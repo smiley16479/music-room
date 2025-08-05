@@ -1,0 +1,86 @@
+version: '3.3'
+
+services:
+  back:
+    container_name: back
+    build:
+      context: ./back/
+    image: back
+    dns:
+      - 8.8.8.8      # Google DNS
+      - 1.1.1.1      # Cloudflare DNS (optionnel)
+    depends_on:
+      - db
+    ports:
+      - 3000:3000
+    command: npm run start:dev
+    volumes:
+      - './back/src:/app/src'
+      # - ./nginx/letsencrypt/:/etc/letsencrypt/ # Pas d'https:// pour le moment
+      - uploads:/app/uploads #ajout d'un volume partagé pour les avatars (à mettre sur un service cloud ou sur nginx)
+      - front_back_shared:/app/public/front_back_shared # À ne pas mettre nécessairement dans public/
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  front:
+    container_name: front
+    build:
+      context: ./front/
+    image: front
+    depends_on:
+      - back
+    ports:
+      - '5050:5050'
+    links:
+      - back
+    command: npm run dev
+    volumes:
+      - ./front/src:/app/src
+      - uploads:/app/static/uploads #ajout d'un volume partagé pour les avatars
+      - front_back_shared:/app/static/front_back_shared # À ne pas mettre nécessairement dans public/
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    container_name: db
+    image: mysql:latest
+    # restart: always
+    environment:
+      MYSQL_USER: mysql_user
+      MYSQL_PASSWORD: root
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - '3306:3306'
+    volumes:
+      - db:/var/lib/mysql
+      - ./db/init.sql/init.sql:/docker-entrypoint-initdb.d/create_tables.sql
+  phpMyAdmin:
+    container_name: phpMyAdmin
+    image: phpmyadmin:latest
+    logging:
+        driver: none
+    depends_on:
+      - db
+    environment:
+    # Necessaire pour se connecter à phpMyAdmin
+      PHP_MY_ADMIN_DEFAULT_EMAIL: admin@admin.com
+      PHP_MY_ADMIN_DEFAULT_PASSWORD: mysql_user
+      PMA_HOST: db              # Le nom du conteneur de la base de données
+      PMA_PASSWORD: root
+    ports:
+      - 4000:80
+
+
+volumes:
+  db:
+    driver: local
+  uploads:
+    driver: local
+  front_back_shared:
+    driver: local
