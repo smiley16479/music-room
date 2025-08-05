@@ -13,7 +13,7 @@ async function bootstrap() {
     transform: true,
   }));
   const config = new DocumentBuilder()
-  .setTitle('Radio I/O')
+  .setTitle('Music Room')
   .setDescription('Description des endpoints de l\'API')
   .setVersion('1.0')
   .build();

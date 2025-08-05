@@ -6,16 +6,16 @@ import { seedInitialData } from './seeds/initial-data.seed';
 @Injectable()
 export class DatabaseService {
 
-    async initializeDatabase() {
+  async initializeDatabase() {
     try {
         // Initialize connection
         await AppDataSource.initialize();
         console.log('✅ Database connection established');
 
         // Run synchronization in development
-        if (process.env.NODE_ENV === 'development') {
-        await AppDataSource.synchronize();
-        console.log('✅ Database schema synchronized');
+        if (process.env.NODE_ENV === 'dev') {
+          await AppDataSource.synchronize();
+          console.log('✅ Database schema synchronized');
         }
 
         // Seed initial data
@@ -27,5 +27,5 @@ export class DatabaseService {
         console.error('❌ Database initialization failed:', error);
         throw error;
     }
-    }
+  }
 }

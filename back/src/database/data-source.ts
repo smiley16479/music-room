@@ -22,7 +22,7 @@ export const AppDataSource = new DataSource({
   password: configService.get('DB_PASSWORD', 'root'),
   database: configService.get('DB_DATABASE', 'db'),
   synchronize: false,
-  logging: configService.get('NODE_ENV') === 'development',
+  logging: configService.get('NODE_ENV') === 'dev',
   entities: [
     User,
     Event,

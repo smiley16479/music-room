@@ -11,7 +11,7 @@ import { VoteModule } from './vote/vote.module';
 import { DeviceModule } from './device/device.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
-// import { DatabaseModule } from './database/database.module';
+import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -27,7 +27,7 @@ import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
         return {
           type: 'mysql',
           url,
-          entities: [__dirname + '/**/*.entities{.ts,.js}'],
+          entities: [__dirname + '/**/*.entity{.ts,.js}'],
           cache: false,
           synchronize: true,
         };
@@ -41,7 +41,7 @@ import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
     DeviceModule,
     InvitationModule,
     PlaylistTrackModule,
-    // DatabaseModule,
+    DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],
