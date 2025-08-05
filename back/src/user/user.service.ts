@@ -171,6 +171,14 @@ export class UserService {
     });
   }
 
+    async setNewPassword(id: string, hashedPassword: string): Promise<void> {
+    // Update password directly without checking the current password
+    // Only use this method for authorized operations like admin reset or password reset via token
+    await this.userRepository.update(id, {
+      password: hashedPassword,
+    });
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findById(id);
     await this.userRepository.remove(user);

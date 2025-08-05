@@ -5,11 +5,19 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
-  constructor(configService: ConfigService) {
+  constructor(private configService: ConfigService) {
+    const clientID = configService.get<string>('FACEBOOK_APP_ID');
+    const clientSecret = configService.get<string>('FACEBOOK_APP_SECRET');
+    const callbackURL = configService.get<string>('FACEBOOK_CALLBACK_URL');
+    
+    if (!clientID || !clientSecret || !callbackURL) {
+      throw new Error('Missing Facebook OAuth configuration');
+    }
+    
     super({
-      clientID: configService.get<string>('FACEBOOK_APP_ID'),
-      clientSecret: configService.get<string>('FACEBOOK_APP_SECRET'),
-      callbackURL: configService.get<string>('FACEBOOK_CALLBACK_URL'),
+      clientID,
+      clientSecret,
+      callbackURL,
       scope: 'email',
       profileFields: ['emails', 'name', 'picture.type(large)'],
     });

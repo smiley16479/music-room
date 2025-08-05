@@ -232,10 +232,11 @@ export class AuthService {
 
     // Update user
     await this.userService.update(user.id, {
-      password: hashedPassword,
-      resetPasswordToken: null,
-      resetPasswordExpires: null,
+      resetPasswordToken: undefined,
+      resetPasswordExpires: undefined,
     });
+
+    await this.userService.setNewPassword(user.id, hashedPassword);
 
     // Send confirmation email
     await this.emailService.sendPasswordResetConfirmation(user.email);
