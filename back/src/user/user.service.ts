@@ -1,10 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class UserService {
-  create(createUserDto: CreateUserDto) {
+  constructor(private readonly mailService: MailService) {}
+
+  async create(createUserDto: CreateUserDto) {
+    // Your existing user creation logic here
+    
+    // Send welcome email to the new user
+    await this.mailService.sendWelcomeEmail(
+      createUserDto.email,
+      createUserDto.displayName || 'User'
+    );
+    
     return 'This action adds a new user';
   }
 
@@ -16,7 +27,9 @@ export class UserService {
     return `This action returns a #${id} user`;
   }
 
-  update(id: number, updateUserDto: UpdateUserDto) {
+  async update(id: number, updateUserDto: UpdateUserDto) {
+    // Your existing user update logic here
+    
     return `This action updates a #${id} user`;
   }
 

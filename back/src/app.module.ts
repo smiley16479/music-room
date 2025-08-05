@@ -12,6 +12,7 @@ import { DeviceModule } from './device/device.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
 import { DatabaseModule } from './database/database.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DatabaseModule } from './database/database.module';
     InvitationModule,
     PlaylistTrackModule,
     DatabaseModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [AppService],
