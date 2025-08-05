@@ -3,6 +3,15 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { UserModule } from './user/user.module';
+import { EventModule } from './event/event.module';
+import { PlaylistModule } from './playlist/playlist.module';
+import { TrackModule } from './track/track.module';
+import { VoteModule } from './vote/vote.module';
+import { DeviceModule } from './device/device.module';
+import { InvitationModule } from './invitation/invitation.module';
+import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
+// import { DatabaseModule } from './database/database.module';
 
 @Module({
   imports: [
@@ -18,12 +27,21 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         return {
           type: 'mysql',
           url,
-          entities: [__dirname + '/**/*.entity{.ts,.js}'],
+          entities: [__dirname + '/**/*.entities{.ts,.js}'],
           cache: false,
           synchronize: true,
         };
       }
     }),
+    UserModule,
+    EventModule,
+    PlaylistModule,
+    TrackModule,
+    VoteModule,
+    DeviceModule,
+    InvitationModule,
+    PlaylistTrackModule,
+    // DatabaseModule,
   ],
   controllers: [AppController],
   providers: [AppService],

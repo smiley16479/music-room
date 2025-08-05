@@ -1,0 +1,43 @@
+export const PERMISSIONS = {
+  USERS: {
+    CREATE: 'users:create',
+    READ: 'users:read',
+    UPDATE: 'users:update',
+    DELETE: 'users:delete',
+    READ_ALL: 'users:read-all',
+  },
+  EVENTS: {
+    CREATE: 'events:create',
+    READ: 'events:read',
+    UPDATE: 'events:update',
+    DELETE: 'events:delete',
+    PARTICIPATE: 'events:participate',
+    VOTE: 'events:vote',
+    MODERATE: 'events:moderate',
+  },
+  PLAYLISTS: {
+    CREATE: 'playlists:create',
+    READ: 'playlists:read',
+    UPDATE: 'playlists:update',
+    DELETE: 'playlists:delete',
+    COLLABORATE: 'playlists:collaborate',
+    ADD_TRACKS: 'playlists:add-tracks',
+    REMOVE_TRACKS: 'playlists:remove-tracks',
+    REORDER_TRACKS: 'playlists:reorder-tracks',
+  },
+  DEVICES: {
+    CREATE: 'devices:create',
+    READ: 'devices:read',
+    UPDATE: 'devices:update',
+    DELETE: 'devices:delete',
+    CONTROL: 'devices:control',
+    DELEGATE: 'devices:delegate',
+  },
+  MUSIC: {
+    SEARCH: 'music:search',
+    PLAY: 'music:play',
+    PAUSE: 'music:pause',
+    SKIP: 'music:skip',
+    CHANGE_VOLUME: 'music:change-volume',
+  },
+} as const;
