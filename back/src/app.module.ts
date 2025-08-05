@@ -13,6 +13,12 @@ import { InvitationModule } from './invitation/invitation.module';
 import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
 import { DatabaseModule } from './database/database.module';
 import { MailModule } from './mail/mail.module';
+import { AuthModule } from './auth/auth.module';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
+import { EmailModule } from './email/email.module';
+
 
 @Module({
   imports: [
@@ -44,8 +50,21 @@ import { MailModule } from './mail/mail.module';
     PlaylistTrackModule,
     DatabaseModule,
     MailModule,
+    AuthModule,
+    EmailModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService,
+    // Global JWT Guard
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    // Global Auth Exception Filter
+    {
+      provide: APP_FILTER,
+      useClass: AuthExceptionFilter,
+    },
+  ],
 })
 export class AppModule {}

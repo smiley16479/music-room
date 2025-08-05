@@ -8,6 +8,8 @@ import {
   IsDateString,
   IsObject,
   IsArray,
+  IsBoolean,
+  IsUrl,
 } from 'class-validator';
 import { VisibilityLevel } from 'src/user/entities/user.entity';
 
@@ -54,6 +56,31 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(VisibilityLevel)
   locationVisibility?: VisibilityLevel;
+
+  @IsOptional()
+  @IsString()
+  googleId?: string;
+
+  @IsOptional()
+  @IsString()
+  facebookId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  emailVerified?: boolean;
+
+  @IsOptional()
+  @IsUrl()
+  avatarUrl?: string;
+
+  // Et probablement aussi :
+  @IsOptional()
+  @IsString()
+  resetPasswordToken?: string;
+
+  @IsOptional()
+  @IsDateString()
+  resetPasswordExpires?: Date;
 
   @IsOptional()
   @IsObject()
