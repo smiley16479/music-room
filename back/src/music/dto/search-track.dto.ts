@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNumber, Min, Max, IsBoolean } from 'class-validator';
 
 export class SearchTrackDto {
   @IsString()
@@ -17,4 +17,8 @@ export class SearchTrackDto {
   @Min(1)
   @Max(100)
   limit?: number = 25;
+
+  @IsOptional()
+  @IsBoolean()
+  includeLocal?: boolean = false;
 }

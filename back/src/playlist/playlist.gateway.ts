@@ -14,7 +14,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { PlaylistTrackWithDetails } from './playlist.service';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';

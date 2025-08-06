@@ -45,7 +45,7 @@ export class Invitation {
   status: InvitationStatus;
 
   @Column({ type: 'text', nullable: true })
-  message: string;
+  message?: string;
 
   @Column({ name: 'expires_at', type: 'timestamp', nullable: true })
   expiresAt: Date;
@@ -73,14 +73,14 @@ export class Invitation {
 
   @ManyToOne(() => Event, (event) => event.invitations, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'event_id' })
-  event: Event;
+  event?: Event;
 
   @Column({ name: 'event_id', nullable: true })
   eventId: string;
 
   @ManyToOne(() => Playlist, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'playlist_id' })
-  playlist: Playlist;
+  playlist?: Playlist;
 
   @Column({ name: 'playlist_id', nullable: true })
   playlistId: string;

@@ -8,7 +8,7 @@ import { EventGateway } from './event.gateway';
 
 import { Event } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 

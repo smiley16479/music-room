@@ -1,3 +1,4 @@
+// src/devices/device.controller.ts
 import {
   Controller,
   Get,
@@ -115,7 +116,152 @@ export class DeviceController {
 
   @Delete(':id')
   async remove(@Param('id') id: string, @CurrentUser() user: User) {
-    // await this.deviceService.sendPlaybackCommand(id, user.id, command); // PROBLEME
+    await this.deviceService.remove(id, user.id);
+    return {
+      success: true,
+      message: 'Device deleted successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // Control Delegation
+  @Post(':id/delegate')
+  @HttpCode(HttpStatus.OK)
+  async delegateControl(
+    @Param('id') id: string,
+    @Body() delegateDto: DelegateControlDto,
+    @CurrentUser() user: User,
+  ) {
+    const device = await this.deviceService.delegateControl(id, user.id, delegateDto);
+    return {
+      success: true,
+      message: 'Control delegated successfully',
+      data: device,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/revoke')
+  @HttpCode(HttpStatus.OK)
+  async revokeControl(@Param('id') id: string, @CurrentUser() user: User) {
+    const device = await this.deviceService.revokeDelegation(id, user.id);
+    return {
+      success: true,
+      message: 'Control revoked successfully',
+      data: device,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/extend')
+  @HttpCode(HttpStatus.OK)
+  async extendDelegation(
+    @Param('id') id: string,
+    @Body() { hours }: { hours: number },
+    @CurrentUser() user: User,
+  ) {
+    const device = await this.deviceService.extendDelegation(id, user.id, hours);
+    return {
+      success: true,
+      message: 'Delegation extended successfully',
+      data: device,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // Playback Control
+  @Post(':id/play')
+  @HttpCode(HttpStatus.OK)
+  async play(
+    @Param('id') id: string,
+    @Body() data: { trackId?: string },
+    @CurrentUser() user: User,
+  ) {
+    const command: PlaybackCommand = {
+      command: 'play',
+      data,
+      timestamp: new Date(),
+      sentBy: user.id,
+    };
+
+    await this.deviceService.sendPlaybackCommand(id, user.id, command);
+    return {
+      success: true,
+      message: 'Play command sent',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/pause')
+  @HttpCode(HttpStatus.OK)
+  async pause(@Param('id') id: string, @CurrentUser() user: User) {
+    const command: PlaybackCommand = {
+      command: 'pause',
+      timestamp: new Date(),
+      sentBy: user.id,
+    };
+
+    await this.deviceService.sendPlaybackCommand(id, user.id, command);
+    return {
+      success: true,
+      message: 'Pause command sent',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/skip')
+  @HttpCode(HttpStatus.OK)
+  async skip(@Param('id') id: string, @CurrentUser() user: User) {
+    const command: PlaybackCommand = {
+      command: 'skip',
+      timestamp: new Date(),
+      sentBy: user.id,
+    };
+
+    await this.deviceService.sendPlaybackCommand(id, user.id, command);
+    return {
+      success: true,
+      message: 'Skip command sent',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/previous')
+  @HttpCode(HttpStatus.OK)
+  async previous(@Param('id') id: string, @CurrentUser() user: User) {
+    const command: PlaybackCommand = {
+      command: 'previous',
+      timestamp: new Date(),
+      sentBy: user.id,
+    };
+
+    await this.deviceService.sendPlaybackCommand(id, user.id, command);
+    return {
+      success: true,
+      message: 'Previous command sent',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/volume')
+  @HttpCode(HttpStatus.OK)
+  async setVolume(
+    @Param('id') id: string,
+    @Body() { volume }: { volume: number },
+    @CurrentUser() user: User,
+  ) {
+    if (volume < 0 || volume > 100) {
+      throw new BadRequestException('Volume must be between 0 and 100');
+    }
+
+    const command: PlaybackCommand = {
+      command: 'volume',
+      data: { volume },
+      timestamp: new Date(),
+      sentBy: user.id,
+    };
+
+    await this.deviceService.sendPlaybackCommand(id, user.id, command);
     return {
       success: true,
       message: 'Volume command sent',

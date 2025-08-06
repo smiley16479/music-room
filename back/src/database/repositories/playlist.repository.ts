@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Playlist, PlaylistVisibility } from 'src/playlist/entities/playlist.entity';
-import { PlaylistTrack } from 'src/playlist-track/entities/playlist-track.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
 @Injectable()
 export class PlaylistRepository {

@@ -50,7 +50,7 @@ export class Track {
   genres: string[];
 
   @Column({ name: 'release_date', type: 'date', nullable: true })
-  releaseDate: Date;
+  releaseDate: Date | null;
 
   @Column({ type: 'boolean', default: true })
   available: boolean;

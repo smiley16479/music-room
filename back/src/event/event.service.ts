@@ -11,7 +11,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { Event, EventStatus, EventVisibility, EventLicenseType } from 'src/event/entities/event.entity';
 import { Vote, VoteType } from 'src/event/entities/vote.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation, InvitationType, InvitationStatus } from 'src/invitation/entities/invitation.entity';
 

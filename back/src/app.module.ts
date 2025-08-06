@@ -6,17 +6,16 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { UserModule } from './user/user.module';
 import { EventModule } from './event/event.module';
 import { PlaylistModule } from './playlist/playlist.module';
-import { TrackModule } from './track/track.module';
 import { DeviceModule } from './device/device.module';
 import { InvitationModule } from './invitation/invitation.module';
-import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
 // import { DatabaseModule } from './database/database.module';
+// import { EmailModule } from './email/email.module';
 import { MailModule } from './mail/mail.module';
 import { AuthModule } from './auth/auth.module';
-// import { EmailModule } from './email/email.module';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
+import { MusicModule } from './music/music.module';
 
 
 @Module({
@@ -42,14 +41,13 @@ import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
     UserModule,
     EventModule,
     PlaylistModule,
-    TrackModule,
     DeviceModule,
     InvitationModule,
-    PlaylistTrackModule,
     // DatabaseModule,
+    // EmailModule,
     MailModule,
     AuthModule,
-    // EmailModule,
+    MusicModule,
   ],
   controllers: [AppController],
   providers: [AppService,

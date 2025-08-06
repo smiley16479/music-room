@@ -8,7 +8,7 @@ import {
   Index,
 } from 'typeorm';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 
 @Entity('playlist_tracks')
