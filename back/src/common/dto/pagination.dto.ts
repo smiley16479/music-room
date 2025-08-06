@@ -6,14 +6,14 @@ export class PaginationDto {
   @Type(() => Number)
   @IsPositive()
   @Min(1)
-  page?: number = 1;
+  page: number = 1;
 
   @IsOptional()
   @Type(() => Number)
   @IsPositive()
   @Min(1)
   @Max(100)
-  limit?: number = 20;
+  limit: number = 20;
 
   get skip(): number {
     if (this.limit && this.page)

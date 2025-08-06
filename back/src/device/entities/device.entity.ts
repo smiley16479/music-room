@@ -66,10 +66,10 @@ export class Device {
   canBeControlled: boolean;
 
   @Column({ name: 'delegated_to_id', nullable: true })
-  delegatedToId: string;
+  delegatedToId: string | null;
 
   @Column({ name: 'delegation_expires_at', type: 'timestamp', nullable: true })
-  delegationExpiresAt: Date;
+  delegationExpiresAt: Date | null;
 
   @Column({ name: 'delegation_permissions', type: 'json', nullable: true })
   delegationPermissions: {
@@ -78,7 +78,7 @@ export class Device {
     canSkip?: boolean;
     canChangeVolume?: boolean;
     canChangePlaylist?: boolean;
-  };
+  } | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

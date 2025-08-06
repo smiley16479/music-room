@@ -12,7 +12,7 @@ import {
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/track/entities/track.entity';
-import { Vote } from 'src/vote/entities/vote.entity';
+import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 
 export enum EventVisibility {

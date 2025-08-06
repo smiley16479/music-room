@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
-import { Vote } from 'src/vote/entities/vote.entity';
+import { Vote } from 'src/event/entities/vote.entity';
 
 @Entity('tracks')
 export class Track {

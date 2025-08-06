@@ -21,7 +21,7 @@ import { FacebookAuthGuard } from './guards/facebook-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 
 import { User } from 'src/user/entities/user.entity';
-import { UserRepository } from '../database/repositories/user.repository';
+import { UserService } from 'src/user/user.service';
 
 @Module({
   imports: [
@@ -41,8 +41,8 @@ import { UserRepository } from '../database/repositories/user.repository';
   controllers: [AuthController],
   providers: [
     AuthService,
+    UserService,
     EmailService,
-    UserRepository,
     LocalStrategy,
     JwtStrategy,
     JwtRefreshStrategy,
@@ -62,4 +62,5 @@ import { UserRepository } from '../database/repositories/user.repository';
     JwtModule,
   ],
 })
+
 export class AuthModule {}
