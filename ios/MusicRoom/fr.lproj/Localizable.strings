@@ -1,0 +1,143 @@
+// Welcome Screen
+"welcome_title" = "Bienvenue sur MusicRoom";
+"welcome_subtitle" = "Collaborez, votez et contrôlez la musique ensemble";
+"get_started" = "Commencer";
+"already_have_account" = "Vous avez déjà un compte ?";
+"sign_in" = "Se connecter";
+
+// Authentication
+"sign_up" = "S'inscrire";
+"email" = "Email";
+"password" = "Mot de passe";
+"confirm_password" = "Confirmer le mot de passe";
+"forgot_password" = "Mot de passe oublié ?";
+"create_account" = "Créer un compte";
+"or_continue_with" = "Ou continuer avec";
+"google" = "Google";
+"facebook" = "Facebook";
+"deezer" = "Deezer";
+
+// Tab Navigation
+"home" = "Accueil";
+"events" = "Événements";
+"playlists" = "Playlists";
+"devices" = "Appareils";
+"profile" = "Profil";
+
+// Home Screen
+"discover_events" = "Découvrir les événements";
+"your_playlists" = "Vos playlists";
+"recent_activity" = "Activité récente";
+"music_preferences" = "Préférences musicales";
+
+// Events
+"create_event" = "Créer un événement";
+"join_event" = "Rejoindre un événement";
+"event_name" = "Nom de l'événement";
+"event_description" = "Description";
+"public_event" = "Événement public";
+"private_event" = "Événement privé";
+"vote_for_tracks" = "Voter pour les pistes";
+"current_playing" = "En cours de lecture";
+
+// Playlists
+"create_playlist" = "Créer une playlist";
+"playlist_name" = "Nom de la playlist";
+"collaborative" = "Collaborative";
+"add_tracks" = "Ajouter des pistes";
+"search_music" = "Rechercher de la musique";
+
+// Devices
+"my_devices" = "Mes appareils";
+"delegated_devices" = "Appareils délégués";
+"add_device" = "Ajouter un appareil";
+"device_name" = "Nom de l'appareil";
+"delegate_control" = "Déléguer le contrôle";
+
+// Profile
+"edit_profile" = "Modifier le profil";
+"display_name" = "Nom d'affichage";
+"bio" = "Biographie";
+"location" = "Localisation";
+"birth_date" = "Date de naissance";
+"privacy_settings" = "Paramètres de confidentialité";
+"notification_settings" = "Paramètres de notification";
+"app_settings" = "Paramètres de l'app";
+"language" = "Langue";
+"dark_mode" = "Mode sombre";
+"sign_out" = "Se déconnecter";
+
+// Notifications
+"push_notifications" = "Notifications push";
+"email_notifications" = "Notifications par email";
+"event_invitations" = "Invitations aux événements";
+"playlist_updates" = "Mises à jour des playlists";
+"friend_requests" = "Demandes d'amis";
+"music_recommendations" = "Recommandations musicales";
+
+// Common
+"save" = "Enregistrer";
+"cancel" = "Annuler";
+"delete" = "Supprimer";
+"edit" = "Modifier";
+"done" = "Terminé";
+"loading" = "Chargement...";
+"error" = "Erreur";
+"success" = "Succès";
+"retry" = "Réessayer";
+"yes" = "Oui";
+"no" = "Non";
+"ok" = "OK";
+
+// Privacy Visibility
+"public" = "Public";
+"friends_only" = "Amis uniquement";
+"private" = "Privé";
+
+// Music Controls
+"play" = "Lecture";
+"pause" = "Pause";
+"skip" = "Suivant";
+"previous" = "Précédent";
+"volume" = "Volume";
+"shuffle" = "Aléatoire";
+"repeat" = "Répéter";
+
+// Errors
+"network_error" = "Erreur de connexion réseau";
+"authentication_error" = "Échec de l'authentification";
+"permission_denied" = "Permission refusée";
+"invalid_input" = "Saisie invalide";
+"server_error" = "Erreur du serveur";
+"invalid_url_error" = "URL invalide";
+"invalid_request_error" = "Requête invalide";
+"invalid_response_error" = "Réponse invalide";
+"not_found_error" = "Non trouvé";
+"decoding_error" = "Échec du décodage de la réponse";
+"unknown_error" = "Erreur inconnue";
+
+// Additional UI strings
+"participants_count" = "participants";
+"upvote" = "Vote positif";
+"downvote" = "Vote négatif";
+"event_invitation" = "Invitation à l'événement";
+"playlist_invitation" = "Invitation à la playlist";
+"friend_request" = "Demande d'ami";
+"pending" = "En attente";
+"accepted" = "Accepté";
+"declined" = "Refusé";
+"expired" = "Expiré";
+"draft" = "Brouillon";
+"active" = "Actif";
+"paused" = "En pause";
+"ended" = "Terminé";
+"speaker" = "Haut-parleur";
+"phone" = "Téléphone";
+"computer" = "Ordinateur";
+"tablet" = "Tablette";
+"other" = "Autre";
+"online" = "En ligne";
+"offline" = "Hors ligne";
+"playing" = "En lecture";
+"invite_only" = "Sur invitation seulement";
+"location_based" = "Basé sur la localisation";
