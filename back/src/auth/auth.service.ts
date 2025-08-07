@@ -11,12 +11,12 @@ import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
 import { User } from 'src/user/entities/user.entity';
-import { EmailService } from './email.service';
 
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RequestPasswordResetDto, ResetPasswordDto } from 'src/user/dto/reset-password.dto';
 import { UserService } from 'src/user/user.service';
+import { EmailService } from 'src/email/email.service';
 
 export interface JwtPayload {
   sub: string;
@@ -76,13 +76,13 @@ export class AuthService {
     // Find user
     const user = await this.userService.findByEmail(email);
     if (!user || !user.password) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Email or password is incorrect');
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Email or password is incorrect');
     }
 
     // Update last seen
@@ -243,17 +243,19 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<void> {
-    // Simple email verification - you might want to use a more secure method
-    const payload = this.jwtService.verify(token);
-    
-    const user = await this.userService.findById(payload.sub);
-    if (!user) {
-      throw new NotFoundException('User not found');
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(token, { secret: this.configService.get<string>('JWT_SECRET') });
+    } catch (err) {
+      throw new BadRequestException('Invalid or expired token');
     }
 
-    await this.userService.update(user.id, {
-      emailVerified: true,
-    });
+    const user = await this.userService.findById(payload.sub);
+    if (!user || user.email !== payload.email) {
+      throw new NotFoundException('User not found or email mismatch');
+    }
+
+    await this.userService.update(user.id, { emailVerified: true });
   }
 
   async sendEmailVerification(user: User): Promise<void> {

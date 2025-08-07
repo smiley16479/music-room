@@ -6,7 +6,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { EmailService } from './email.service';
 
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
@@ -22,6 +21,7 @@ import { LocalAuthGuard } from './guards/local-auth.guard';
 
 import { User } from 'src/user/entities/user.entity';
 import { UserService } from 'src/user/user.service';
+import { EmailService } from 'src/email/email.service';
 
 @Module({
   imports: [

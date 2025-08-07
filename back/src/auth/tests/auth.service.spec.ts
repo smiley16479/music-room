@@ -6,7 +6,7 @@ import * as bcrypt from 'bcrypt';
 
 import { AuthService } from '../auth.service';
 import { UserRepository } from '../../database/repositories/user.repository';
-import { EmailService } from '../email.service';
+import { EmailService } from 'src/email/email.service';
 import { User } from 'src/user/entities/user.entity';
 
 describe('AuthService', () => {

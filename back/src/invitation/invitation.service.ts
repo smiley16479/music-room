@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { UpdateInvitationDto } from './dto/update-invitation.dto';
-import { MailService } from '../mail/mail.service';
+import { EmailService } from 'src/email/email.service';
 import { InvitationType } from './entities/invitation.entity';
 
 @Injectable()
 export class InvitationService {
-  constructor(private readonly mailService: MailService) {}
+  constructor(private readonly emailService: EmailService) {}
 
   async create(createInvitationDto: CreateInvitationDto) {
     // Your existing invitation creation logic here
@@ -26,7 +26,7 @@ export class InvitationService {
       const inviteUrl = `https://music-room.com/invitations/${createInvitationDto.playlistId}`;
       
       // Send playlist invitation email
-      await this.mailService.sendPlaylistInvitation(
+      await this.emailService.sendPlaylistInvitation(
         inviteeEmail,
         senderName,
         playlistName,

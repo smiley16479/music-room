@@ -11,9 +11,8 @@ import { DeviceModule } from './device/device.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
 // import { DatabaseModule } from './database/database.module';
-import { MailModule } from './mail/mail.module';
 import { AuthModule } from './auth/auth.module';
-// import { EmailModule } from './email/email.module';
+import { EmailModule } from './email/email.module';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
@@ -47,9 +46,8 @@ import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
     InvitationModule,
     PlaylistTrackModule,
     // DatabaseModule,
-    MailModule,
     AuthModule,
-    // EmailModule,
+    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService,
