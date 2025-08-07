@@ -6,7 +6,7 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { EventService } from './event.service';
 import { Event, EventStatus, EventVisibility } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 import { EmailService } from 'src/email/email.service';

@@ -13,8 +13,8 @@ import {
   PlaylistVisibility, 
   PlaylistLicenseType 
 } from 'src/playlist/entities/playlist.entity';
-import { PlaylistTrack } from 'src/playlist-track/entities/playlist-track.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { 
   Invitation, 

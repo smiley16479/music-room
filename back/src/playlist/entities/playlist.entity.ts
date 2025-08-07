@@ -10,7 +10,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 
 export enum PlaylistVisibility {
   PUBLIC = 'public',

@@ -35,7 +35,7 @@ export interface AuthResult {
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly userService: UserService, // Use UserService instead of UserRepository
+    private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,

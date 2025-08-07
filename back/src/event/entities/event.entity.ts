@@ -11,7 +11,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 

@@ -14,7 +14,7 @@ import { JwtService } from '@nestjs/jwt';
 
 import { Event } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { VoteResult } from './event.service';
 

@@ -3,20 +3,18 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
+import { DatabaseModule } from './database/database.module';
+import { MusicModule } from './music/music.module';
+import { DeviceModule } from './device/device.module';
+import { EmailModule } from './email/email.module';
 import { EventModule } from './event/event.module';
 import { PlaylistModule } from './playlist/playlist.module';
-import { TrackModule } from './track/track.module';
-import { DeviceModule } from './device/device.module';
 import { InvitationModule } from './invitation/invitation.module';
-import { PlaylistTrackModule } from './playlist-track/playlist-track.module';
-// import { DatabaseModule } from './database/database.module';
-import { AuthModule } from './auth/auth.module';
-import { EmailModule } from './email/email.module';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
-
 
 @Module({
   imports: [
@@ -38,29 +36,28 @@ import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
         };
       }
     }),
+    AuthModule,
     UserModule,
+    DatabaseModule,
+    MusicModule,
+    DeviceModule,
+    EmailModule,
     EventModule,
     PlaylistModule,
-    TrackModule,
-    DeviceModule,
     InvitationModule,
-    PlaylistTrackModule,
-    // DatabaseModule,
-    AuthModule,
-    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService,
-    // Global JWT Guard
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
-    // Global Auth Exception Filter
-    {
-      provide: APP_FILTER,
-      useClass: AuthExceptionFilter,
-    },
+    // // Global JWT Guard
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: JwtAuthGuard,
+    // },
+    // // Global Auth Exception Filter
+    // {
+    //   provide: APP_FILTER,
+    //   useClass: AuthExceptionFilter,
+    // },
   ],
 })
 export class AppModule {}

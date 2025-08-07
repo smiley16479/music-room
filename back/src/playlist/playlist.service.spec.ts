@@ -5,8 +5,8 @@ import { NotFoundException, ForbiddenException, ConflictException } from '@nestj
 
 import { PlaylistService } from './playlist.service';
 import { Playlist, PlaylistVisibility } from 'src/playlist/entities/playlist.entity';
-import { PlaylistTrack } from 'src/playlist-track/entities/playlist-track.entity';
-import { Track } from 'src/track/entities/track.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 import { EmailService } from 'src/email/email.service';
