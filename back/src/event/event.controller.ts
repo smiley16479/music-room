@@ -24,13 +24,20 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 
 import { User } from 'src/user/entities/user.entity';
+import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 
+@ApiTags('Events')
 @Controller('event')
 @UseGuards(JwtAuthGuard)
 export class EventController {
   constructor(private readonly eventService: EventService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Create an event',
+    description: 'Creates a new music event with settings for voting, location, and participants',
+  })
+  @ApiBody({ type: CreateEventDto })
   async create(@Body() createEventDto: CreateEventDto, @CurrentUser() user: User) {
     const event = await this.eventService.create(createEventDto, user.id);
     return {
@@ -43,12 +50,29 @@ export class EventController {
 
   @Get()
   @Public()
+  @ApiOperation({
+    summary: 'Get all events',
+    description: 'Returns a paginated list of all accessible events',
+  })
+  @ApiQuery({ type: PaginationDto })
   async findAll(@Query() paginationDto: PaginationDto, @CurrentUser() user?: User) {
     return this.eventService.findAll(paginationDto, user?.id);
   }
 
   @Get('nearby')
   @Public()
+  @ApiOperation({
+    summary: 'Find nearby events',
+    description: 'Returns events within a specified radius of a location',
+  })
+  @ApiQuery({ type: LocationDto })
+  @ApiQuery({ 
+    name: 'radius', 
+    type: String, 
+    description: 'Radius in kilometers to search for events',
+    required: false,
+    example: '10'
+  })
   async findNearby(
     @Query() locationDto: LocationDto,
     @Query('radius') radius: string = '10',
@@ -59,6 +83,11 @@ export class EventController {
   }
 
   @Get('my-event')
+  @ApiOperation({
+    summary: 'Get user events',
+    description: 'Returns events created by or participated in by the current user',
+  })
+  @ApiQuery({ type: PaginationDto })
   async getMyEvent(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
     const { page, limit, skip } = paginationDto;
     
@@ -72,6 +101,16 @@ export class EventController {
 
   @Get(':id')
   @Public()
+  @ApiOperation({
+    summary: 'Get event by ID',
+    description: 'Returns detailed information about a specific event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to retrieve',
+    required: true
+  })
   async findOne(@Param('id') id: string, @CurrentUser() user?: User) {
     const event = await this.eventService.findById(id, user?.id);
     return {
@@ -83,6 +122,16 @@ export class EventController {
 
   @Get(':id/voting-results')
   @Public()
+  @ApiOperation({
+    summary: 'Get voting results',
+    description: 'Returns the current voting results for tracks in an event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to get voting results for',
+    required: true
+  })
   async getVotingResults(@Param('id') id: string, @CurrentUser() user?: User) {
     const results = await this.eventService.getVotingResults(id, user?.id);
     return {
@@ -93,6 +142,17 @@ export class EventController {
   }
 
   @Patch(':id')
+  @ApiOperation({
+    summary: 'Update event',
+    description: 'Updates an event\'s information and settings',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to update',
+    required: true
+  })
+  @ApiBody({ type: UpdateEventDto })
   async update(
     @Param('id') id: string,
     @Body() updateEventDto: UpdateEventDto,
@@ -108,6 +168,16 @@ export class EventController {
   }
 
   @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete event',
+    description: 'Permanently deletes an event and all its data',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to delete',
+    required: true
+  })
   async remove(@Param('id') id: string, @CurrentUser() user: User) {
     await this.eventService.remove(id, user.id);
     return {
@@ -120,6 +190,16 @@ export class EventController {
   // Participant Management
   @Post(':id/join')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Join event',
+    description: 'Adds the current user as a participant to the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to join',
+    required: true
+  })
   async joinEvent(@Param('id') id: string, @CurrentUser() user: User) {
     await this.eventService.addParticipant(id, user.id);
     return {
@@ -131,6 +211,16 @@ export class EventController {
 
   @Post(':id/leave')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Leave event',
+    description: 'Removes the current user as a participant from the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to leave',
+    required: true
+  })
   async leaveEvent(@Param('id') id: string, @CurrentUser() user: User) {
     await this.eventService.removeParticipant(id, user.id);
     return {
@@ -143,6 +233,17 @@ export class EventController {
   // Voting
   @Post(':id/vote')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Vote for track',
+    description: 'Submits a vote for a track in the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiBody({ type: CreateVoteDto })
   async vote(
     @Param('id') id: string,
     @Body() voteDto: CreateVoteDto,
@@ -158,6 +259,22 @@ export class EventController {
   }
 
   @Delete(':id/vote/:trackId')
+  @ApiOperation({
+    summary: 'Remove vote',
+    description: 'Removes the user\'s vote for a specific track in the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'trackId',
+    type: String,
+    description: 'The ID of the track to remove vote from',
+    required: true
+  })
   async removeVote(
     @Param('id') id: string,
     @Param('trackId') trackId: string,
@@ -175,6 +292,16 @@ export class EventController {
   // Event Control
   @Post(':id/start')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Start event',
+    description: 'Starts the event and begins music playback (event owner only)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to start',
+    required: true
+  })
   async startEvent(@Param('id') id: string, @CurrentUser() user: User) {
     const event = await this.eventService.startEvent(id, user.id);
     return {
@@ -187,6 +314,16 @@ export class EventController {
 
   @Post(':id/end')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'End event',
+    description: 'Ends the event and stops music playback (event owner only)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to end',
+    required: true
+  })
   async endEvent(@Param('id') id: string, @CurrentUser() user: User) {
     const event = await this.eventService.endEvent(id, user.id);
     return {
@@ -199,6 +336,16 @@ export class EventController {
 
   @Post(':id/next-track')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Play next track',
+    description: 'Skips to the next track in the event queue based on voting results',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
   async playNextTrack(@Param('id') id: string, @CurrentUser() user: User) {
     const track = await this.eventService.playNextTrack(id, user.id);
     return {
@@ -212,6 +359,17 @@ export class EventController {
   // Location-based features
   @Post(':id/check-location')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Check location permission',
+    description: 'Verifies if a user\'s location allows them to participate in the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiBody({ type: LocationDto })
   async checkLocationPermission(
     @Param('id') id: string,
     @Body() locationDto: LocationDto,
@@ -227,6 +385,30 @@ export class EventController {
   // Invitations
   @Post(':id/invite')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Invite users to event',
+    description: 'Sends email invitations to multiple users to join the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        emails: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Array of email addresses to invite',
+          example: ['friend1@example.com', 'friend2@example.com']
+        }
+      },
+      required: ['emails']
+    }
+  })
   async inviteUsers(
     @Param('id') id: string,
     @Body() { emails }: { emails: string[] },

@@ -69,6 +69,24 @@ export class AuthController {
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Authenticate a user',
+    description: 'Authenticate a user with email and password credentials and return access and refresh tokens',
+  })
+  @ApiBody({
+    type: LoginDto,
+    description: 'User login credentials',
+    required: true,
+    examples: {
+      example1: {
+        summary: 'Standard login',
+        value: {
+          email: 'user@example.com',
+          password: 'YourPassword123!',
+        },
+      },
+    },
+  })
   async login(@Req() req: Request & { user: User }, @Body() loginDto: LoginDto) {
     const result = await this.authService.login(loginDto);
     return {
@@ -82,6 +100,23 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh access token',
+    description: 'Use a valid refresh token to generate a new access token when the original expires',
+  })
+  @ApiBody({
+    type: RefreshTokenDto,
+    description: 'Refresh token data',
+    required: true,
+    examples: {
+      example1: {
+        summary: 'Token refresh',
+        value: {
+          refreshToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        },
+      },
+    },
+  })
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     const result = await this.authService.refreshToken(refreshTokenDto.refreshToken);
     return {
@@ -95,6 +130,23 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request password reset',
+    description: 'Request a password reset link to be sent to the user\'s email',
+  })
+  @ApiBody({
+    type: RequestPasswordResetDto,
+    description: 'Email address for password reset',
+    required: true,
+    examples: {
+      example1: {
+        summary: 'Password reset request',
+        value: {
+          email: 'user@example.com',
+        },
+      },
+    },
+  })
   async requestPasswordReset(@Body() dto: RequestPasswordResetDto) {
     await this.authService.requestPasswordReset(dto);
     return {
@@ -107,6 +159,25 @@ export class AuthController {
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset password',
+    description: 'Reset the user\'s password using the token received via email',
+  })
+  @ApiBody({
+    type: ResetPasswordDto,
+    description: 'Reset password data including token and new password',
+    required: true,
+    examples: {
+      example1: {
+        summary: 'Password reset',
+        value: {
+          token: 'abcdef123456',
+          password: 'NewStrongPassword123!',
+          confirmPassword: 'NewStrongPassword123!',
+        },
+      },
+    },
+  })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
     return {
@@ -118,6 +189,17 @@ export class AuthController {
 
   @Public()
   @Get('verify-email')
+  @ApiOperation({
+    summary: 'Verify email address',
+    description: 'Verify a user\'s email address using the token sent via email',
+  })
+  @ApiQuery({
+    name: 'token',
+    type: String,
+    description: 'The email verification token received via email',
+    required: true,
+    example: 'abc123def456ghi789'
+  })
   async verifyEmail(@Query('token') token: string) {
     await this.authService.verifyEmail(token);
     return {
@@ -128,6 +210,10 @@ export class AuthController {
   }
 
   @Post('resend-verification')
+  @ApiOperation({
+    summary: 'Resend verification email',
+    description: 'Resend the email verification link to the current user\'s email address',
+  })
   async resendVerification(@CurrentUser() user: User) {
     await this.authService.sendEmailVerification(user);
     return {
@@ -141,6 +227,10 @@ export class AuthController {
   @Public()
   @Get('google')
   @UseGuards(GoogleAuthGuard)
+  @ApiOperation({
+    summary: 'Google OAuth login',
+    description: 'Initiates Google OAuth authentication flow',
+  })
   async googleAuth() {
     // Initiates Google OAuth flow
   }
@@ -148,6 +238,10 @@ export class AuthController {
   @Public()
   @Get('google/callback')
   @UseGuards(GoogleAuthGuard)
+  @ApiOperation({
+    summary: 'Google OAuth callback',
+    description: 'Handles the Google OAuth callback and redirects to the frontend with authentication tokens',
+  })
   async googleAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
     try {
       const result = await this.authService.googleLogin(req.user);
@@ -172,6 +266,10 @@ export class AuthController {
   @Public()
   @Get('facebook')
   @UseGuards(FacebookAuthGuard)
+  @ApiOperation({
+    summary: 'Facebook OAuth login',
+    description: 'Initiates Facebook OAuth authentication flow',
+  })
   async facebookAuth() {
     // Initiates Facebook OAuth flow
   }
@@ -179,6 +277,10 @@ export class AuthController {
   @Public()
   @Get('facebook/callback')
   @UseGuards(FacebookAuthGuard)
+  @ApiOperation({
+    summary: 'Facebook OAuth callback',
+    description: 'Handles the Facebook OAuth callback and redirects to the frontend with authentication tokens',
+  })
   async facebookAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
     try {
       const result = await this.authService.facebookLogin(req.user);
@@ -199,6 +301,10 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiOperation({
+    summary: 'Get current user profile',
+    description: 'Returns the profile information of the currently authenticated user',
+  })
   async getProfile(@CurrentUser() user: User) {
     return {
       success: true,
@@ -209,6 +315,10 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout user',
+    description: 'Logs out the current user from the application',
+  })
   async logout(@CurrentUser() user: User) {
     // In a more advanced implementation, you might want to blacklist the token
     return {
@@ -219,6 +329,23 @@ export class AuthController {
   }
 
   @Post('link-google')
+  @ApiOperation({
+    summary: 'Link Google account',
+    description: 'Links the current user account with a Google account',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        googleToken: {
+          type: 'string',
+          description: 'Google authentication token',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        }
+      },
+      required: ['googleToken']
+    }
+  })
   async linkGoogle(@CurrentUser() user: User, @Body() { googleToken }: { googleToken: string }) {
     // TODO: Implement linking existing account with Google
     return {
@@ -229,6 +356,23 @@ export class AuthController {
   }
 
   @Post('link-facebook')
+  @ApiOperation({
+    summary: 'Link Facebook account',
+    description: 'Links the current user account with a Facebook account',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        facebookToken: {
+          type: 'string',
+          description: 'Facebook authentication token',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+        }
+      },
+      required: ['facebookToken']
+    }
+  })
   async linkFacebook(@CurrentUser() user: User, @Body() { facebookToken }: { facebookToken: string }) {
     // TODO: Implement linking existing account with Facebook
     return {
@@ -239,6 +383,10 @@ export class AuthController {
   }
 
   @Post('unlink-google')
+  @ApiOperation({
+    summary: 'Unlink Google account',
+    description: 'Removes the link between the current user account and their Google account',
+  })
   async unlinkGoogle(@CurrentUser() user: User) {
     // TODO: Implement unlinking Google account
     return {
@@ -249,6 +397,10 @@ export class AuthController {
   }
 
   @Post('unlink-facebook')
+  @ApiOperation({
+    summary: 'Unlink Facebook account',
+    description: 'Removes the link between the current user account and their Facebook account',
+  })
   async unlinkFacebook(@CurrentUser() user: User) {
     // TODO: Implement unlinking Facebook account
     return {

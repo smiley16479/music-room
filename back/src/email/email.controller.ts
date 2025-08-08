@@ -10,8 +10,9 @@ import { EmailService } from './email.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 // import { CurrentUser } from '../common/decorators/current-user.decorator';
 // import { User } from 'src/user/entities/user.entity';
-import { ApiTags, ApiOperation, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 
+@ApiTags('Email')
 @Controller('email')
 @UseGuards(JwtAuthGuard)
 export class EmailController {
