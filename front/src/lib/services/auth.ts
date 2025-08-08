@@ -76,58 +76,6 @@ export const authService = {
     }
   },
 
-  async facebookLogin(accessToken: string): Promise<AuthResponse> {
-    try {
-      const response = await fetch(`${config.apiUrl}/api/auth/facebook`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ accessToken })
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Facebook login failed');
-      }
-
-      localStorage.setItem('accessToken', result.data.accessToken);
-      localStorage.setItem('refreshToken', result.data.refreshToken);
-
-      return result;
-    } catch (error) {
-      console.error('Facebook login error:', error);
-      throw error;
-    }
-  },
-
-  async googleLogin(accessToken: string): Promise<AuthResponse> {
-    try {
-      const response = await fetch(`${config.apiUrl}/api/auth/google`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ accessToken })
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Google login failed');
-      }
-
-      localStorage.setItem('accessToken', result.data.accessToken);
-      localStorage.setItem('refreshToken', result.data.refreshToken);
-
-      return result;
-    } catch (error) {
-      console.error('Google login error:', error);
-      throw error;
-    }
-  },
-
   isAuthenticated(): boolean {
     return !!localStorage.getItem('accessToken');
   }

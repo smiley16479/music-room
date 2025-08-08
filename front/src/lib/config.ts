@@ -5,7 +5,6 @@ export const config = {
     
     // API endpoint
     apiUrl: 'http://localhost:3000',
-
     
     features: {
         trackVoting: true,
@@ -19,7 +18,7 @@ export const config = {
     },
     
     defaults: {
-        eventPrivacy: 'public', // 'public' or 'private'
-        playlistPrivacy: 'public', // 'public' or 'private'
+        eventPrivacy: 'public',
+        playlistPrivacy: 'public',
     }
 };

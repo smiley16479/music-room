@@ -159,7 +159,7 @@
       <div class="mt-6 grid grid-cols-2 gap-3">
         <div>
           <a
-            href="/auth/google"
+            href="{config.apiUrl}/api/auth/google"
             class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm bg-white dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600"
           >
             <span class="sr-only">Sign in with Google</span>
@@ -174,7 +174,7 @@
 
         <div>
           <a
-            href="/auth/facebook"
+            href="{config.apiUrl}/api/auth/facebook"
             class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm bg-white dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600"
           >
             <span class="sr-only">Sign in with Facebook</span>
