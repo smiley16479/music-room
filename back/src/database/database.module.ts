@@ -34,7 +34,7 @@ import { DatabaseService } from './database.service';
           PlaylistTrack,
         ],
         synchronize: configService.get('NODE_ENV') === 'dev',
-        logging: configService.get('NODE_ENV') === 'dev',
+        logging: false, //configService.get('NODE_ENV') === 'dev',
         timezone: 'Z',
         charset: 'utf8mb4',
         extra: {

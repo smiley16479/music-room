@@ -9,6 +9,8 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  Logger,
+  BadRequestException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -32,6 +34,8 @@ import { ApiOperation, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
 
 @Controller('auth')
 export class AuthController {
+
+  private readonly logger = new Logger(AuthController.name);
   constructor(private readonly authService: AuthService) {}
 
   @Public()
@@ -243,6 +247,7 @@ export class AuthController {
     description: 'Handles the Google OAuth callback and redirects to the frontend with authentication tokens',
   })
   async googleAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+    this.logger.log(`googleAuthCallback`);
     try {
       const result = await this.authService.googleLogin(req.user);
       console.log('Google login successful:', result);
@@ -259,6 +264,24 @@ export class AuthController {
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
       const redirectUrl = `${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`;
       res.redirect(redirectUrl);
+    }
+  }
+
+  /** Même logique que GoogleAuthGuard mais retourne JSON */
+  @Post('google/mobile-token')
+  // async googleMobileTokenExchange(@Body() { code }: { code: string }) {
+  async googleMobileTokenExchange(@Body() body/* { idToken }: { idToken: string } */) {
+    console.log("body", body);
+    
+    this.logger.log(`google/mobile-token AuthCallback`);
+
+    try {
+      const googleUser = await this.authService.verifyGoogleCode(body.code);
+      // const googleUser = await this.authService.verifyGoogleIdToken(bodyidToken);
+      const result = await this.authService.googleLogin(googleUser);
+      console.log('Google login successful:', result);
+    } catch (error) {
+      this.logger.error(`google/mobile-token AuthCallback`);
     }
   }
 
@@ -297,6 +320,39 @@ export class AuthController {
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
       const redirectUrl = `${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`;
       res.redirect(redirectUrl);
+    }
+  }
+
+  @Post('facebook/mobile-login')
+    @ApiOperation({
+      summary: 'Facebook OAuth callback for mobile',
+      description: 'Handles the Facebook OAuth callback for mobile and redirects to the mobileApp with authentication tokens',
+    })
+  async facebookMobileLogin(@Body('access_token') fbToken: string) {
+
+    try {
+      this.logger.log(`facebookMobileLogin access_token ${fbToken}`);
+      const fbProfile = await this.authService.getFacebookProfile(fbToken);
+
+      const fbUserData = {
+          id: fbProfile.id,
+          email: fbProfile.email,
+          name: fbProfile.name,
+          picture: fbProfile.picture?.data?.url,
+          accessToken: fbToken,
+      };
+
+      // const fbUserData = await this.authService.verifyFacebookToken(fbToken);
+      const result = await this.authService.facebookLogin(fbUserData);
+      this.logger.log(`facebookMobileLogin result`, result);
+      return {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        user: result.user
+      };
+    } catch (error) {
+        this.logger.error('Facebook mobile login failed:', error);
+        throw new BadRequestException('Facebook authentication failed');
     }
   }
 

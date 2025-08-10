@@ -14,6 +14,7 @@ services:
     command: npm run start:dev
     volumes:
       - './back/src:/app/src'
+      - ./back/.env:/app/.env
       # - ./nginx/letsencrypt/:/etc/letsencrypt/ # Pas d'https:// pour le moment
       - uploads:/app/uploads #ajout d'un volume partagé pour les avatars (à mettre sur un service cloud ou sur nginx)
       - front_back_shared:/app/public/front_back_shared # À ne pas mettre nécessairement dans public/
