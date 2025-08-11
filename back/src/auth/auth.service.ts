@@ -4,9 +4,12 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
@@ -34,11 +37,14 @@ export interface AuthResult {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly httpService: HttpService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<AuthResult> {
@@ -98,7 +104,66 @@ export class AuthService {
     };
   }
 
+  /** verifyGoogleCode pour IOS en mode oauth Manuel (pas de SDK) */
+  async verifyGoogleCode(code: string) {
+    // 1. Échanger le code contre un access token Google
+
+    this.logger.debug('verifyGoogleCode')
+
+    console.log('🔍 Debug Google token exchange:');
+    console.log('Client ID:', this.configService.get('GOOGLE_WEB_CLIENT_ID'));
+    console.log('Client Secret exists:', this.configService.get('GOOGLE_CLIENT_SECRET'));
+    console.log('Code:', code);
+    console.log('Redirect URI:', 'com.googleusercontent.apps.734605703797-duvg1eiupfeva2njit9chbpq0bvmstke://');
+
+    try {
+      const tokenResponse = await firstValueFrom(
+          this.httpService.post('https://oauth2.googleapis.com/token', {
+              client_id: this.configService.get('GOOGLE_WEB_CLIENT_ID'),
+              client_secret: this.configService.get('GOOGLE_CLIENT_SECRET'),
+              code: code,
+              grant_type: 'authorization_code',
+              redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' // 'http://localhost' // 'com.googleusercontent.apps.734605703797-duvg1eiupfeva2njit9chbpq0bvmstke://'
+          })
+      );
+
+
+      const { access_token } = tokenResponse.data;
+      this.logger.debug('verifyGoogleCode1')
+
+      // 2. Utiliser l'access token pour récupérer les infos utilisateur
+      const userResponse = await firstValueFrom(
+          this.httpService.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+              headers: { Authorization: `Bearer ${access_token}` }
+          })
+      );
+
+      console.log("verifyGoogleCode userResponse.data:", userResponse.data);
+      // 3. Formater comme votre GoogleStrategy le fait
+      const googleUser = userResponse.data;
+      return {
+          id: googleUser.id,
+          email: googleUser.email,
+          name: googleUser.name,
+          picture: googleUser.picture,
+          accessToken: access_token
+      };
+    } catch (error) {
+        console.error('❌ Google token exchange error:');
+        console.error('Status:', error.response?.status);
+        console.error('Data:', error.response?.data);
+        console.error('Message:', error.message);
+        throw error;
+    }
+}
+
+
+  /** Récupère le user en fonction de son googleUser.id et renvoie les acces et refreshToken */
   async googleLogin(googleUser: any): Promise<AuthResult> {
+
+    this.logger.debug('googleLogin')
+    console.log("googleUser", googleUser);
+    
     let user = await this.userService.findByGoogleId(googleUser.id);
 
     if (!user) {
@@ -134,6 +199,29 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+async verifyGoogleIdToken(idToken: string) {
+    const response = await firstValueFrom(
+        this.httpService.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`)
+    );
+    return response.data; // Contient les infos user
+}
+
+  async verifyFacebookToken(fbToken: string) {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get('https://graph.facebook.com/me', {
+          params: {
+            fields: 'id,name,email',
+            access_token: fbToken
+          }
+        })
+      );
+      return response.data;
+    } catch (error) {
+      throw new UnauthorizedException('Invalid Facebook token');
+    }
   }
 
   async facebookLogin(facebookUser: any): Promise<AuthResult> {
@@ -173,6 +261,15 @@ export class AuthService {
       refreshToken,
     };
   }
+
+  async getFacebookProfile(accessToken: string) {
+    const response = await firstValueFrom(
+        this.httpService.get(
+            `https://graph.facebook.com/me?fields=id,name,email,picture.type(large)&access_token=${accessToken}`
+        )
+    );
+    return response.data;
+}
 
   async refreshToken(refreshToken: string): Promise<{ accessToken: string }> {
     try {
