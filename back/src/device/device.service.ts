@@ -180,6 +180,35 @@ export class DeviceService {
     return Promise.all(devices.map(device => this.addDeviceStats(device)));
   }
 
+  async getControlPermissions(userId: string, deviceId?: string): Promise<any[]> {
+    const query = this.deviceRepository.createQueryBuilder('device')
+      .leftJoinAndSelect('device.owner', 'owner')
+      .leftJoinAndSelect('device.delegatedTo', 'delegatedTo')
+      .where('device.delegatedToId IS NOT NULL')
+      .andWhere('(device.ownerId = :userId OR device.delegatedToId = :userId)', { userId });
+
+    if (deviceId) {
+      query.andWhere('device.id = :deviceId', { deviceId });
+    }
+
+    const devices = await query.getMany();
+
+    return devices.map(device => ({
+      id: `${device.id}-${device.delegatedToId}`,
+      grantedTo: device.delegatedTo?.id,
+      grantedToName: device.delegatedTo?.displayName || device.delegatedTo?.email,
+      deviceId: device.id,
+      deviceName: device.name,
+      grantedAt: device.delegationExpiresAt ? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() : new Date().toISOString(), // Approximate
+      expiresAt: device.delegationExpiresAt?.toISOString(),
+      isActive: device.delegationExpiresAt ? device.delegationExpiresAt > new Date() : true,
+      permissions: device.delegationPermissions,
+      deviceOwner: device.owner?.displayName || device.owner?.email,
+      isGrantedByMe: device.ownerId === userId,
+      isGrantedToMe: device.delegatedToId === userId,
+    })).filter(permission => permission.isActive);
+  }
+
   async update(id: string, updateDeviceDto: UpdateDeviceDto, userId: string): Promise<DeviceWithStats> {
     const device = await this.findById(id, userId);
 

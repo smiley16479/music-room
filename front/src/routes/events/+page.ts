@@ -1,0 +1,21 @@
+import type { PageLoad } from './$types';
+import { eventsService } from '$lib/services/events';
+
+export const load: PageLoad = async ({ url, fetch }) => {
+  try {
+    const isPublic = url.searchParams.get('public');
+    // Only handle explicit public filter during SSR
+    const publicFilter = isPublic === 'true' ? true : undefined;
+    
+    const events = await eventsService.getEvents(publicFilter, fetch);
+    
+    return {
+      events
+    };
+  } catch (error) {
+    console.error('Failed to load events:', error);
+    return {
+      events: []
+    };
+  }
+};

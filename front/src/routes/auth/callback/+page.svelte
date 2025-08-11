@@ -2,11 +2,12 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { authStore } from '$lib/stores/auth';
 
   let error = '';
   let processing = true;
 
-  onMount(() => {
+  onMount(async () => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const refreshToken = params.get('refresh');
@@ -19,14 +20,22 @@
     }
 
     if (token && refreshToken) {
-      // Store tokens
-      localStorage.setItem('accessToken', token);
-      localStorage.setItem('refreshToken', refreshToken);
-      
-      // Redirect to home page
-      setTimeout(() => {
-        goto('/');
-      }, 1000);
+      try {
+        // Store tokens
+        localStorage.setItem('accessToken', token);
+        localStorage.setItem('refreshToken', refreshToken);
+        
+        // Refresh the auth store with the new user data
+        await authStore.refreshUser();
+        
+        // Redirect to home page
+        setTimeout(() => {
+          goto('/');
+        }, 1000);
+      } catch (err) {
+        error = 'Failed to authenticate user';
+        processing = false;
+      }
     } else {
       error = 'Authentication failed: No tokens received';
       processing = false;

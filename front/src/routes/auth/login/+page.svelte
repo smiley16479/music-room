@@ -1,7 +1,7 @@
 
 <script lang="ts">
   import { config } from '$lib/config';
-  import { authService } from '$lib/services/auth';
+  import { authStore } from '$lib/stores/auth';
   import { goto } from '$app/navigation';
 
   let email = '';
@@ -34,7 +34,7 @@
     generalError = '';
     successMessage = '';
     try {
-      const response = await authService.login({ email, password });
+      const response = await authStore.login(email, password);
       successMessage = response.message || 'Login successful! Redirecting...';
       setTimeout(() => {
         goto('/');

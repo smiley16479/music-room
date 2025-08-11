@@ -4,135 +4,187 @@
 </svelte:head>
 
 <script lang="ts">
-    import { authService } from '$lib/services/auth';
+  import { authService } from '$lib/services/auth';
   import { onMount } from 'svelte';
-  let isAuthenticated: boolean | null = null;
+  
+  let user: any = null;
+  
   onMount(async () => {
-	const user = await authService.isAuthenticated();
-
-	if (user) isAuthenticated = user;
+    user = authService.isAuthenticated();
   });
 </script>
 
 <section class="min-h-screen bg-primary text-[#5e53f1]">
 	<div class="container mx-auto px-4 py-16 flex flex-col items-center justify-center text-center">
-	{#if isAuthenticated}
-	  <div class="mb-6 text-lg text-white">Hello you are Authenticated</div>
+	{#if user}
+	  <div class="mb-6 text-lg text-gray-800">
+		Welcome back, <span class="font-semibold">{user.displayName || user.email}</span>!
+	  </div>
 	{/if}
-		<h1 class="font-family-main text-5xl md:text-6xl font-bold mb-8">
-			Welcome to Music Room
+		<h1 class="font-family-main text-5xl md:text-6xl font-bold mb-8 text-gray-800">
+			Music Room
 		</h1>
 		
-		<p class="text-xl md:text-2xl mb-12 max-w-2xl">
+		<p class="text-xl md:text-2xl mb-12 max-w-2xl text-gray-700">
 			Create, share, and enjoy music together with friends in real-time
 		</p>
 		
 		<div class="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-4xl mb-12">
-			<div class="bg-indigo-800 bg-opacity-50 p-6 rounded-lg shadow-lg">
-				<h3 class="text-xl font-bold mb-3">Track Voting</h3>
-				<p>Vote on the next tracks to play at events and parties</p>
-				<a href="/events" class="mt-4 inline-block text-sm text-purple-300 hover:text-white">
-					Browse Events →
+			<div class="bg-white bg-opacity-80 p-6 rounded-lg shadow-lg border border-secondary/20">
+				<div class="w-12 h-12 bg-secondary/20 rounded-lg flex items-center justify-center mb-4 mx-auto">
+					<svg class="w-6 h-6 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
+					</svg>
+				</div>
+				<h3 class="text-xl font-bold mb-3 text-gray-800">Track Voting</h3>
+				<p class="text-gray-600 mb-4">Vote on the next tracks to play at events and parties. Create democratic playlists where everyone has a voice.</p>
+				<a href="/events" class="inline-block bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+					Join Events
 				</a>
 			</div>
 			
-			<div class="bg-indigo-800 bg-opacity-50 p-6 rounded-lg shadow-lg">
-				<h3 class="text-xl font-bold mb-3">Playlist Editor</h3>
-				<p>Collaborate on playlists in real-time with your friends</p>
-				<a href="/playlists" class="mt-4 inline-block text-sm text-purple-300 hover:text-white">
-					Explore Playlists →
+			<div class="bg-white bg-opacity-80 p-6 rounded-lg shadow-lg border border-secondary/20">
+				<div class="w-12 h-12 bg-secondary/20 rounded-lg flex items-center justify-center mb-4 mx-auto">
+					<svg class="w-6 h-6 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"></path>
+					</svg>
+				</div>
+				<h3 class="text-xl font-bold mb-3 text-gray-800">Playlist Editor</h3>
+				<p class="text-gray-600 mb-4">Collaborate on playlists in real-time with your friends. Build the perfect soundtrack together.</p>
+				<a href="/playlists" class="inline-block bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+					Create Playlists
 				</a>
 			</div>
 			
-			<div class="bg-indigo-800 bg-opacity-50 p-6 rounded-lg shadow-lg">
-				<h3 class="text-xl font-bold mb-3">Control Delegation</h3>
-				<p>Share music control with friends across devices</p>
-				<a href="/devices" class="mt-4 inline-block text-sm text-purple-300 hover:text-white">
-					Manage Devices →
+			<div class="bg-white bg-opacity-80 p-6 rounded-lg shadow-lg border border-secondary/20">
+				<div class="w-12 h-12 bg-secondary/20 rounded-lg flex items-center justify-center mb-4 mx-auto">
+					<svg class="w-6 h-6 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m13 0h-6"></path>
+					</svg>
+				</div>
+				<h3 class="text-xl font-bold mb-3 text-gray-800">Control Delegation</h3>
+				<p class="text-gray-600 mb-4">Share music control with friends across devices. Let others DJ for you remotely.</p>
+				{#if user}
+				<a href="/devices" class="inline-block bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+					Manage Devices
 				</a>
+				{:else}
+				<a href="/auth/login" class="inline-block bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors">
+					Get Started
+				</a>
+				{/if}
 			</div>
 		</div>
-		
-		<div class="flex flex-col sm:flex-row gap-4">
-			<a href="/auth/login" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-full transition duration-300">
-				Login
+
+		{#if !user}
+		<div class="flex space-x-4">
+			<a href="/auth/register" class="bg-secondary text-white px-8 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors">
+				Get Started
 			</a>
-			<a href="/auth/register" class="bg-transparent border-2 border-purple-600 hover:bg-purple-600 text-white font-bold py-3 px-8 rounded-full transition duration-300">
-				Register
+			<a href="/auth/login" class="border border-secondary text-secondary px-8 py-3 rounded-lg font-semibold hover:bg-secondary/10 transition-colors">
+				Sign In
 			</a>
 		</div>
+		{:else}
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl">
+			<a href="/events" class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold text-center hover:bg-secondary/80 transition-colors">
+				Browse Events
+			</a>
+			<a href="/playlists" class="border border-secondary text-secondary px-6 py-3 rounded-lg font-semibold text-center hover:bg-secondary/10 transition-colors">
+				My Playlists
+			</a>
+		</div>
+		{/if}
 	</div>
 
-	<!-- Features Section -->
-	<div class="py-20 bg-primary">
-		<div class="container mx-auto px-4">
-			<h2 class="text-3xl md:text-4xl font-bold mb-16 text-center">How Music Room Works</h2>
-			
-			<div class="grid grid-cols-1 md:grid-cols-2 gap-16">
-				<div class="flex flex-col md:flex-row items-start md:items-center gap-6">
-					<div class="bg-purple-700 rounded-full p-4 text-white">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-						</svg>
-					</div>
-					<div>
-						<h3 class="text-xl font-bold mb-3">Create or Join Music Events</h3>
-						<p class="text-indigo-200">Host virtual or in-person music events where everyone can suggest and vote for the next track in the playlist.</p>
-					</div>
+	<!-- Features Overview -->
+	<div class="container mx-auto px-4 py-16">
+		<div class="text-center mb-12">
+			<h2 class="font-family-main text-3xl md:text-4xl font-bold mb-4 text-gray-800">
+				How It Works
+			</h2>
+			<p class="text-lg text-gray-600 max-w-2xl mx-auto">
+				Music Room brings people together through the universal language of music
+			</p>
+		</div>
+
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+			<div class="text-center">
+				<div class="w-16 h-16 bg-secondary/20 rounded-full flex items-center justify-center mb-4 mx-auto">
+					<span class="text-2xl font-bold text-secondary">1</span>
 				</div>
-				
-				<div class="flex flex-col md:flex-row items-start md:items-center gap-6">
-					<div class="bg-purple-700 rounded-full p-4 text-white">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
-						</svg>
-					</div>
-					<div>
-						<h3 class="text-xl font-bold mb-3">Real-time Collaboration</h3>
-						<p class="text-indigo-200">Edit playlists together with friends or like-minded music enthusiasts in real-time, creating unique musical experiences.</p>
-					</div>
+				<h3 class="text-xl font-semibold mb-2 text-gray-800">Create or Join</h3>
+				<p class="text-gray-600">Start a new event or playlist, or join existing ones created by your friends.</p>
+			</div>
+
+			<div class="text-center">
+				<div class="w-16 h-16 bg-secondary/20 rounded-full flex items-center justify-center mb-4 mx-auto">
+					<span class="text-2xl font-bold text-secondary">2</span>
 				</div>
-				
-				<div class="flex flex-col md:flex-row items-start md:items-center gap-6">
-					<div class="bg-purple-700 rounded-full p-4 text-white">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-						</svg>
-					</div>
-					<div>
-						<h3 class="text-xl font-bold mb-3">Privacy Controls</h3>
-						<p class="text-indigo-200">Choose between public and private events or playlists, with granular control over who can access and contribute.</p>
-					</div>
+				<h3 class="text-xl font-semibold mb-2 text-gray-800">Collaborate</h3>
+				<p class="text-gray-600">Add tracks, vote for favorites, and work together to create the perfect musical experience.</p>
+			</div>
+
+			<div class="text-center">
+				<div class="w-16 h-16 bg-secondary/20 rounded-full flex items-center justify-center mb-4 mx-auto">
+					<span class="text-2xl font-bold text-secondary">3</span>
 				</div>
-				
-				<div class="flex flex-col md:flex-row items-start md:items-center gap-6">
-					<div class="bg-purple-700 rounded-full p-4 text-white">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-						</svg>
-					</div>
-					<div>
-						<h3 class="text-xl font-bold mb-3">License Management</h3>
-						<p class="text-indigo-200">Control who can vote and edit with flexible licensing options, including location-based permissions.</p>
-					</div>
-				</div>
+				<h3 class="text-xl font-semibold mb-2 text-gray-800">Enjoy Together</h3>
+				<p class="text-gray-600">Listen and enjoy music together, whether you're in the same room or across the world.</p>
 			</div>
 		</div>
-	</div>
 
-	<!-- Getting Started Section -->
-	<div class="py-20">
-		<div class="container mx-auto px-4 text-center">
-			<h2 class="text-3xl md:text-4xl font-bold mb-6">Ready to Get Started?</h2>
-			<p class="text-xl mb-12 max-w-2xl mx-auto">Join Music Room today and transform how you experience music with friends</p>
-			
-			<div class="flex flex-col sm:flex-row gap-4 justify-center">
-				<a href="/auth/register" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-8 rounded-full transition duration-300">
-					Create Free Account
-				</a>
-				<a href="#features" class="bg-transparent border-2 border-purple-600 hover:bg-purple-600 text-white font-bold py-3 px-8 rounded-full transition duration-300">
-					Learn More
-				</a>
+		<div class="bg-white bg-opacity-80 rounded-xl p-8 shadow-lg border border-secondary/20">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+				<div>
+					<h3 class="font-family-main text-2xl font-bold mb-4 text-gray-800">
+						Perfect for Any Occasion
+					</h3>
+					<ul class="space-y-3 text-gray-600">
+						<li class="flex items-center">
+							<svg class="w-5 h-5 text-secondary mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+							House parties and gatherings
+						</li>
+						<li class="flex items-center">
+							<svg class="w-5 h-5 text-secondary mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+							Road trips and travel
+						</li>
+						<li class="flex items-center">
+							<svg class="w-5 h-5 text-secondary mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+							Workout sessions
+						</li>
+						<li class="flex items-center">
+							<svg class="w-5 h-5 text-secondary mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+							Study groups and work
+						</li>
+						<li class="flex items-center">
+							<svg class="w-5 h-5 text-secondary mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+							Virtual hangouts
+						</li>
+					</ul>
+				</div>
+				<div class="text-center">
+					<div class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-full flex items-center justify-center mx-auto mb-6">
+						<svg class="w-16 h-16 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+						</svg>
+					</div>
+					{#if !user}
+					<a href="/auth/register" class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors">
+						Join the Community
+					</a>
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>

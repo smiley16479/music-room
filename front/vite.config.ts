@@ -11,9 +11,7 @@ export default defineConfig({
     port: 5050,
   },
   plugins: [
-    tailwindcss({
-      config: './tailwind.config.js',
-    }), 
+    tailwindcss(), 
     sveltekit()
   ]
 });

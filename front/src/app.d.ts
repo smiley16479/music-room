@@ -8,6 +8,13 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	namespace svelteHTML {
+		// allow for custom Svelte element properties
+		interface IntrinsicElements {
+			[elemName: string]: any;
+		}
+	}
 }
 
 export {};

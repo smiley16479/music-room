@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 
 import { DeviceService, PlaybackCommand } from './device.service';
@@ -82,6 +83,29 @@ export class DeviceController {
     return {
       success: true,
       data: devices,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('control-permissions')
+  @ApiOperation({
+    summary: 'Get control permissions',
+    description: 'Returns all active control permissions, both granted by and granted to the current user',
+  })
+  @ApiQuery({ 
+    name: 'deviceId', 
+    type: String, 
+    required: false,
+    description: 'Filter by specific device ID'
+  })
+  async getControlPermissions(
+    @CurrentUser() user: User,
+    @Query('deviceId') deviceId?: string
+  ) {
+    const permissions = await this.deviceService.getControlPermissions(user.id, deviceId);
+    return {
+      success: true,
+      data: permissions,
       timestamp: new Date().toISOString(),
     };
   }

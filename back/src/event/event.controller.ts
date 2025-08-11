@@ -27,7 +27,7 @@ import { User } from 'src/user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 
 @ApiTags('Events')
-@Controller('event')
+@Controller('events')
 @UseGuards(JwtAuthGuard)
 export class EventController {
   constructor(private readonly eventService: EventService) {}
