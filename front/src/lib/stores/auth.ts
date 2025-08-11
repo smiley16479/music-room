@@ -6,6 +6,7 @@ function createAuthStore() {
 
   return {
     subscribe,
+    set, // Expose the set method
     
     // Initialize the store with current auth state
     init: () => {
@@ -18,10 +19,32 @@ function createAuthStore() {
           .then((freshUser: User | null) => {
             if (freshUser) {
               set(freshUser);
+            } else {
+              // Check if we still have tokens after the getCurrentUser call
+              const stillHasTokens = authService.getAuthToken();
+              if (!stillHasTokens) {
+                // Tokens were cleared by getCurrentUser due to auth failure
+                set(null);
+              } else if (user) {
+                // Server failed but we have cached user and tokens, keep the cached version
+                set(user);
+              }
             }
           })
-          .catch(() => {
-            // If server request fails, keep the localStorage user
+          .catch((error) => {
+            console.error('Failed to refresh user data:', error);
+            // Check if we still have tokens after the error
+            const stillHasTokens = authService.getAuthToken();
+            if (!stillHasTokens) {
+              // Tokens were cleared due to auth failure
+              set(null);
+            } else if (user) {
+              // We have cached user data and tokens, keep it even if server is unreachable
+              set(user);
+            } else {
+              // No cached user and server failed, user is definitely logged out
+              set(null);
+            }
           });
       }
     },
@@ -53,9 +76,27 @@ function createAuthStore() {
     
     // Refresh user data from server
     refreshUser: async () => {
+      const currentUser = authService.isAuthenticated();
       const user = await authService.getCurrentUser();
-      set(user);
-      return user;
+      
+      if (user) {
+        set(user);
+      } else {
+        // Check if tokens were cleared (indicating auth failure)
+        const stillHasTokens = authService.getAuthToken();
+        if (!stillHasTokens) {
+          // User was logged out due to invalid tokens
+          set(null);
+        } else if (currentUser) {
+          // If server refresh failed but we have cached user and tokens, keep the cached version
+          set(currentUser);
+        } else {
+          // No user data available, set to null
+          set(null);
+        }
+      }
+      
+      return user || currentUser;
     }
   };
 }

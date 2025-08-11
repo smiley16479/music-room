@@ -4,13 +4,14 @@
 </svelte:head>
 
 <script lang="ts">
-  import { authService } from '$lib/services/auth';
+  import { authStore } from '$lib/stores/auth';
   import { onMount } from 'svelte';
   
-  let user: any = null;
+  // Use the global auth store
+  let user = $derived($authStore);
   
   onMount(async () => {
-    user = authService.isAuthenticated();
+    // User is now available through the reactive store
   });
 </script>
 

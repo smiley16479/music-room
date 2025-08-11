@@ -1,8 +1,15 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import Header from './Header.svelte';
+	import { authStore } from '$lib/stores/auth';
 	import '../app.css';
 	
 	let { children } = $props();
+
+	onMount(() => {
+		// Initialize the auth store at the app level
+		authStore.init();
+	});
 </script>
 
 <div class="bg-primary flex flex-col min-h-screen">

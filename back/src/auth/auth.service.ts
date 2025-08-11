@@ -287,7 +287,6 @@ async verifyGoogleIdToken(idToken: string) {
       }
 
       const accessToken = await this.generateAccessToken(user);
-
       return { accessToken };
     } catch (error) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -375,7 +374,18 @@ async verifyGoogleIdToken(idToken: string) {
   }
 
   async validateJwtPayload(payload: JwtPayload): Promise<User | null> {
-    return this.userService.findById(payload.sub);
+    
+    try {
+      const user = await this.userService.findById(payload.sub);
+      return user;
+    } catch (error) {
+      // If user is not found, return null instead of throwing
+      if (error instanceof NotFoundException) {
+        return null;
+      }
+      // Re-throw other types of errors
+      throw error;
+    }
   }
 
   private async generateTokens(user: User): Promise<{ accessToken: string; refreshToken: string }> {
@@ -394,7 +404,11 @@ async verifyGoogleIdToken(idToken: string) {
       type: 'access',
     };
 
-    return this.jwtService.signAsync(payload);
+    this.logger.debug('Generating access token for user:', user.id);
+    const token = await this.jwtService.signAsync(payload);
+    this.logger.debug('Access token generated successfully');
+    
+    return token;
   }
 
   private async generateRefreshToken(user: User): Promise<string> {

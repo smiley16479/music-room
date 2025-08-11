@@ -6,7 +6,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { authService } from '$lib/services/auth';
+	import { authStore } from '$lib/stores/auth';
 	import { eventsService, type Event } from '$lib/services/events';
 	import { goto } from '$app/navigation';
 
@@ -14,7 +14,8 @@
 	let events: Event[] = $state(data?.events || []);
 	let loading = $state(false);
 	let error = $state('');
-	let user = $state<any>(null);
+	// Use the global auth store
+	let user = $derived($authStore);
 	let showCreateModal = $state(false);
 	let filter: 'all' | 'public' | 'private' = $state('all');
 
@@ -50,8 +51,7 @@
 	});
 
 	onMount(() => {
-		// Initialize user on client side
-		user = authService.isAuthenticated();
+		// User is now available through the reactive store
 	});
 
 	async function loadEvents() {
@@ -285,7 +285,7 @@
 				</button>
 			</div>
 			
-			<form onsubmit={createEvent} class="space-y-4">
+			<form onsubmit={(e) => { e.preventDefault(); createEvent(e); }} class="space-y-4">
 				<div>
 					<label for="event-title" class="block text-sm font-medium text-gray-700 mb-1">Event Title</label>
 					<input 

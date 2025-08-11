@@ -3,16 +3,18 @@ import { authService } from './auth';
 
 export interface Playlist {
   id: string;
-  title: string;
+  name: string; // Changed from 'title' to match backend
   description?: string;
-  ownerId: string;
-  ownerName: string;
-  isPublic: boolean;
+  creatorId: string; // Changed from 'ownerId' to match backend
+  creator?: { id: string; displayName: string }; // Backend relation
+  visibility: 'public' | 'private'; // Changed from 'isPublic' boolean to enum
   isCollaborative: boolean;
-  licenseType: 'free' | 'invited_only';
-  tracks: PlaylistTrack[];
+  licenseType: 'open' | 'invited'; // Changed from 'free'|'invited_only' to match backend
+  trackCount: number; // Track count from backend
+  totalDuration: number; // Total duration from backend
+  tracks?: PlaylistTrack[]; // Optional - only included in detailed view
   collaborators: Collaborator[];
-  thumbnailUrl?: string;
+  coverImageUrl?: string; // Changed from 'thumbnailUrl' to match backend
   createdAt: string;
   updatedAt: string;
 }
@@ -40,11 +42,11 @@ export interface Collaborator {
 }
 
 export interface CreatePlaylistData {
-  title: string;
+  name: string; // Changed from 'title' to match backend
   description?: string;
-  isPublic: boolean;
+  visibility: 'public' | 'private'; // Changed from 'isPublic' boolean to enum
   isCollaborative: boolean;
-  licenseType: 'free' | 'invited_only';
+  licenseType: 'open' | 'invited'; // Changed from 'free'|'invited_only' to match backend
 }
 
 export const playlistsService = {
@@ -80,6 +82,21 @@ export const playlistsService = {
 
     if (!response.ok) {
       throw new Error('Failed to fetch playlist');
+    }
+
+    const result = await response.json();
+    return result.data;
+  },
+
+  async getPlaylistTracks(playlistId: string): Promise<PlaylistTrack[]> {
+    const token = authService.getAuthToken();
+    
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/tracks`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch playlist tracks');
     }
 
     const result = await response.json();

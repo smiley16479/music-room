@@ -1,12 +1,12 @@
 <svelte:head>
-	<title>{playlist?.title || 'Playlist'} - Music Room</title>
+	<title>{playlist?.name || 'Playlist'} - Music Room</title>
 	<meta name="description" content="Collaborate on music playlists in real-time" />
 </svelte:head>
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { authService } from '$lib/services/auth';
+	import { authStore } from '$lib/stores/auth';
 	import { playlistsService, type Playlist, type PlaylistTrack } from '$lib/services/playlists';
 	import { goto } from '$app/navigation';
 
@@ -15,7 +15,8 @@
 	let playlist = $state<Playlist | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let user = $state<any>(null);
+	// Use the global auth store instead of local user variable
+	let user = $derived($authStore);
 	let showAddTrackModal = $state(false);
 	let showAddCollaboratorModal = $state(false);
 	let draggedIndex: number | null = null;
@@ -37,9 +38,7 @@
 	const playlistId = $derived($page.params.id);
 
 	onMount(() => {
-		// Initialize user on client side
-		user = authService.isAuthenticated();
-		
+		// User is now available through the reactive store
 		loadPlaylist();
 		// Set up real-time updates
 		const interval = setInterval(loadPlaylist, 10000);
@@ -50,7 +49,13 @@
 		if (!playlistId) return;
 		
 		try {
+			// Load playlist metadata
 			playlist = await playlistsService.getPlaylist(playlistId);
+			
+			// Load tracks separately
+			const tracks = await playlistsService.getPlaylistTracks(playlistId);
+			playlist.tracks = tracks;
+			
 			loading = false;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load playlist';
@@ -138,7 +143,7 @@
 	async function handleDrop(event: DragEvent, dropIndex: number) {
 		event.preventDefault();
 		
-		if (draggedIndex === null || draggedIndex === dropIndex || !playlist || !playlistId) return;
+		if (draggedIndex === null || draggedIndex === dropIndex || !playlist || !playlistId || !playlist.tracks) return;
 
 		try {
 			// Create new track positions array
@@ -176,9 +181,9 @@
 		return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 	}
 
-	const isOwner = $derived(user && playlist?.ownerId === user.id);
+	const isOwner = $derived(user && playlist?.creatorId === user.id);
 	const canEdit = $derived(isOwner || (user && playlist?.collaborators?.some((c: any) => c.userId === user.id && c.role === 'editor')));
-	const canView = $derived(playlist?.isPublic || isOwner || (user && playlist?.collaborators?.some((c: any) => c.userId === user.id)));
+	const canView = $derived(playlist?.visibility === 'public' || isOwner || (user && playlist?.collaborators?.some((c: any) => c.userId === user.id)));
 </script>
 
 {#if loading}
@@ -196,8 +201,8 @@
 	<!-- Playlist Header -->
 	<div class="bg-white rounded-lg shadow-md p-6 mb-8">
 		<div class="flex items-start space-x-6">
-			{#if playlist.thumbnailUrl}
-			<img src={playlist.thumbnailUrl} alt={playlist.title} class="w-32 h-32 rounded-lg object-cover" />
+			{#if playlist.coverImageUrl}
+			<img src={playlist.coverImageUrl} alt={playlist.name} class="w-32 h-32 rounded-lg object-cover" />
 			{:else}
 			<div class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center">
 				<svg class="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -209,15 +214,15 @@
 			<div class="flex-1">
 				<div class="flex justify-between items-start mb-4">
 					<div>
-						<h1 class="font-family-main text-3xl font-bold text-gray-800 mb-2">{playlist.title}</h1>
+						<h1 class="font-family-main text-3xl font-bold text-gray-800 mb-2">{playlist.name}</h1>
 						{#if playlist.description}
 						<p class="text-gray-600 mb-4">{playlist.description}</p>
 						{/if}
 					</div>
 					
 					<div class="flex space-x-2">
-						<span class="px-3 py-1 text-sm rounded-full {playlist.isPublic ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-							{playlist.isPublic ? 'Public' : 'Private'}
+						<span class="px-3 py-1 text-sm rounded-full {playlist.visibility === 'public' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
+							{playlist.visibility === 'public' ? 'Public' : 'Private'}
 						</span>
 						{#if playlist.isCollaborative}
 						<span class="px-3 py-1 text-sm rounded-full bg-purple-100 text-purple-800">
@@ -230,12 +235,12 @@
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600">
 					<div>
 						<span class="font-medium">Owner:</span>
-						<span class="ml-1">{playlist.ownerName}</span>
+						<span class="ml-1">{playlist.creator?.displayName || 'Unknown'}</span>
 					</div>
 					
 					<div>
 						<span class="font-medium">Tracks:</span>
-						<span class="ml-1">{playlist.tracks.length}</span>
+						<span class="ml-1">{playlist.tracks?.length || playlist.trackCount || 0}</span>
 					</div>
 					
 					<div>
@@ -284,7 +289,7 @@
 			<div class="bg-white rounded-lg shadow-md p-6">
 				<h2 class="text-xl font-bold text-gray-800 mb-6">Tracks</h2>
 				
-				{#if playlist.tracks.length === 0}
+				{#if !playlist.tracks || playlist.tracks.length === 0}
 				<div class="text-center py-8">
 					<p class="text-gray-500 mb-4">No tracks in this playlist yet</p>
 					{#if canEdit}
@@ -364,11 +369,11 @@
 					<!-- Owner -->
 					<div class="flex items-center space-x-3">
 						<div class="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center">
-							<span class="text-sm font-semibold">{playlist.ownerName.charAt(0)}</span>
+							<span class="text-sm font-semibold">{(playlist.creator?.displayName || 'U').charAt(0)}</span>
 						</div>
 						
 						<div class="flex-1">
-							<p class="font-medium text-gray-800">{playlist.ownerName}</p>
+							<p class="font-medium text-gray-800">{playlist.creator?.displayName || 'Unknown'}</p>
 							<p class="text-xs text-gray-500">Owner</p>
 						</div>
 					</div>
@@ -426,7 +431,7 @@
 				</button>
 			</div>
 			
-			<form onsubmit={addTrack} class="space-y-4">
+			<form onsubmit={(e) => { e.preventDefault(); addTrack(e); }} class="space-y-4">
 				<div>
 					<label for="trackTitle" class="block text-sm font-medium text-gray-700 mb-1">Track Title</label>
 					<input 
@@ -537,7 +542,7 @@
 				</button>
 			</div>
 			
-			<form onsubmit={addCollaborator} class="space-y-4">
+			<form onsubmit={(e) => { e.preventDefault(); addCollaborator(e); }} class="space-y-4">
 				<div>
 					<label for="userEmail" class="block text-sm font-medium text-gray-700 mb-1">User Email or ID</label>
 					<input 

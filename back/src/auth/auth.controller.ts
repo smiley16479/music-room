@@ -11,6 +11,7 @@ import {
   Query,
   Logger,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -19,6 +20,7 @@ import { Public } from './decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 import { LocalAuthGuard } from './guards/local-auth.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { FacebookAuthGuard } from './guards/facebook-auth.guard';
@@ -214,6 +216,7 @@ export class AuthController {
   }
 
   @Post('resend-verification')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Resend verification email',
     description: 'Resend the email verification link to the current user\'s email address',
@@ -252,11 +255,18 @@ export class AuthController {
       const result = await this.authService.googleLogin(req.user);
       console.log('Google login successful:', result);
 
-      // Redirect to frontend with tokens
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
+      const userData = encodeURIComponent(JSON.stringify({
+        id: result.user.id,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        avatarUrl: result.user.avatarUrl
+      }));
+      
       const redirectUrl = `${frontendUrl}/auth/callback?` +
         `token=${result.accessToken}&` +
         `refresh=${result.refreshToken}&` +
+        `user=${userData}&` +
         `success=true`;
       
       res.redirect(redirectUrl);
@@ -308,11 +318,19 @@ export class AuthController {
     try {
       const result = await this.authService.facebookLogin(req.user);
       
-      // Redirect to frontend with tokens
+      // Redirect to frontend with tokens and minimal user data
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
+      const userData = encodeURIComponent(JSON.stringify({
+        id: result.user.id,
+        email: result.user.email,
+        displayName: result.user.displayName,
+        avatarUrl: result.user.avatarUrl
+      }));
+      
       const redirectUrl = `${frontendUrl}/auth/callback?` +
         `token=${result.accessToken}&` +
         `refresh=${result.refreshToken}&` +
+        `user=${userData}&` +
         `success=true`;
       
       res.redirect(redirectUrl);
@@ -357,11 +375,17 @@ export class AuthController {
   }
 
   @Get('me')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Get current user profile',
     description: 'Returns the profile information of the currently authenticated user',
   })
   async getProfile(@CurrentUser() user: User) {
+    if (!user) {
+      this.logger.warn('getProfile called but user is undefined/null');
+      throw new UnauthorizedException('User not found');
+    }
+    
     return {
       success: true,
       data: user,
@@ -370,6 +394,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Logout user',
@@ -385,6 +410,7 @@ export class AuthController {
   }
 
   @Post('link-google')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Link Google account',
     description: 'Links the current user account with a Google account',
@@ -412,6 +438,7 @@ export class AuthController {
   }
 
   @Post('link-facebook')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Link Facebook account',
     description: 'Links the current user account with a Facebook account',
@@ -439,6 +466,7 @@ export class AuthController {
   }
 
   @Post('unlink-google')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Unlink Google account',
     description: 'Removes the link between the current user account and their Google account',
@@ -453,6 +481,7 @@ export class AuthController {
   }
 
   @Post('unlink-facebook')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Unlink Facebook account',
     description: 'Removes the link between the current user account and their Facebook account',

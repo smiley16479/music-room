@@ -1,15 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { authStore } from '$lib/stores/auth';
-	import { onMount } from 'svelte';
 
 	// Use the reactive auth store
-	$: user = $authStore;
-
-	onMount(() => {
-		// Initialize the auth store with current state
-		authStore.init();
-	});
+	let user = $derived($authStore);
 
 	function logout() {
 		authStore.logout();
@@ -61,7 +55,7 @@
 		  <span class="text-sm font-medium hidden md:block">{user.displayName || user.email}</span>
 		</a>
 		<button 
-		  on:click={logout}
+		  onclick={logout}
 		  class="bg-secondary text-white px-3 py-1 rounded text-sm font-medium hover:bg-secondary/80 transition-colors"
 		>
 		  Logout

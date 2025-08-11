@@ -6,14 +6,15 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import { authService } from '$lib/services/auth';
+	import { authStore } from '$lib/stores/auth';
 	import { eventsService, type Event, type Track } from '$lib/services/events';
 	import { goto } from '$app/navigation';
 
 	let event = $state<Event | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let user = $state<any>(null);
+	// Use the global auth store
+	let user = $derived($authStore);
 	let showAddTrackModal = $state(false);
 	let votingCooldown = $state(new Map<string, boolean>());
 
@@ -30,9 +31,7 @@
 	const eventId = $derived($page.params.id);
 
 	onMount(() => {
-		// Initialize user on client side
-		user = authService.isAuthenticated();
-		
+		// User is now available through the reactive store
 		loadEvent();
 		// Set up real-time updates (WebSocket would be ideal here)
 		const interval = setInterval(loadEvent, 5000);
@@ -379,7 +378,7 @@
 				</button>
 			</div>
 			
-			<form onsubmit={addTrack} class="space-y-4">
+			<form onsubmit={(e) => { e.preventDefault(); addTrack(e); }} class="space-y-4">
 				<div>
 					<label for="track-title" class="block text-sm font-medium text-gray-700 mb-1">Track Title</label>
 					<input 

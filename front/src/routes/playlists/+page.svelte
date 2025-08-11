@@ -6,44 +6,57 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { authService } from '$lib/services/auth';
+	import { authStore } from '$lib/stores/auth';
 	import { playlistsService, type Playlist } from '$lib/services/playlists';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import type { User } from '$lib/services/auth';
 
-	// Get initial data from load function
-	export let data;
-	let playlists: Playlist[] = data.playlists || [];
-	let loading = false;
-	let error = '';
-	let user: any = null;
-	let showCreateModal = false;
-	let filter: 'all' | 'public' | 'private' | 'mine' = 'all';
+	// Svelte 5 runes - using correct syntax for state and reactivity
+	let { data } = $props();
+	let playlists = $state<Playlist[]>(data.playlists || []);
+	let loading = $state(false);
+	let error = $state('');
+	// Use the global auth store
+	let user = $state<User | null>(null);
+	
+	// Subscribe to auth store changes
+	$effect(() => {
+		const unsubscribe = authStore.subscribe(value => {
+			user = value;
+		});
+		return unsubscribe;
+	});
+	
+	let showCreateModal = $state(false);
+	let filter = $state<'all' | 'public' | 'private' | 'mine'>('all');
 
 	// Create playlist form
-	let newPlaylist = {
-		title: '',
+	let newPlaylist = $state({
+		name: '',
 		description: '',
-		isPublic: true,
+		visibility: 'public' as const,
 		isCollaborative: true,
-		licenseType: 'free' as const
-	};
+		licenseType: 'open' as const
+	});
 
-	// Update filter based on URL parameter
-	$: {
-		const currentFilter = $page.url.searchParams.get('filter') || 'all';
-		if (currentFilter !== filter) {
-			filter = currentFilter as typeof filter;
+	// Update filter based on URL parameter  
+	let filterFromURL = $derived($page.url.searchParams.get('filter') || 'all');
+	$effect(() => {
+		if (filterFromURL !== filter) {
+			filter = filterFromURL as typeof filter;
 		}
-	}
+	});
 
 	// Update playlists when data changes
-	$: if (data.playlists) {
-		playlists = data.playlists;
-	}
+	$effect(() => {
+		if (data.playlists) {
+			playlists = data.playlists;
+		}
+	});
 
+	// No need for onMount to initialize user, it's handled by the store
 	onMount(() => {
-		// Initialize user on client side
-		user = authService.isAuthenticated();
+		// The user is already available through the reactive store
 	});
 
 	async function loadPlaylists() {
@@ -61,7 +74,12 @@
 					publicFilter = false;
 					break;
 				case 'mine':
+					// For "mine" filter, we want to show only playlists owned by the user
 					userId = user?.id;
+					break;
+				case 'all':
+				default:
+					// Show all accessible playlists (default backend behavior)
 					break;
 			}
 
@@ -88,11 +106,11 @@
 			showCreateModal = false;
 			// Reset form
 			newPlaylist = {
-				title: '',
+				name: '',
 				description: '',
-				isPublic: true,
+				visibility: 'public',
 				isCollaborative: true,
-				licenseType: 'free'
+				licenseType: 'open'
 			};
 			await loadPlaylists();
 		} catch (err) {
@@ -111,6 +129,15 @@
 	}
 
 	function handleFilterChange() {
+		// Update URL to reflect current filter
+		const url = new URL(window.location.href);
+		if (filter === 'all') {
+			url.searchParams.delete('filter');
+		} else {
+			url.searchParams.set('filter', filter);
+		}
+		replaceState(url.href, {});
+		
 		loadPlaylists();
 	}
 </script>
@@ -189,8 +216,8 @@
 	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 		{#each playlists as playlist}
 		<div class="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-			{#if playlist.thumbnailUrl}
-			<div class="h-48 bg-cover bg-center" style="background-image: url('{playlist.thumbnailUrl}')"></div>
+			{#if playlist.coverImageUrl}
+			<div class="h-48 bg-cover bg-center" style="background-image: url('{playlist.coverImageUrl}')"></div>
 			{:else}
 			<div class="h-48 bg-gradient-to-br from-secondary/20 to-purple-300 flex items-center justify-center">
 				<svg class="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -201,10 +228,10 @@
 			
 			<div class="p-6">
 				<div class="flex items-start justify-between mb-4">
-					<h3 class="text-xl font-bold text-gray-800 line-clamp-2">{playlist.title}</h3>
+					<h3 class="text-xl font-bold text-gray-800 line-clamp-2">{playlist.name}</h3>
 					<div class="flex flex-col items-end space-y-1">
-						<span class="px-2 py-1 text-xs rounded-full {playlist.isPublic ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-							{playlist.isPublic ? 'Public' : 'Private'}
+						<span class="px-2 py-1 text-xs rounded-full {playlist.visibility === 'public' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
+							{playlist.visibility === 'public' ? 'Public' : 'Private'}
 						</span>
 						{#if playlist.isCollaborative}
 						<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
@@ -221,12 +248,12 @@
 				<div class="space-y-2 text-sm text-gray-500 mb-4">
 					<div class="flex items-center">
 						<span class="font-medium">Owner:</span>
-						<span class="ml-2">{playlist.ownerName}</span>
+						<span class="ml-2">{playlist.creator?.displayName || 'Unknown'}</span>
 					</div>
 					
 					<div class="flex items-center">
 						<span class="font-medium">Tracks:</span>
-						<span class="ml-2">{playlist.tracks.length}</span>
+						<span class="ml-2">{playlist.trackCount || 0}</span>
 					</div>
 					
 					<div class="flex items-center">
@@ -273,16 +300,16 @@
 				</button>
 			</div>
 			
-			<form onsubmit={createPlaylist} class="space-y-4">
+			<form onsubmit={(e) => { e.preventDefault(); createPlaylist(e); }} class="space-y-4">
 				<div>
-					<label for="playlistTitle" class="block text-sm font-medium text-gray-700 mb-1">Playlist Title</label>
+					<label for="playlistTitle" class="block text-sm font-medium text-gray-700 mb-1">Playlist Name</label>
 					<input 
 						id="playlistTitle"
 						type="text" 
-						bind:value={newPlaylist.title}
+						bind:value={newPlaylist.name}
 						required
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
-						placeholder="Enter playlist title"
+						placeholder="Enter playlist name"
 					/>
 				</div>
 				
@@ -300,12 +327,26 @@
 				<div class="space-y-3">
 					<div class="flex items-center">
 						<input 
-							type="checkbox" 
-							id="isPublic"
-							bind:checked={newPlaylist.isPublic}
+							type="radio" 
+							id="public"
+							name="visibility"
+							value="public"
+							bind:group={newPlaylist.visibility}
 							class="mr-2"
 						/>
-						<label for="isPublic" class="text-sm text-gray-700">Public playlist (anyone can find it)</label>
+						<label for="public" class="text-sm text-gray-700">Public playlist (anyone can find it)</label>
+					</div>
+					
+					<div class="flex items-center">
+						<input 
+							type="radio" 
+							id="private"
+							name="visibility"
+							value="private"
+							bind:group={newPlaylist.visibility}
+							class="mr-2"
+						/>
+						<label for="private" class="text-sm text-gray-700">Private playlist (only you and invited users)</label>
 					</div>
 					
 					<div class="flex items-center">
@@ -326,8 +367,8 @@
 						bind:value={newPlaylist.licenseType}
 						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
 					>
-						<option value="free">Free (anyone can edit)</option>
-						<option value="invited_only">Invited users only</option>
+						<option value="open">Open (anyone can edit)</option>
+						<option value="invited">Invited users only</option>
 					</select>
 				</div>
 				

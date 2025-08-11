@@ -6,6 +6,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { authService } from '$lib/services/auth';
+	import { authStore } from '$lib/stores/auth';
 	import { devicesService, type Device, type ControlPermission, type MusicControl } from '$lib/services/devices';
 	import { goto } from '$app/navigation';
 
@@ -13,11 +14,14 @@
 	let controlPermissions: ControlPermission[] = [];
 	let loading = false;
 	let error = '';
-	let user = authService.isAuthenticated();
 	let showAddDeviceModal = false;
 	let showGrantControlModal = false;
 	let selectedDevice: Device | null = null;
 	let musicControls = new Map<string, MusicControl>();
+	let dataLoaded = false; // Flag to prevent repeated loading
+
+	// Use the reactive auth store
+	$: user = $authStore;
 
 	// Add device form
 	let newDevice = {
@@ -31,13 +35,12 @@
 		expiresAt: ''
 	};
 
-	onMount(async () => {
-		if (!user) {
-			goto('/auth/login');
-			return;
-		}
-		await loadData();
-	});
+	// Reactive authentication check and data loading
+	$: if (user === null && typeof window !== 'undefined') {
+		goto('/auth/login');
+	} else if (user && !loading && !dataLoaded) {
+		loadData();
+	}
 
 	async function loadData() {
 		loading = true;
@@ -59,9 +62,11 @@
 				}
 			}
 			musicControls = musicControls; // Trigger reactivity
+			dataLoaded = true; // Mark data as loaded
 		} catch (err) {
 			error = 'Failed to load devices and permissions';
-			console.error(err);
+			console.error('loadData error:', err);
+			dataLoaded = true; // Mark as loaded even on error to prevent infinite retries
 		} finally {
 			loading = false;
 		}
@@ -80,7 +85,7 @@
 				name: '',
 				type: 'mobile'
 			};
-			return loadData();
+			dataLoaded = false; // Trigger reload
 		}).catch((err) => {
 			error = err instanceof Error ? err.message : 'Failed to add device';
 		}).finally(() => {
@@ -93,7 +98,7 @@
 
 		try {
 			await devicesService.deleteDevice(deviceId);
-			await loadData();
+			dataLoaded = false; // Trigger reload
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to remove device';
 		}
@@ -104,7 +109,7 @@
 
 		try {
 			await devicesService.updateDevice(device.id, { isActive: !device.isActive });
-			await loadData();
+			dataLoaded = false; // Trigger reload
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to update device';
 		}
@@ -128,7 +133,7 @@
 				userId: '',
 				expiresAt: ''
 			};
-			return loadData();
+			dataLoaded = false; // Trigger reload
 		}).catch((err) => {
 			error = err instanceof Error ? err.message : 'Failed to grant control permission';
 		}).finally(() => {
@@ -141,7 +146,7 @@
 
 		try {
 			await devicesService.revokeControlPermission(permission.deviceId, permission.grantedTo);
-			await loadData();
+			dataLoaded = false; // Trigger reload
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to revoke control permission';
 		}

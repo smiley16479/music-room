@@ -11,22 +11,30 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private authService: AuthService,
     configService: ConfigService,
   ) {
+    const secret = configService.get<string>('JWT_SECRET');
+    
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') ?? 'default-secret',
+      secretOrKey: secret ?? 'default-secret',
     });
   }
 
   async validate(payload: JwtPayload): Promise<User> {
-    if (payload.type !== 'access') {
-      throw new UnauthorizedException('Invalid token type');
-    }
+    try {
+      if (payload.type !== 'access') {
+        throw new UnauthorizedException('Invalid token type');
+      }
 
-    const user = await this.authService.validateJwtPayload(payload);
-    if (!user) {
-      throw new UnauthorizedException('User not found');
+      const user = await this.authService.validateJwtPayload(payload);
+      
+      if (!user) {
+        throw new UnauthorizedException('User not found');
+      }
+      
+      return user;
+    } catch (error) {
+      throw error;
     }
-    return user;
   }
 }
