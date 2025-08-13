@@ -9,6 +9,7 @@
 	import { authStore } from '$lib/stores/auth';
 	import { eventsService, type Event, type Track } from '$lib/services/events';
 	import { goto } from '$app/navigation';
+	import { getAvatarColor, getAvatarLetter } from '$lib/utils/avatar';
 
 	let event = $state<Event | null>(null);
 	let loading = $state(true);
@@ -33,9 +34,8 @@
 	onMount(() => {
 		// User is now available through the reactive store
 		loadEvent();
-		// Set up real-time updates (WebSocket would be ideal here)
-		const interval = setInterval(loadEvent, 5000);
-		return () => clearInterval(interval);
+		// Real-time updates handled by WebSocket events
+		// No polling needed when WebSocket is working properly
 	});
 
 	async function loadEvent() {
@@ -340,8 +340,11 @@
 						{#if participant.profilePicture}
 						<img src={participant.profilePicture} alt={participant.displayName} class="w-10 h-10 rounded-full object-cover" />
 						{:else}
-						<div class="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center">
-							<span class="text-sm font-semibold">{participant.displayName.charAt(0)}</span>
+						<div 
+							class="w-10 h-10 rounded-full flex items-center justify-center"
+							style="background-color: {getAvatarColor(participant.displayName)}"
+						>
+							<span class="text-sm font-semibold text-white">{getAvatarLetter(participant.displayName)}</span>
 						</div>
 						{/if}
 						

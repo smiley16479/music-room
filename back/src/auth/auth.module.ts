@@ -12,12 +12,16 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
+import { GoogleLinkStrategy } from './strategies/google-link.strategy';
+import { FacebookLinkStrategy } from './strategies/facebook-link.strategy';
 import { LocalStrategy } from './strategies/local.strategy';
 
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { FacebookAuthGuard } from './guards/facebook-auth.guard';
+import { GoogleLinkAuthGuard } from './guards/google-link-auth.guard';
+import { FacebookLinkAuthGuard } from './guards/facebook-link-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 
 import { User } from 'src/user/entities/user.entity';
@@ -53,10 +57,14 @@ import { EmailService } from 'src/email/email.service';
     JwtRefreshStrategy,
     GoogleStrategy,
     FacebookStrategy,
+    GoogleLinkStrategy,
+    FacebookLinkStrategy,
     JwtAuthGuard,
     JwtRefreshGuard,
     GoogleAuthGuard,
     FacebookAuthGuard,
+    GoogleLinkAuthGuard,
+    FacebookLinkAuthGuard,
     LocalAuthGuard,
   ],
   exports: [

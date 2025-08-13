@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { authStore } from '$lib/stores/auth';
+	import { getAvatarColor, getAvatarLetter, getUserAvatarUrl } from '$lib/utils/avatar';
 
 	// Use the reactive auth store
 	let user = $derived($authStore);
@@ -45,11 +46,24 @@
 	{#if user}
 	  <div class="flex items-center space-x-3">
 		<a href="/profile" class="flex items-center space-x-2 text-gray-800 hover:text-secondary transition-colors">
-		  {#if user.profilePicture}
-			<img src={user.profilePicture} alt="Profile" class="w-8 h-8 rounded-full object-cover" />
+		  {#if user.avatarUrl && !user.avatarUrl.startsWith('data:image/svg+xml')}
+			<img 
+				src={user.avatarUrl} 
+				alt="Profile" 
+				class="w-8 h-8 rounded-full object-cover"
+				onerror={(e) => {
+					const target = e.target as HTMLImageElement;
+					if (target) {
+						target.src = getUserAvatarUrl(user);
+					}
+				}}
+			/>
 		  {:else}
-			<div class="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center">
-			  <span class="text-sm font-semibold">{user.displayName?.charAt(0) || user.email.charAt(0)}</span>
+			<div 
+				class="w-8 h-8 rounded-full flex items-center justify-center"
+				style="background-color: {getAvatarColor(user.displayName || user.email)}"
+			>
+			  <span class="text-sm font-semibold text-white">{getAvatarLetter(user.displayName || user.email)}</span>
 			</div>
 		  {/if}
 		  <span class="text-sm font-medium hidden md:block">{user.displayName || user.email}</span>

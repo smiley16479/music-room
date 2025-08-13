@@ -16,6 +16,7 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { PlaylistTrackWithDetails } from './playlist.service';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
+import { UserService } from 'src/user/user.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
 
@@ -44,7 +45,10 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
   private readonly logger = new Logger(PlaylistGateway.name);
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private userService: UserService,
+  ) {}
 
   afterInit(server: Server) {
     this.logger.log('Playlists WebSocket Gateway initialized');
@@ -65,6 +69,17 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       const payload = this.jwtService.verify(token);
       client.userId = payload.sub;
 
+      // Fetch user data
+      if (client.userId) {
+        try {
+          const user = await this.userService.findById(client.userId);
+          client.user = user;
+        } catch (error) {
+          this.logger.warn(`Could not fetch user data for ${client.userId}: ${error.message}`);
+          // Continue without user data - we have the userId at least
+        }
+      }
+
       this.logger.log(`Client connected: ${client.id} (User: ${client.userId})`);
     } catch (error) {
       this.logger.warn(`Connection rejected: Invalid token - ${error.message}`);
@@ -73,6 +88,23 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   handleDisconnect(client: AuthenticatedSocket) {
+    // If the client was in a playlist room, notify others and update participants list
+    if (client.data?.playlistId) {
+      const playlistId = client.data.playlistId;
+      const room = SOCKET_ROOMS.PLAYLIST(playlistId);
+      
+      // Notify other collaborators
+      client.to(room).emit('collaborator-left', {
+        playlistId,
+        userId: client.userId,
+        socketId: client.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Send updated participants list
+      this.sendParticipantsList(playlistId);
+    }
+
     this.logger.log(`Client disconnected: ${client.id} (User: ${client.userId})`);
   }
 
@@ -103,6 +135,9 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         timestamp: new Date().toISOString(),
       });
 
+      // Send updated participants list to all users in the room
+      await this.sendParticipantsList(playlistId);
+
       client.emit('joined-playlist', { playlistId, room });
       this.logger.log(`User ${client.userId} joined playlist ${playlistId}`);
     } catch (error) {
@@ -131,10 +166,30 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         timestamp: new Date().toISOString(),
       });
 
+      // Send updated participants list to remaining users
+      await this.sendParticipantsList(playlistId);
+
       client.emit('left-playlist', { playlistId });
       this.logger.log(`User ${client.userId} left playlist ${playlistId}`);
     } catch (error) {
       client.emit('error', { message: 'Failed to leave playlist', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('get-participants')
+  async handleGetParticipants(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { playlistId }: { playlistId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      await this.sendParticipantsList(playlistId, client);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to get participants', details: error.message });
     }
   }
 
@@ -456,6 +511,72 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   // Utility methods
+  async sendParticipantsList(playlistId: string, targetClient?: AuthenticatedSocket) {
+    try {
+      const room = SOCKET_ROOMS.PLAYLIST(playlistId);
+      const sockets = await this.server.in(room).fetchSockets();
+      
+      // Get unique user IDs from sockets
+      const userIds = Array.from(new Set(
+        sockets
+          .map(socket => (socket as unknown as AuthenticatedSocket).userId)
+          .filter(userId => userId !== undefined)
+      ));
+      
+      // Fetch complete user data from database for all participants
+      const participantPromises = userIds.map(async (userId) => {
+        try {
+          const user = await this.userService.findById(userId);
+          const userSockets = sockets.filter(s => (s as unknown as AuthenticatedSocket).userId === userId);
+          
+          return userSockets.map(socket => {
+            const authSocket = socket as unknown as AuthenticatedSocket;
+            return {
+              userId: authSocket.userId,
+              socketId: authSocket.id,
+              joinedAt: authSocket.data?.joinedAt || new Date().toISOString(),
+              displayName: user.displayName || user.email?.split('@')[0] || `User ${userId.slice(-8)}`,
+              avatarUrl: user.avatarUrl || null,
+            };
+          });
+        } catch (error) {
+          // If user not found, create fallback data
+          const userSockets = sockets.filter(s => (s as unknown as AuthenticatedSocket).userId === userId);
+          return userSockets.map(socket => {
+            const authSocket = socket as unknown as AuthenticatedSocket;
+            return {
+              userId: authSocket.userId,
+              socketId: authSocket.id,
+              joinedAt: authSocket.data?.joinedAt || new Date().toISOString(),
+              displayName: `User ${userId.slice(-8)}`,
+              avatarUrl: null,
+            };
+          });
+        }
+      });
+      
+      const participantArrays = await Promise.all(participantPromises);
+      const participants = participantArrays.flat();
+
+      const participantsData = {
+        playlistId,
+        participants,
+      };
+
+      if (targetClient) {
+        // Send to specific client
+        targetClient.emit('participants-list', participantsData);
+      } else {
+        // Send to all clients in the room
+        this.server.to(room).emit('participants-list', participantsData);
+      }
+
+      this.logger.log(`Sent participants list for playlist ${playlistId}: ${participants.length} participants`);
+    } catch (error) {
+      this.logger.error(`Failed to send participants list for playlist ${playlistId}:`, error);
+    }
+  }
+
   async getPlaylistCollaborators(playlistId: string): Promise<string[]> {
     const room = SOCKET_ROOMS.PLAYLIST(playlistId);
     const sockets = await this.server.in(room).fetchSockets();

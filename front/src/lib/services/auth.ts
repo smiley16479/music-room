@@ -15,6 +15,27 @@ export interface User {
   id: string;
   email: string;
   displayName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  birthDate?: string;
+  location?: string;
+  googleId?: string;
+  facebookId?: string;
+  emailVerified?: boolean;
+  displayNameVisibility?: 'public' | 'friends' | 'private';
+  bioVisibility?: 'public' | 'friends' | 'private';
+  birthDateVisibility?: 'public' | 'friends' | 'private';
+  locationVisibility?: 'public' | 'friends' | 'private';
+  musicPreferences?: {
+    favoriteGenres?: string[];
+    favoriteArtists?: string[];
+    dislikedGenres?: string[];
+  };
+  connectedAccounts?: {
+    google?: boolean;
+    facebook?: boolean;
+  };
+  // Legacy fields for backward compatibility
   profilePicture?: string;
   publicInfo?: {
     displayName: string;
@@ -30,16 +51,6 @@ export interface User {
     phoneNumber?: string;
     birthDate?: string;
   };
-  musicPreferences?: {
-    favoriteGenres?: string[];
-    favoriteArtists?: string[];
-    listeningHabits?: string;
-  };
-  connectedAccounts?: {
-    google?: boolean;
-    facebook?: boolean;
-  };
-  isEmailVerified?: boolean;
 }
 
 export interface AuthResponse {
@@ -225,8 +236,8 @@ export const authService = {
     const token = localStorage.getItem('accessToken');
     if (!token) throw new Error('Not authenticated');
 
-    const response = await fetch(`${config.apiUrl}/api/user/profile`, {
-      method: 'PUT',
+    const response = await fetch(`${config.apiUrl}/api/users/me`, {
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
@@ -247,25 +258,6 @@ export const authService = {
     }
   },
 
-  async linkSocialAccount(provider: 'google' | 'facebook', token: string): Promise<void> {
-    const authToken = localStorage.getItem('accessToken');
-    if (!authToken) throw new Error('Not authenticated');
-
-    const response = await fetch(`${config.apiUrl}/api/auth/link-${provider}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
-      },
-      body: JSON.stringify({ [`${provider}Token`]: token })
-    });
-
-    if (!response.ok) {
-      const result = await response.json();
-      throw new Error(result.message || `Failed to link ${provider} account`);
-    }
-  },
-
   async unlinkSocialAccount(provider: 'google' | 'facebook'): Promise<void> {
     const authToken = localStorage.getItem('accessToken');
     if (!authToken) throw new Error('Not authenticated');
@@ -280,6 +272,25 @@ export const authService = {
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || `Failed to unlink ${provider} account`);
+    }
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const token = localStorage.getItem('accessToken');
+    if (!token) throw new Error('Not authenticated');
+
+    const response = await fetch(`${config.apiUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Password change failed');
     }
   },
 

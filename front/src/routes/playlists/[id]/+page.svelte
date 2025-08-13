@@ -4,11 +4,15 @@
 </svelte:head>
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { authStore } from '$lib/stores/auth';
 	import { playlistsService, type Playlist, type PlaylistTrack } from '$lib/services/playlists';
+	import { getAvatarColor, getAvatarLetter } from '$lib/utils/avatar';
+	import { socketService } from '$lib/services/socket';
+	import { participantsService } from '$lib/stores/participants';
 	import { goto } from '$app/navigation';
+	import ParticipantsList from '$lib/components/ParticipantsList.svelte';
 
 	// Get initial data from load function
 	let { data } = $props();
@@ -20,6 +24,9 @@
 	let showAddTrackModal = $state(false);
 	let showAddCollaboratorModal = $state(false);
 	let draggedIndex: number | null = null;
+
+	// Socket connection state
+	let isSocketConnected = $state(false);
 
 	// Add track form
 	let newTrack = $state({
@@ -38,12 +45,78 @@
 	const playlistId = $derived($page.params.id);
 
 	onMount(() => {
-		// User is now available through the reactive store
-		loadPlaylist();
-		// Set up real-time updates
-		const interval = setInterval(loadPlaylist, 10000);
-		return () => clearInterval(interval);
+		// Async initialization function
+		const initializePlaylist = async () => {
+			// Load playlist first
+			await loadPlaylist();
+
+			// Set up socket connection for real-time features
+			if (playlistId && user) {
+				await setupSocketConnection(playlistId);
+			}
+		};
+
+		// Call initialization
+		initializePlaylist();
+
+		// Set up real-time updates via WebSocket only
+		// Polling removed - real-time updates handled by socket events
+		
+		// Return cleanup function
+		return () => {
+			if (playlistId && isSocketConnected) {
+				cleanupSocketConnection(playlistId);
+			}
+		};
 	});
+
+	onDestroy(() => {
+		// Clean up socket connection when leaving the page
+		if (playlistId && isSocketConnected) {
+			cleanupSocketConnection(playlistId);
+		}
+	});
+
+	async function setupSocketConnection(playlistId: string) {
+		try {
+			if (!socketService.isConnected()) {
+				await socketService.connect();
+			}
+
+			// Set up participant listeners
+			socketService.setupParticipantListeners(playlistId);
+
+			// Join the playlist room
+			socketService.joinPlaylist(playlistId);
+
+			// Request current participants list
+			socketService.requestParticipantsList(playlistId);
+
+			isSocketConnected = true;
+			console.log('Socket connected and joined playlist room');
+		} catch (err) {
+			console.error('Failed to set up socket connection:', err);
+			error = 'Failed to connect to real-time updates';
+		}
+	}
+
+	function cleanupSocketConnection(playlistId: string) {
+		try {
+			// Leave the playlist room
+			socketService.leavePlaylist(playlistId);
+
+			// Clean up event listeners
+			socketService.cleanupParticipantListeners();
+
+			// Clear participants from store
+			participantsService.clearParticipants(playlistId);
+
+			isSocketConnected = false;
+			console.log('Socket connection cleaned up');
+		} catch (err) {
+			console.error('Failed to clean up socket connection:', err);
+		}
+	}
 
 	async function loadPlaylist() {
 		if (!playlistId) return;
@@ -245,7 +318,7 @@
 					
 					<div>
 						<span class="font-medium">Collaborators:</span>
-						<span class="ml-1">{playlist.collaborators.length}</span>
+						<span class="ml-1">{playlist.collaborators.length + 1}</span>
 					</div>
 					
 					<div>
@@ -268,7 +341,7 @@
 					onclick={() => showAddCollaboratorModal = true}
 					class="border border-secondary text-secondary px-4 py-2 rounded-lg hover:bg-secondary/10 transition-colors"
 				>
-					Add Collaborator
+					Invite Collaborators
 				</button>
 				{/if}
 				</div>
@@ -283,11 +356,19 @@
 	</div>
 	{/if}
 
-	<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+	<div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
 		<!-- Tracks -->
-		<div class="lg:col-span-2">
+		<div class="lg:col-span-3">
 			<div class="bg-white rounded-lg shadow-md p-6">
-				<h2 class="text-xl font-bold text-gray-800 mb-6">Tracks</h2>
+				<div class="flex justify-between items-center mb-6">
+					<h2 class="text-xl font-bold text-gray-800">Tracks</h2>
+					{#if isSocketConnected}
+						<div class="flex items-center text-sm text-green-600">
+							<div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+							Live
+						</div>
+					{/if}
+				</div>
 				
 				{#if !playlist.tracks || playlist.tracks.length === 0}
 				<div class="text-center py-8">
@@ -360,16 +441,25 @@
 			</div>
 		</div>
 		
-		<!-- Collaborators -->
-		<div class="lg:col-span-1">
+		<!-- Sidebar -->
+		<div class="lg:col-span-1 space-y-6">
+			<!-- Real-time Participants -->
+			{#if isSocketConnected && playlistId}
+				<ParticipantsList {playlistId} />
+			{/if}
+			
+			<!-- Static Collaborators -->
 			<div class="bg-white rounded-lg shadow-md p-6">
 				<h2 class="text-xl font-bold text-gray-800 mb-4">Collaborators ({playlist.collaborators.length + 1})</h2>
 				
 				<div class="space-y-3">
 					<!-- Owner -->
 					<div class="flex items-center space-x-3">
-						<div class="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center">
-							<span class="text-sm font-semibold">{(playlist.creator?.displayName || 'U').charAt(0)}</span>
+						<div 
+							class="w-10 h-10 rounded-full flex items-center justify-center"
+							style="background-color: {getAvatarColor(playlist.creator?.displayName || 'Unknown')}"
+						>
+							<span class="text-sm font-semibold text-white">{getAvatarLetter(playlist.creator?.displayName || 'Unknown')}</span>
 						</div>
 						
 						<div class="flex-1">
@@ -381,8 +471,11 @@
 					<!-- Collaborators -->
 					{#each playlist.collaborators as collaborator}
 					<div class="flex items-center space-x-3">
-						<div class="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
-							<span class="text-sm font-semibold">{collaborator.displayName.charAt(0)}</span>
+						<div 
+							class="w-10 h-10 rounded-full flex items-center justify-center"
+							style="background-color: {getAvatarColor(collaborator.displayName)}"
+						>
+							<span class="text-sm font-semibold text-white">{getAvatarLetter(collaborator.displayName)}</span>
 						</div>
 						
 						<div class="flex-1">

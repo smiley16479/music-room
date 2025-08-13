@@ -12,9 +12,13 @@ import {
   Logger,
   BadRequestException,
   UnauthorizedException,
+  Inject,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { UserService } from '../user/user.service';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -24,6 +28,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { FacebookAuthGuard } from './guards/facebook-auth.guard';
+import { GoogleLinkAuthGuard } from './guards/google-link-auth.guard';
+import { FacebookLinkAuthGuard } from './guards/facebook-link-auth.guard';
 
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -38,7 +44,12 @@ import { ApiOperation, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
 export class AuthController {
 
   private readonly logger = new Logger(AuthController.name);
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly userService: UserService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Public()
   @Post('register')
@@ -252,6 +263,52 @@ export class AuthController {
   async googleAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
     this.logger.log(`googleAuthCallback`);
     try {
+      const user = req.user;
+      
+      // Check if this is a linking request (from the strategy)
+      if (user.linkingMode === 'link' && user.linkingToken) {
+        // This is a linking flow
+        try {
+          // Verify the user token
+          const payload = this.jwtService.verify(user.linkingToken, { 
+            secret: this.configService.get<string>('JWT_SECRET') 
+          });
+          const currentUser = await this.userService.findByEmail(payload.email);
+          
+          if (!currentUser) {
+            throw new UnauthorizedException('User not found');
+          }
+          
+          // Link the Google account
+          await this.authService.linkGoogleProfile(currentUser, user);
+          
+          // Send success message to parent window (popup)
+          res.send(`
+            <script>
+              window.opener.postMessage({
+                type: 'OAUTH_SUCCESS',
+                provider: 'google'
+              }, window.location.origin);
+              window.close();
+            </script>
+          `);
+          return;
+        } catch (linkError) {
+          // Send error message to parent window (popup)
+          res.send(`
+            <script>
+              window.opener.postMessage({
+                type: 'OAUTH_ERROR',
+                error: '${linkError.message || 'Failed to link Google account'}'
+              }, window.location.origin);
+              window.close();
+            </script>
+          `);
+          return;
+        }
+      }
+      
+      // Regular login flow
       const result = await this.authService.googleLogin(req.user);
       console.log('Google login successful:', result);
 
@@ -316,6 +373,52 @@ export class AuthController {
   })
   async facebookAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
     try {
+      const user = req.user;
+      
+      // Check if this is a linking request (from the strategy)
+      if (user.linkingMode === 'link' && user.linkingToken) {
+        // This is a linking flow
+        try {
+          // Verify the user token
+          const payload = this.jwtService.verify(user.linkingToken, { 
+            secret: this.configService.get<string>('JWT_SECRET') 
+          });
+          const currentUser = await this.userService.findByEmail(payload.email);
+          
+          if (!currentUser) {
+            throw new UnauthorizedException('User not found');
+          }
+          
+          // Link the Facebook account
+          await this.authService.linkFacebookProfile(currentUser, user);
+          
+          // Send success message to parent window (popup)
+          res.send(`
+            <script>
+              window.opener.postMessage({
+                type: 'OAUTH_SUCCESS',
+                provider: 'facebook'
+              }, window.location.origin);
+              window.close();
+            </script>
+          `);
+          return;
+        } catch (linkError) {
+          // Send error message to parent window (popup)
+          res.send(`
+            <script>
+              window.opener.postMessage({
+                type: 'OAUTH_ERROR',
+                error: '${linkError.message || 'Failed to link Facebook account'}'
+              }, window.location.origin);
+              window.close();
+            </script>
+          `);
+          return;
+        }
+      }
+      
+      // Regular login flow
       const result = await this.authService.facebookLogin(req.user);
       
       // Redirect to frontend with tokens and minimal user data
@@ -386,9 +489,18 @@ export class AuthController {
       throw new UnauthorizedException('User not found');
     }
     
+    // Transform user data to include connectedAccounts
+    const userWithConnectedAccounts = {
+      ...user,
+      connectedAccounts: {
+        google: !!user.googleId,
+        facebook: !!user.facebookId,
+      }
+    };
+    
     return {
       success: true,
-      data: user,
+      data: userWithConnectedAccounts,
       timestamp: new Date().toISOString(),
     };
   }
@@ -409,62 +521,6 @@ export class AuthController {
     };
   }
 
-  @Post('link-google')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({
-    summary: 'Link Google account',
-    description: 'Links the current user account with a Google account',
-  })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        googleToken: {
-          type: 'string',
-          description: 'Google authentication token',
-          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-        }
-      },
-      required: ['googleToken']
-    }
-  })
-  async linkGoogle(@CurrentUser() user: User, @Body() { googleToken }: { googleToken: string }) {
-    // TODO: Implement linking existing account with Google
-    return {
-      success: true,
-      message: 'Google account linked successfully',
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  @Post('link-facebook')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({
-    summary: 'Link Facebook account',
-    description: 'Links the current user account with a Facebook account',
-  })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        facebookToken: {
-          type: 'string',
-          description: 'Facebook authentication token',
-          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
-        }
-      },
-      required: ['facebookToken']
-    }
-  })
-  async linkFacebook(@CurrentUser() user: User, @Body() { facebookToken }: { facebookToken: string }) {
-    // TODO: Implement linking existing account with Facebook
-    return {
-      success: true,
-      message: 'Facebook account linked successfully',
-      timestamp: new Date().toISOString(),
-    };
-  }
-
   @Post('unlink-google')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({
@@ -472,12 +528,16 @@ export class AuthController {
     description: 'Removes the link between the current user account and their Google account',
   })
   async unlinkGoogle(@CurrentUser() user: User) {
-    // TODO: Implement unlinking Google account
-    return {
-      success: true,
-      message: 'Google account unlinked successfully',
-      timestamp: new Date().toISOString(),
-    };
+    try {
+      await this.authService.unlinkGoogleAccount(user);
+      return {
+        success: true,
+        message: 'Google account unlinked successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message || 'Failed to unlink Google account');
+    }
   }
 
   @Post('unlink-facebook')
@@ -487,11 +547,162 @@ export class AuthController {
     description: 'Removes the link between the current user account and their Facebook account',
   })
   async unlinkFacebook(@CurrentUser() user: User) {
-    // TODO: Implement unlinking Facebook account
-    return {
-      success: true,
-      message: 'Facebook account unlinked successfully',
-      timestamp: new Date().toISOString(),
-    };
+    try {
+      await this.authService.unlinkFacebookAccount(user);
+      return {
+        success: true,
+        message: 'Facebook account unlinked successfully',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      throw new BadRequestException(error.message || 'Failed to unlink Facebook account');
+    }
+  }
+
+  // Dedicated OAuth linking endpoints
+  @Get('google/link')
+  @UseGuards(GoogleLinkAuthGuard)
+  @ApiOperation({
+    summary: 'Google OAuth linking initiation',
+    description: 'Initiates Google OAuth flow specifically for account linking',
+  })
+  async googleLink(@Query('token') token: string, @Req() req: any) {
+    // The token will be passed through the OAuth state parameter
+    // The guard will handle the OAuth flow initiation
+    console.log('Google link endpoint reached with token:', token ? 'token present' : 'no token');
+  }
+
+  @Get('google/link-callback')
+  @UseGuards(GoogleLinkAuthGuard)
+  @ApiOperation({
+    summary: 'Google OAuth linking callback',
+    description: 'Handles the Google OAuth callback for account linking',
+  })
+  async googleLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+    console.log('Google link callback reached');
+    try {
+      const user = req.user;
+      console.log('User object:', user);
+      
+      if (!user.linkingToken) {
+        console.log('Missing linking token');
+        throw new UnauthorizedException('Missing authentication token for linking');
+      }
+      
+      // Verify the user token
+      console.log('Verifying linking token...');
+      const payload = this.jwtService.verify(user.linkingToken, { 
+        secret: this.configService.get<string>('JWT_SECRET') 
+      });
+      console.log('Token payload:', payload);
+      const currentUser = await this.userService.findByEmail(payload.email);
+      
+      if (!currentUser) {
+        console.log('User not found for email:', payload.email);
+        throw new UnauthorizedException('User not found');
+      }
+      
+      // Link the Google account
+      console.log('Linking Google account...');
+      await this.authService.linkGoogleProfile(currentUser, user);
+      console.log('Google account linked successfully');
+      console.log('Google account linked successfully');
+      
+      // Send success message to parent window (popup)
+      res.send(`
+        <script>
+          window.opener.postMessage({
+            type: 'OAUTH_SUCCESS',
+            provider: 'google'
+          }, '*');
+          setTimeout(() => window.close(), 500);
+        </script>
+      `);
+    } catch (error) {
+      console.log('Google link callback error:', error);
+      // Send error message to parent window (popup)
+      res.send(`
+        <script>
+          window.opener.postMessage({
+            type: 'OAUTH_ERROR',
+            error: '${error.message || 'Failed to link Google account'}'
+          }, '*');
+          setTimeout(() => window.close(), 500);
+        </script>
+      `);
+    }
+  }
+
+  @Get('facebook/link')
+  @UseGuards(FacebookLinkAuthGuard)
+  @ApiOperation({
+    summary: 'Facebook OAuth linking initiation',
+    description: 'Initiates Facebook OAuth flow specifically for account linking',
+  })
+  async facebookLink(@Query('token') token: string, @Req() req: any) {
+    // The token will be passed through the OAuth state parameter
+    // The guard will handle the OAuth flow initiation
+    console.log('Facebook link endpoint reached with token:', token ? 'token present' : 'no token');
+  }
+
+  @Get('facebook/link-callback')
+  @UseGuards(FacebookLinkAuthGuard)
+  @ApiOperation({
+    summary: 'Facebook OAuth linking callback',
+    description: 'Handles the Facebook OAuth callback for account linking',
+  })
+  async facebookLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+    console.log('Facebook link callback reached');
+    try {
+      const user = req.user;
+      console.log('User object:', user);
+      
+      if (!user.linkingToken) {
+        console.log('Missing linking token');
+        throw new UnauthorizedException('Missing authentication token for linking');
+      }
+      
+      // Verify the user token
+      console.log('Verifying linking token...');
+      const payload = this.jwtService.verify(user.linkingToken, { 
+        secret: this.configService.get<string>('JWT_SECRET') 
+      });
+      console.log('Token payload:', payload);
+      const currentUser = await this.userService.findByEmail(payload.email);
+      
+      if (!currentUser) {
+        console.log('User not found for email:', payload.email);
+        throw new UnauthorizedException('User not found');
+      }
+      
+      // Link the Facebook account
+      console.log('Linking Facebook account...');
+      await this.authService.linkFacebookProfile(currentUser, user);
+      console.log('Facebook account linked successfully');
+      console.log('Facebook account linked successfully');
+      
+      // Send success message to parent window (popup)
+      res.send(`
+        <script>
+          window.opener.postMessage({
+            type: 'OAUTH_SUCCESS',
+            provider: 'facebook'
+          }, '*');
+          setTimeout(() => window.close(), 500);
+        </script>
+      `);
+    } catch (error) {
+      console.log('Facebook link callback error:', error);
+      // Send error message to parent window (popup)
+      res.send(`
+        <script>
+          window.opener.postMessage({
+            type: 'OAUTH_ERROR',
+            error: '${error.message || 'Failed to link Facebook account'}'
+          }, '*');
+          setTimeout(() => window.close(), 500);
+        </script>
+      `);
+    }
   }
 }

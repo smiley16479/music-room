@@ -4,11 +4,11 @@ import { Strategy, Profile } from 'passport-facebook';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
-export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
+export class FacebookLinkStrategy extends PassportStrategy(Strategy, 'facebook-link') {
   constructor(private configService: ConfigService) {
     const clientID = configService.get<string>('FACEBOOK_APP_ID');
     const clientSecret = configService.get<string>('FACEBOOK_APP_SECRET');
-    const callbackURL = configService.get<string>('FACEBOOK_CALLBACK_URL');
+    const callbackURL = configService.get<string>('FACEBOOK_LINK_CALLBACK_URL');
     
     if (!clientID || !clientSecret || !callbackURL) {
       throw new Error('Missing Facebook OAuth configuration');
@@ -20,7 +20,7 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
       callbackURL,
       scope: 'email',
       profileFields: ['emails', 'name', 'picture.type(large)'],
-      passReqToCallback: true, // This allows us to access the request in validate
+      passReqToCallback: true,
     });
   }
 
@@ -31,7 +31,14 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
     profile: Profile,
     done: (err: any, user: any, info?: any) => void,
   ): Promise<any> {
+    console.log('Facebook link strategy validate reached');
+    console.log('Profile:', profile);
+    console.log('Request query:', req.query);
+    
     const { id, name, emails, photos } = profile;
+    
+    // Get the token from the state parameter (passed through OAuth flow)
+    const linkingToken = req.query.state;
     
     const user = {
       id,
@@ -39,11 +46,12 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
       name: `${name?.givenName} ${name?.familyName}`,
       picture: photos?.[0],
       accessToken,
-      // Pass through linking information from the original request
-      linkingMode: req.query?.mode,
-      linkingToken: req.query?.token,
+      // This strategy is specifically for linking
+      isLinking: true,
+      linkingToken: linkingToken,
     };
     
+    console.log('Facebook link user object:', user);
     done(null, user);
   }
 }
