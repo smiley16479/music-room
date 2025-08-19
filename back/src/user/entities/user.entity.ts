@@ -144,6 +144,9 @@ export class User {
   @ManyToMany(() => Event, (event) => event.participants)
   participatedEvents: Event[];
 
+  @ManyToMany(() => Event, (event) => event.admins)
+  adminOfEvents: Event[];
+
   // Many-to-many for collaborated playlists
   @ManyToMany(() => Playlist, (playlist) => playlist.collaborators)
   collaboratedPlaylists: Playlist[];

@@ -3,13 +3,30 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { EventService } from 'src/event/event.service';
+import { PlaylistService } from 'src/playlist/playlist.service';
+import { DeviceService } from 'src/device/device.service';
+import { UserService } from 'src/user/user.service';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(
+    private reflector: Reflector,
+    // Injection des services
+    @Inject(forwardRef(() => EventService))
+    private eventService: EventService,
+    @Inject(forwardRef(() => PlaylistService))
+    private playlistService: PlaylistService,
+    @Inject(forwardRef(() => DeviceService))
+    private deviceService: DeviceService,
+    @Inject(forwardRef(() => UserService))
+    private userService: UserService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const requiredPermissions = this.reflector.getAllAndOverride<string[]>(

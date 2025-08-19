@@ -5,6 +5,8 @@ import {
   ConflictException,
   NotFoundException,
   Logger,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -85,11 +87,14 @@ export class AuthService {
       throw new UnauthorizedException('Email or password is incorrect');
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Email or password is incorrect');
-    }
+    console.log(email, password, user, loginDto);
+    
+    // ATTENTION REMMETRE POUR DEV
+    // // Verify password
+    // const isPasswordValid = await bcrypt.compare(password, user.password);
+    // if (!isPasswordValid) {
+    //   throw new UnauthorizedException('Email or password is incorrect');
+    // }
 
     // Update last seen
     await this.userService.updateLastSeen(user.id);
@@ -104,59 +109,135 @@ export class AuthService {
     };
   }
 
-  /** verifyGoogleCode pour IOS en mode oauth Manuel (pas de SDK) */
-  async verifyGoogleCode(code: string) {
-    // 1. Échanger le code contre un access token Google
+/** verifyGoogleCode pour IOS en mode oauth Manuel (pas de SDK) */
+async verifyGoogleCodeMobile(
+  code: string, 
+  redirectUri: string,
+  platform: 'ios' | 'android'
+) {
+  this.logger.debug(`Verifying Google code for ${platform}`);
+  
+  // Sélectionner le bon client selon la plateforme
+  const clientId = platform === 'ios' 
+    ? this.configService.get('GOOGLE_IOS_CLIENT_ID')  // Client ID iOS
+    : this.configService.get('GOOGLE_ANDROID_CLIENT_ID'); // Client ID Android
 
-    this.logger.debug('verifyGoogleCode')
-
-    console.log('🔍 Debug Google token exchange:');
-    console.log('Client ID:', this.configService.get('GOOGLE_WEB_CLIENT_ID'));
-    console.log('Client Secret exists:', this.configService.get('GOOGLE_CLIENT_SECRET'));
-    console.log('Code:', code);
-    console.log('Redirect URI:', 'com.googleusercontent.apps.734605703797-duvg1eiupfeva2njit9chbpq0bvmstke://');
-
-    try {
-      const tokenResponse = await firstValueFrom(
-          this.httpService.post('https://oauth2.googleapis.com/token', {
-              client_id: this.configService.get('GOOGLE_WEB_CLIENT_ID'),
-              client_secret: this.configService.get('GOOGLE_CLIENT_SECRET'),
-              code: code,
-              grant_type: 'authorization_code',
-              redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' // 'http://localhost' // 'com.googleusercontent.apps.734605703797-duvg1eiupfeva2njit9chbpq0bvmstke://'
-          })
-      );
-
-
-      const { access_token } = tokenResponse.data;
-      this.logger.debug('verifyGoogleCode1')
-
-      // 2. Utiliser l'access token pour récupérer les infos utilisateur
-      const userResponse = await firstValueFrom(
-          this.httpService.get('https://www.googleapis.com/oauth2/v2/userinfo', {
-              headers: { Authorization: `Bearer ${access_token}` }
-          })
-      );
-
-      console.log("verifyGoogleCode userResponse.data:", userResponse.data);
-      // 3. Formater comme votre GoogleStrategy le fait
-      const googleUser = userResponse.data;
-      return {
-          id: googleUser.id,
-          email: googleUser.email,
-          name: googleUser.name,
-          picture: googleUser.picture,
-          accessToken: access_token
+  // Pour iOS, pas besoin de client_secret
+  // Pour Android/Web, il faut le client_secret
+  const tokenRequestBody: any = {
+    code: code,
+    client_id: clientId,
+    grant_type: 'authorization_code',
+    redirect_uri: redirectUri
+  };
+  
+  // iOS n'a pas de client_secret (client public)
+  // Seuls les clients web/android en ont un
+  if (platform === 'android') {
+    tokenRequestBody.client_secret = this.configService.get('GOOGLE_CLIENT_SECRET');
+  }
+  
+  console.log('🔍 Token exchange request:', {
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    has_secret: !!tokenRequestBody.client_secret,
+    platform: platform
+  });
+  
+  try {
+    // 1. Échanger le code contre des tokens
+    const tokenResponse = await firstValueFrom(
+      this.httpService.post(
+        'https://oauth2.googleapis.com/token',
+        tokenRequestBody,
+        {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      )
+    );
+    
+    const { access_token, refresh_token, id_token } = tokenResponse.data;
+    
+    this.logger.debug('✅ Token exchange successful');
+    
+    // 2. Décoder l'ID token pour obtenir les infos utilisateur
+    // ou utiliser l'API userinfo
+    let userInfo;
+    
+    if (id_token) {
+      // Méthode 1: Décoder l'ID token (plus rapide)
+      const decoded = this.decodeJWT(id_token);
+      userInfo = {
+        id: decoded.sub,
+        email: decoded.email,
+        name: decoded.name,
+        picture: decoded.picture
       };
-    } catch (error) {
-        console.error('❌ Google token exchange error:');
-        console.error('Status:', error.response?.status);
-        console.error('Data:', error.response?.data);
-        console.error('Message:', error.message);
-        throw error;
+    } else {
+      // Méthode 2: Appeler l'API userinfo
+      const userResponse = await firstValueFrom(
+        this.httpService.get(
+          'https://www.googleapis.com/oauth2/v2/userinfo',
+          {
+            headers: { 
+              Authorization: `Bearer ${access_token}` 
+            }
+          }
+        )
+      );
+      userInfo = userResponse.data;
     }
+    
+    console.log('✅ User info retrieved:', userInfo.email);
+    
+    // 3. Retourner les infos formatées
+    return {
+      id: userInfo.id || userInfo.sub,
+      email: userInfo.email,
+      name: userInfo.name,
+      picture: userInfo.picture,
+      accessToken: access_token,
+      refreshToken: refresh_token
+    };
+    
+  } catch (error) {
+    console.error('❌ Google token exchange error:');
+    console.error('Status:', error.response?.status);
+    console.error('Error:', error.response?.data);
+    console.error('Message:', error.message);
+    
+    // Logger les détails pour debug
+    if (error.response?.data?.error) {
+      this.logger.error(`Google OAuth error: ${error.response.data.error}`);
+      this.logger.error(`Description: ${error.response.data.error_description}`);
+    }
+    
+    throw new HttpException(
+      error.response?.data || { message: 'Failed to verify Google code' },
+      error.response?.status || HttpStatus.BAD_REQUEST
+    );
+  }
 }
 
+// Fonction helper pour décoder un JWT sans vérification
+// (l'ID token vient directement de Google, donc on peut lui faire confiance)
+private decodeJWT(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format');
+    }
+    
+    const payload = parts[1];
+    const decoded = Buffer.from(payload, 'base64').toString('utf-8');
+    return JSON.parse(decoded);
+  } catch (error) {
+    this.logger.error('Failed to decode JWT:', error);
+    return null;
+  }
+}
 
   /** Récupère le user en fonction de son googleUser.id et renvoie les acces et refreshToken */
   async googleLogin(googleUser: any): Promise<AuthResult> {

@@ -25,6 +25,7 @@ import { PERMISSIONS } from '../common/constants/permissions';
 
 import { User } from './entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { MusicPreferencesDto } from './dto/music-preferences.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -228,6 +229,19 @@ export class UserController {
     return {
       success: true,
       data: users,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Patch('me/preferences')
+  async updatePreferences(
+    @CurrentUser() user: User,
+    @Body() preferences: MusicPreferencesDto,
+  ) {
+    const userData = await this.userService.updateMusicPreferences(user.id, preferences);
+    return {
+      success: true,
+      data: userData,
       timestamp: new Date().toISOString(),
     };
   }

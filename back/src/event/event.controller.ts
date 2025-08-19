@@ -92,10 +92,13 @@ export class EventController {
     const { page, limit, skip } = paginationDto;
     
     // This would be a separate method in the service for user's event
+    const events = await this.eventService.getEventsUserCanInvite(user.id);
+
     return {
       success: true,
       message: 'User event retrieved successfully',
       timestamp: new Date().toISOString(),
+      data: events
     };
   }
 
@@ -226,6 +229,37 @@ export class EventController {
     return {
       success: true,
       message: 'Successfully left the event',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /** TO DO: permissions */
+  @Delete(':id/participant/:userId')
+  @ApiOperation({
+    summary: 'Remove participant from event',
+    description: 'Allows an event admin to remove a participant from the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'The ID of the user to remove',
+    required: true
+  })
+  async removeParticipantByAdmin(
+    @Param('id') eventId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() admin: User,
+  ) {
+    await this.eventService.removeParticipant(eventId, userId);
+    return {
+      success: true,
+      message: 'Participant removed successfully',
       timestamp: new Date().toISOString(),
     };
   }
