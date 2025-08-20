@@ -133,7 +133,7 @@ export class Event {
   })
   participants: User[];
 
-  @ManyToMany(() => User)
+  @ManyToMany(() => User, (user) => user.adminOfEvents)
   @JoinTable({
     name: 'event_admins',
     joinColumn: { name: 'event_id', referencedColumnName: 'id' },

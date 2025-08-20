@@ -192,17 +192,26 @@ export class PlaylistService {
     await this.checkEditPermissions(playlist, userId);
 
     // Get or create track
-    const track = await this.trackRepository.findOne({
-      where: { id: addTrackDto.trackId },
+    let track = await this.trackRepository.findOne({
+      where: { deezerId: addTrackDto.deezerId },
     });
 
     if (!track) {
-      throw new NotFoundException('Track not found');
+      track = this.trackRepository.create({
+        deezerId: addTrackDto.deezerId,
+        title: addTrackDto.title,
+        artist: addTrackDto.artist,
+        album: addTrackDto.album,
+        duration: addTrackDto.duration,
+        previewUrl: addTrackDto.previewUrl,
+        albumCoverUrl: addTrackDto.albumCoverUrl,
+      });
+      track = await this.trackRepository.save(track);
     }
 
     // Check if track already exists in playlist
     const existingTrack = await this.playlistTrackRepository.findOne({
-      where: { playlistId, trackId: addTrackDto.trackId },
+      where: { playlistId, trackId: track.id },
     });
 
     if (existingTrack) {
@@ -225,7 +234,7 @@ export class PlaylistService {
     // Create playlist track
     const playlistTrack = this.playlistTrackRepository.create({
       playlistId,
-      trackId: addTrackDto.trackId,
+      trackId: track.id,
       addedById: userId,
       position,
     });
@@ -489,10 +498,12 @@ export class PlaylistService {
 
     // Copy all tracks
     for (const playlistTrack of originalTracks) {
-      await this.addTrack(duplicatePlaylist.id, userId, {
-        trackId: playlistTrack.trackId,
-        position: playlistTrack.position,
-      });
+      await this.addExistingTrackToPlaylist(
+        duplicatePlaylist.id,
+        playlistTrack.track.id,
+        userId,
+        playlistTrack.position
+      );
     }
 
     return this.findById(duplicatePlaylist.id, userId);
@@ -678,5 +689,30 @@ export class PlaylistService {
       totalDuration,
       updatedAt: new Date(),
     });
+  }
+
+  // Ajout d'un track existant à une playlist (pour duplication)
+  private async addExistingTrackToPlaylist(
+    playlistId: string,
+    trackId: string,
+    userId: string,
+    position?: number
+  ) {
+    // Vérifie que le track existe en base
+    const track = await this.trackRepository.findOne({ where: { id: trackId } });
+    if (!track) throw new NotFoundException('Track not found');
+
+    // Vérifie qu'il n'est pas déjà dans la playlist
+    const existingTrack = await this.playlistTrackRepository.findOne({ where: { playlistId, trackId } });
+    if (existingTrack) throw new ConflictException('Track already exists in playlist');
+
+    // Ajoute le track à la playlist
+    const playlistTrack = this.playlistTrackRepository.create({
+      playlistId,
+      trackId,
+      addedById: userId,
+      position,
+    });
+    await this.playlistTrackRepository.save(playlistTrack);
   }
 }

@@ -75,8 +75,8 @@ This is a SwiftUI iOS application for collaborative music experiences, featuring
 
 ### Permissions & Visibility
 - **VisibilityLevel**: public, friendsOnly, private
-- **LicenseType**: public, inviteOnly, locationBased
-- **EventStatus**: draft, active, paused, ended
+- **LicenseType**: open, invited, locationBased
+- **EventStatus**: upcoming, active, paused, ended
 
 ## Real-time Features
 

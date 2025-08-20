@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Data Models
-
 // MARK: - AuthResponse Models
 struct AuthResponse: Codable {
     let accessToken: String
@@ -37,12 +35,9 @@ struct User: Codable, Identifiable {
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        
         id = try container.decode(String.self, forKey: .id)
         email = try container.decode(String.self, forKey: .email)
-        // Ici displayName est obligatoire, mais tu peux définir une valeur par défaut si absent
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? "Unknown"
-        
         avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
         birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate)
@@ -52,11 +47,55 @@ struct User: Codable, Identifiable {
         lastSeen = try container.decodeIfPresent(String.self, forKey: .lastSeen)
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
-        
         displayNameVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .displayNameVisibility)
         bioVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .bioVisibility)
         birthDateVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .birthDateVisibility)
         locationVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .locationVisibility)
+    }
+
+    // Public initializer for manual instantiation and mocks
+    init(
+        id: String,
+        email: String,
+        displayName: String,
+        avatarUrl: String? = nil,
+        bio: String? = nil,
+        birthDate: String? = nil,
+        location: String? = nil,
+        emailVerified: Bool? = nil,
+        musicPreferences: MusicPreferences? = nil,
+        lastSeen: String? = nil,
+        createdAt: String? = nil,
+        updatedAt: String? = nil,
+        displayNameVisibility: VisibilityLevel? = nil,
+        bioVisibility: VisibilityLevel? = nil,
+        birthDateVisibility: VisibilityLevel? = nil,
+        locationVisibility: VisibilityLevel? = nil
+    ) {
+        self.id = id
+        self.email = email
+        self.displayName = displayName
+        self.avatarUrl = avatarUrl
+        self.bio = bio
+        self.birthDate = birthDate
+        self.location = location
+        self.emailVerified = emailVerified
+        self.musicPreferences = musicPreferences
+        self.lastSeen = lastSeen
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.displayNameVisibility = displayNameVisibility
+        self.bioVisibility = bioVisibility
+        self.birthDateVisibility = birthDateVisibility
+        self.locationVisibility = locationVisibility
+    }
+}
+
+extension User {
+    static func mock(id: String = UUID().uuidString) -> User {
+        User(
+            id: id, email: "mock@user.com", displayName: "Mock"
+        )
     }
 }
 
@@ -90,7 +129,7 @@ struct Track: Codable, Identifiable {
     let deezerId: String?
     let title: String
     let artist: String
-    let album: String
+    let album: String?
     let duration: Int // Duration in seconds
     let previewUrl: String?
     let albumCoverUrl: String?
@@ -100,14 +139,70 @@ struct Track: Codable, Identifiable {
     let deezerUrl: String?
     let genres: [String]?
     let releaseDate: String?
-    let available: Bool
-    let createdAt: String
-    let updatedAt: String
+    let available: Bool?
+    let createdAt: String?
+    let updatedAt: String?
+
+    // UI-specific properties (optionnels)
+    var likes: Int?
+    var dislikes: Int?
+    var hasPlayed: Bool?
+    var isCurrentlyPlaying: Bool?
+    var voteScore: Int { (likes ?? 0) - (dislikes ?? 0) }
+    var preview: String? // URL de preview Deezer (30 secondes)
     
     var formattedDuration: String {
         let minutes = duration / 60
         let seconds = duration % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    init(
+        id: String,
+        title: String = "Unknown",
+        artist: String = "Unknown Artist",
+        duration: Int,
+        deezerId: String? = nil,
+        album: String? = nil,
+        previewUrl: String? = nil,
+        albumCoverUrl: String? = nil,
+        albumCoverSmallUrl: String? = nil,
+        albumCoverMediumUrl: String? = nil,
+        albumCoverBigUrl: String? = nil,
+        deezerUrl: String? = nil,
+        genres: [String]? = nil,
+        releaseDate: String? = nil,
+        available: Bool? = nil,
+        createdAt: String? = nil,
+        updatedAt: String? = nil,
+        likes: Int = 0,
+        dislikes: Int = 0,
+        hasPlayed: Bool = false,
+        isCurrentlyPlaying: Bool = false,
+        preview: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+        self.deezerId = deezerId
+        self.album = album
+        self.previewUrl = previewUrl
+        self.albumCoverUrl = albumCoverUrl
+        self.albumCoverSmallUrl = albumCoverSmallUrl
+        self.albumCoverMediumUrl = albumCoverMediumUrl
+        self.albumCoverBigUrl = albumCoverBigUrl
+        self.deezerUrl = deezerUrl
+        self.genres = genres
+        self.releaseDate = releaseDate
+        self.available = available
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.likes = likes
+        self.dislikes = dislikes
+        self.hasPlayed = hasPlayed
+        self.isCurrentlyPlaying = isCurrentlyPlaying
+        self.preview = preview
     }
 }
 
@@ -135,19 +230,44 @@ struct Event: Codable, Identifiable {
     let creatorId: String
     let creator: User?
     let participants: [User]?
-    let playlist: [Track]?
+    let playlist: [Playlist]?
+    
+    // MARK: - Mock Event Data:
+      static let mockEvent: [Event] = [
+          Event(id: "UUID", name: "No Events",
+          description: nil,
+          visibility: VisibilityLevel.public, licenseType: LicenseType.open, status: EventStatus.upcoming,
+          latitude: nil,
+          longitude: nil,
+          locationRadius: nil,
+          locationName: nil,
+          votingStartTime: nil,
+          votingEndTime: nil,
+          eventDate: nil,
+          eventEndDate: nil,
+          currentTrackId: nil,
+          currentTrackStartedAt: nil,
+          maxVotesPerUser: nil,
+          createdAt: "",
+          updatedAt: "",
+          creatorId: "",
+          creator: nil,
+          participants: nil,
+          playlist: nil
+          )
+      ]
 }
 
 enum EventStatus: String, Codable, CaseIterable {
-    case draft = "draft"
-    case active = "active"
+    case upcoming = "upcoming"
+    case active = "live"
     case paused = "paused"
     case ended = "ended"
     
     var localizedString: String {
         switch self {
-        case .draft:
-            return "draft".localized
+        case .upcoming:
+            return "upcoming".localized
         case .active:
             return "active".localized
         case .paused:
@@ -187,6 +307,41 @@ struct Playlist: Codable, Identifiable {
             return String(format: "%d:00", minutes)
         }
     }
+
+    // Custom initializer for easier instantiation
+    init(
+        id: String,
+        name: String = "Untitled Playlist",
+        description: String? = nil,
+        visibility: VisibilityLevel = .public,
+        licenseType: LicenseType = .open,
+        coverImageUrl: String? = nil,
+        isCollaborative: Bool = false,
+        totalDuration: Int? = nil,
+        trackCount: Int = 0,
+        createdAt: String = "",
+        updatedAt: String = "",
+        creatorId: String = "",
+        creator: User? = nil,
+        collaborators: [User]? = nil,
+        tracks: [PlaylistTrack]? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.visibility = visibility
+        self.licenseType = licenseType
+        self.coverImageUrl = coverImageUrl
+        self.isCollaborative = isCollaborative
+        self.totalDuration = totalDuration
+        self.trackCount = trackCount
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.creatorId = creatorId
+        self.creator = creator
+        self.collaborators = collaborators
+        self.tracks = tracks
+    }
 }
 
 struct PlaylistTrack: Codable, Identifiable {
@@ -197,8 +352,30 @@ struct PlaylistTrack: Codable, Identifiable {
     let addedById: String
     let playlistId: String
     let trackId: String
-    let track: Track?
-    let addedBy: User?
+    let track: Track
+    let addedBy: User
+    // Custom initializer for easier instantiation
+    init(
+        id: String,
+        position: Int = 0,
+        addedAt: String = "",
+        createdAt: String = "",
+        addedById: String = "",
+        playlistId: String = "",
+        trackId: String = "",
+        track: Track,
+        addedBy: User
+    ) {
+        self.id = id
+        self.position = position
+        self.addedAt = addedAt
+        self.createdAt = createdAt
+        self.addedById = addedById
+        self.playlistId = playlistId
+        self.trackId = trackId
+        self.track = track
+        self.addedBy = addedBy
+    }
 }
 
 // MARK: - Device Model
@@ -299,16 +476,16 @@ enum DeviceStatus: String, Codable, CaseIterable {
 
 // MARK: - License Type
 enum LicenseType: String, Codable, CaseIterable {
-    case `public` = "public"
-    case inviteOnly = "invite_only"
+    case open = "open"
+    case inviteOnly = "invited"
     case locationBased = "location_based"
     
     var localizedString: String {
         switch self {
-        case .public:
-            return "public".localized
+        case .open:
+            return "open".localized
         case .inviteOnly:
-            return "invite_only".localized
+            return "invited".localized
         case .locationBased:
             return "location_based".localized
         }
@@ -396,4 +573,46 @@ enum InvitationStatus: String, Codable, CaseIterable {
             return "expired".localized
         }
     }
+}
+
+// MARK: - Deezer API Models
+struct DeezerSearchResponse: Codable {
+    let data: [DeezerTrack]
+    let total: Int
+    let next: String?
+}
+
+struct DeezerTrack: Codable {
+    let id: Int
+    let title: String
+    let duration: Int
+    let preview: String
+    let artist: DeezerArtist
+    let album: DeezerAlbum
+    
+    var asTrack: Track {
+        Track(
+            id: UUID().uuidString,
+            title: title,
+            artist: artist.name,
+            duration: Int(TimeInterval(duration)),
+            deezerId: String(id),
+            previewUrl: preview,
+            albumCoverUrl: album.cover_medium,
+            preview: preview
+        )
+    }
+}
+
+struct DeezerArtist: Codable {
+    let id: Int
+    let name: String
+}
+
+struct DeezerAlbum: Codable {
+    let id: Int
+    let title: String
+    let cover_small: String
+    let cover_medium: String
+    let cover_big: String
 }

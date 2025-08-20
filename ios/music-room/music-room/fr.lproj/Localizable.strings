@@ -128,7 +128,7 @@
 "accepted" = "Accepté";
 "declined" = "Refusé";
 "expired" = "Expiré";
-"draft" = "Brouillon";
+"upcoming" = "À venir";
 "active" = "Actif";
 "paused" = "En pause";
 "ended" = "Terminé";
@@ -140,5 +140,5 @@
 "online" = "En ligne";
 "offline" = "Hors ligne";
 "playing" = "En lecture";
-"invite_only" = "Sur invitation seulement";
+"invited" = "Sur invitation seulement";
 "location_based" = "Basé sur la localisation";
