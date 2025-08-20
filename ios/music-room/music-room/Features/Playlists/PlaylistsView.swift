@@ -71,15 +71,7 @@ struct PlaylistsView: View {
                     )
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [
-                            GridItem(.flexible(), spacing: 16),
-                            GridItem(.flexible(), spacing: 16)
-                        ], spacing: 16) {
-                            ForEach(filteredPlaylists) { playlist in
-                                PlaylistGridItem(playlist: playlist)
-                            }
-                        }
-                        .padding(20)
+                        PlaylistsGrid(playlists: filteredPlaylists)
                     }
                 }
             }
@@ -135,6 +127,29 @@ enum PlaylistFilter: CaseIterable {
         case .public:
             return "public".localized
         }
+    }
+}
+
+// MARK: - Playlist Grid
+struct PlaylistsGrid: View {
+    let playlists: [Playlist]
+    private let gridColumns = [
+        GridItem(.flexible()),
+        GridItem(.flexible())
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: gridColumns, spacing: 20) {
+            ForEach(playlists) { playlist in
+                NavigationLink(
+                    destination: PlaylistDetailsView(playlist: playlist),
+                    label: {
+                        PlaylistGridItem(playlist: playlist)
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 20)
     }
 }
 

@@ -418,7 +418,7 @@ struct QuickActionButton2: View {
                     .font(.caption)
                     .foregroundColor(.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity)

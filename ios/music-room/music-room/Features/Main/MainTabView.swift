@@ -39,6 +39,7 @@ struct MainTabView: View {
                 .tag(3)
             
             ProfileView()
+                .environmentObject(tabManager)
                 .tabItem {
                     Image(systemName: tabManager.selectedTab == 4 ? "person.circle.fill" : "person.circle")
                     Text("profile".localized)
