@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import { authService } from './auth';
 import { participantsService } from '$lib/stores/participants';
+import { config } from '$lib/config';
 
 export interface PlaylistParticipant {
   userId: string;
@@ -55,7 +56,7 @@ class SocketService {
       }
 
       // Connect to the playlists namespace
-      this.socket = io('http://localhost:3000/playlists', {
+      this.socket = io(`${config.apiUrl}/playlists`, {
         auth: {
           token: token
         },

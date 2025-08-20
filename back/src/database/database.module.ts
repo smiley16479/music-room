@@ -16,33 +16,43 @@ import { DatabaseService } from './database.service';
   imports: [
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'mysql',
-        host: configService.get('DB_HOST', 'db'),
-        port: configService.get('DB_PORT', 3306),
-        username: configService.get('DB_USERNAME', 'root'),
-        password: configService.get('DB_PASSWORD', 'root'),
-        database: configService.get('DB_DATABASE', 'db'),
-        entities: [
-          User,
-          Event,
-          Playlist,
-          Track,
-          Vote,
-          Device,
-          Invitation,
-          PlaylistTrack,
-        ],
-        synchronize: configService.get('NODE_ENV') === 'dev',
-        logging: false, //configService.get('NODE_ENV') === 'dev',
-        timezone: 'Z',
-        charset: 'utf8mb4',
-        extra: {
-          connectionLimit: 10,
-          acquireTimeout: 60000,
-          timeout: 60000,
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const isDev = configService.get('NODE_ENV') === 'dev';
+        return {
+          type: 'mysql',
+          host: configService.get('DB_HOST', 'db'),
+          port: configService.get('DB_PORT', 3306),
+          username: configService.get('DB_USERNAME', 'root'),
+          password: configService.get('DB_PASSWORD', 'root'),
+          database: configService.get('DB_DATABASE', 'db'),
+          entities: [
+            User,
+            Event,
+            Playlist,
+            Track,
+            Vote,
+            Device,
+            Invitation,
+            PlaylistTrack,
+          ],
+          // Use synchronize in dev mode, migrations in production
+          synchronize: isDev,
+          migrationsRun: !isDev,
+          migrations: isDev ? [] : ['dist/database/migrations/*.js'],
+          logging: false,
+          timezone: 'Z',
+          charset: 'utf8mb4',
+          extra: {
+            connectionLimit: 10,
+            acquireTimeout: 60000,
+            timeout: 60000,
+          },
+          // Handle migration errors gracefully
+          retryAttempts: 3,
+          retryDelay: 3000,
+          autoLoadEntities: true,
+        };
+      },
       inject: [ConfigService],
     }),
   ],

@@ -28,22 +28,22 @@ export class Track {
   @Column({ type: 'int', comment: 'Duration in seconds' })
   duration: number;
 
-  @Column({ name: 'preview_url', nullable: true })
+  @Column({ name: 'preview_url', nullable: true, length: 500 })
   previewUrl: string;
 
-  @Column({ name: 'album_cover_url', nullable: true })
+  @Column({ name: 'album_cover_url', nullable: true, length: 500 })
   albumCoverUrl: string;
 
-  @Column({ name: 'album_cover_small_url', nullable: true })
+  @Column({ name: 'album_cover_small_url', nullable: true, length: 500 })
   albumCoverSmallUrl: string;
 
-  @Column({ name: 'album_cover_medium_url', nullable: true })
+  @Column({ name: 'album_cover_medium_url', nullable: true, length: 500 })
   albumCoverMediumUrl: string;
 
-  @Column({ name: 'album_cover_big_url', nullable: true })
+  @Column({ name: 'album_cover_big_url', nullable: true, length: 500 })
   albumCoverBigUrl: string;
 
-  @Column({ name: 'deezer_url', nullable: true })
+  @Column({ name: 'deezer_url', nullable: true, length: 500 })
   deezerUrl: string;
 
   @Column({ type: 'json', nullable: true })

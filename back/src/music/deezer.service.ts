@@ -92,19 +92,21 @@ export class DeezerService {
         return cached;
       }
 
-      // Build advanced search query
+      // Build advanced search query - use simple combined search instead of field-specific syntax
       const queryParts: string[] = [];
       
-      if (params.artist) queryParts.push(`artist:"${params.artist}"`);
-      if (params.album) queryParts.push(`album:"${params.album}"`);
-      if (params.track) queryParts.push(`track:"${params.track}"`);
-      if (params.label) queryParts.push(`label:"${params.label}"`);
-      if (params.dur_min) queryParts.push(`dur_min:${params.dur_min}`);
-      if (params.dur_max) queryParts.push(`dur_max:${params.dur_max}`);
-      if (params.bpm_min) queryParts.push(`bpm_min:${params.bpm_min}`);
-      if (params.bpm_max) queryParts.push(`bpm_max:${params.bpm_max}`);
+      if (params.artist) queryParts.push(params.artist);
+      if (params.album) queryParts.push(params.album);
+      if (params.track) queryParts.push(params.track);
+      if (params.label) queryParts.push(params.label);
 
       const query = queryParts.join(' ');
+      
+      // If no query parts, return empty result
+      if (!query.trim()) {
+        return { data: [], total: 0 };
+      }
+
       const url = `${this.baseUrl}/search/track`;
 
       const response = await firstValueFrom(
@@ -116,9 +118,7 @@ export class DeezerService {
             output: 'json',
           },
         })
-      );
-
-      const result = response.data;
+      );      const result = response.data;
       
       // Cache result
       await this.cacheManager.set(cacheKey, result, 600); // 10 minutes for advanced searches

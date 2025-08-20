@@ -336,26 +336,68 @@
 				
 				<div class="space-y-3">
 					{#each event.participants as participant}
-					<div class="flex items-center space-x-3">
-						{#if participant.profilePicture}
-						<img src={participant.profilePicture} alt={participant.displayName} class="w-10 h-10 rounded-full object-cover" />
+						{#if participant.userId !== user?.id}
+							<button 
+								class="flex items-center space-x-3 hover:bg-gray-50 cursor-pointer rounded-lg p-2 transition-colors w-full text-left"
+								onclick={() => {
+									if (participant.userId) {
+										goto(`/users/${participant.userId}`);
+									}
+								}}
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										if (participant.userId) {
+											goto(`/users/${participant.userId}`);
+										}
+									}
+								}}
+							>
+								{#if participant.profilePicture}
+									<img src={participant.profilePicture} alt={participant.displayName} class="w-10 h-10 rounded-full object-cover" />
+								{:else}
+									<div 
+										class="w-10 h-10 rounded-full flex items-center justify-center"
+										style="background-color: {getAvatarColor(participant.displayName)}"
+									>
+										<span class="text-sm font-semibold text-white">{getAvatarLetter(participant.displayName)}</span>
+									</div>
+								{/if}
+
+								<div class="flex-1">
+									<p class="font-medium text-gray-800">{participant.displayName}</p>
+									<p class="text-xs text-gray-500">
+										{participant.role === 'host' ? 'Host' : 'Participant'} • 
+										Joined {formatDate(participant.joinedAt)}
+									</p>
+								</div>
+
+								<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+								</svg>
+							</button>
 						{:else}
-						<div 
-							class="w-10 h-10 rounded-full flex items-center justify-center"
-							style="background-color: {getAvatarColor(participant.displayName)}"
-						>
-							<span class="text-sm font-semibold text-white">{getAvatarLetter(participant.displayName)}</span>
-						</div>
+							<div class="flex items-center space-x-3 p-2">
+								{#if participant.profilePicture}
+									<img src={participant.profilePicture} alt={participant.displayName} class="w-10 h-10 rounded-full object-cover" />
+								{:else}
+									<div 
+										class="w-10 h-10 rounded-full flex items-center justify-center"
+										style="background-color: {getAvatarColor(participant.displayName)}"
+									>
+										<span class="text-sm font-semibold text-white">{getAvatarLetter(participant.displayName)}</span>
+									</div>
+								{/if}
+
+								<div class="flex-1">
+									<p class="font-medium text-gray-800">{participant.displayName}</p>
+									<p class="text-xs text-gray-500">
+										{participant.role === 'host' ? 'Host' : 'Participant'} • 
+										Joined {formatDate(participant.joinedAt)}
+									</p>
+								</div>
+							</div>
 						{/if}
-						
-						<div class="flex-1">
-							<p class="font-medium text-gray-800">{participant.displayName}</p>
-							<p class="text-xs text-gray-500">
-								{participant.role === 'host' ? 'Host' : 'Participant'} • 
-								Joined {formatDate(participant.joinedAt)}
-							</p>
-						</div>
-					</div>
 					{/each}
 				</div>
 			</div>

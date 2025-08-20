@@ -264,6 +264,19 @@ export class PlaylistService {
     // Check edit permissions
     await this.checkEditPermissions(playlist, userId);
 
+    // Validate required fields
+    if (!addTrackDto.trackId) {
+      throw new BadRequestException('Track ID is required');
+    }
+
+    if (!userId) {
+      throw new BadRequestException('User ID is required');
+    }
+
+    if (!playlistId) {
+      throw new BadRequestException('Playlist ID is required');
+    }
+
     // Get or create track
     const track = await this.trackRepository.findOne({
       where: { id: addTrackDto.trackId },
@@ -295,13 +308,18 @@ export class PlaylistService {
       await this.shiftTracksPosition(playlistId, position, 1);
     }
 
-    // Create playlist track
+    // Create playlist track with validation
     const playlistTrack = this.playlistTrackRepository.create({
       playlistId,
       trackId: addTrackDto.trackId,
       addedById: userId,
       position,
     });
+
+    // Validate required fields before saving
+    if (!playlistTrack.playlistId || !playlistTrack.trackId || !playlistTrack.addedById) {
+      throw new BadRequestException('Missing required fields for playlist track');
+    }
 
     const savedPlaylistTrack = await this.playlistTrackRepository.save(playlistTrack);
 
@@ -410,6 +428,7 @@ export class PlaylistService {
     collaboratorId: string,
     requesterId: string
   ): Promise<void> {
+    console.log(`Adding collaborator ${collaboratorId} to playlist ${playlistId} by ${requesterId}`);
     const playlist = await this.findById(playlistId, requesterId);
 
     // Only creator or invited users can add new collaborators

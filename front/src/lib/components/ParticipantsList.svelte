@@ -3,6 +3,7 @@
 	import { participantsStore } from '$lib/stores/participants';
 	import { authStore } from '$lib/stores/auth';
 	import { getAvatarColor, getAvatarLetter } from '$lib/utils/avatar';
+	import { goto } from '$app/navigation';
 
 	let { playlistId }: { playlistId: string } = $props();
 
@@ -35,16 +36,71 @@
 			.toUpperCase()
 			.slice(0, 2);
 	}
+
+	// Navigate to user profile
+	function viewUserProfile(participant: PlaylistParticipant) {
+		if (participant.userId && participant.userId !== currentUser?.id) {
+			goto(`/users/${participant.userId}`);
+		}
+	}
 </script>
 
-<div class="participants-panel">
-	<div class="participants-header">
-		<h3>Active Participants ({participants.length})</h3>
+<div class="bg-white rounded-lg shadow-md">
+	<div class="p-4 bg-[#f8fafc] border-b border-[#e2e8f0]">
+		<h2 class="text-lg font-bold text-gray-800">Active Participants ({participants.length})</h2>
 	</div>
-	
-	<div class="participants-list">
+
+	<div class="max-h-60 overflow-y-auto">
 		{#each participants as participant (participant.socketId)}
-			<div class="participant-item" class:is-current-user={participant.userId === currentUser?.id}>
+			{#if participant.userId !== currentUser?.id}
+			<button 
+				class="participant-item clickable" 
+				class:is-current-user={participant.userId === currentUser?.id}
+				onclick={() => viewUserProfile(participant)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						viewUserProfile(participant);
+					}
+				}}
+			>
+				<div class="participant-avatar">
+					{#if participant.avatarUrl && !participant.avatarUrl.startsWith('data:image/svg+xml')}
+						<img src={participant.avatarUrl} alt={participant.displayName} />
+					{:else}
+						<div 
+							class="avatar-fallback"
+							style="background-color: {getAvatarColor(participant.displayName)}"
+						>
+							{getAvatarLetter(participant.displayName)}
+						</div>
+					{/if}
+				</div>
+				
+				<div class="participant-info">
+					<div class="participant-name">
+						{participant.displayName}
+						{#if participant.userId === currentUser?.id}
+							<span class="you-badge">You</span>
+						{/if}
+					</div>
+					<div class="participant-time">
+						{formatJoinTime(participant.joinedAt)}
+					</div>
+				</div>
+				
+				<div class="participant-status">
+					<div class="online-indicator"></div>
+					<svg class="view-profile-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+					</svg>
+				</div>
+			</button>
+			{:else}
+			<div 
+				class="participant-item" 
+				class:is-current-user={participant.userId === currentUser?.id}
+			>
 				<div class="participant-avatar">
 					{#if participant.avatarUrl && !participant.avatarUrl.startsWith('data:image/svg+xml')}
 						<img src={participant.avatarUrl} alt={participant.displayName} />
@@ -74,6 +130,7 @@
 					<div class="online-indicator"></div>
 				</div>
 			</div>
+			{/if}
 		{/each}
 		
 		{#if participants.length === 0}
@@ -85,47 +142,37 @@
 </div>
 
 <style>
-	.participants-panel {
-		background: white;
-		border-radius: 8px;
-		border: 1px solid #e2e8f0;
-		overflow: hidden;
-	}
-
-	.participants-header {
-		padding: 16px;
-		background: #f8fafc;
-		border-bottom: 1px solid #e2e8f0;
-	}
-
-	.participants-header h3 {
-		margin: 0;
-		font-size: 16px;
-		font-weight: 600;
-		color: #334155;
-	}
-
-	.participants-list {
-		padding: 8px;
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
 	.participant-item {
 		display: flex;
 		align-items: center;
 		padding: 12px;
-		border-radius: 6px;
 		transition: background-color 0.2s ease;
+		width: 100%;
+		border: none;
+		background: transparent;
+		text-align: left;
+		font-family: inherit;
 	}
 
 	.participant-item:hover {
 		background: #f1f5f9;
 	}
 
+	.participant-item.clickable {
+		cursor: pointer;
+	}
+
+	.participant-item.clickable:hover {
+		background: #e2e8f0;
+	}
+
 	.participant-item.is-current-user {
 		background: #eff6ff;
 		border: 1px solid #dbeafe;
+	}
+
+	.participant-item.is-current-user:hover {
+		background: #eff6ff;
 	}
 
 	.participant-avatar {
@@ -186,6 +233,9 @@
 
 	.participant-status {
 		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		gap: 8px;
 	}
 
 	.online-indicator {
@@ -195,6 +245,15 @@
 		border-radius: 50%;
 		border: 2px solid white;
 		box-shadow: 0 0 0 1px #10b981;
+	}
+
+	.view-profile-icon {
+		color: #94a3b8;
+		transition: color 0.2s ease;
+	}
+
+	.participant-item.clickable:hover .view-profile-icon {
+		color: #64748b;
 	}
 
 	.empty-state {

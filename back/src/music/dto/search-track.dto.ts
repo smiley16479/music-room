@@ -1,4 +1,5 @@
 import { IsString, IsOptional, IsNumber, Min, Max, IsBoolean } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class SearchTrackDto {
   @IsString()
@@ -13,12 +14,14 @@ export class SearchTrackDto {
   album?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   @Max(100)
   limit?: number = 25;
 
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   includeLocal?: boolean = false;
 }

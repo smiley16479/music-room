@@ -3,50 +3,70 @@ import { authService } from './auth';
 
 export interface Playlist {
   id: string;
-  name: string; // Changed from 'title' to match backend
+  name: string;
   description?: string;
-  creatorId: string; // Changed from 'ownerId' to match backend
-  creator?: { id: string; displayName: string }; // Backend relation
-  visibility: 'public' | 'private'; // Changed from 'isPublic' boolean to enum
+  creatorId: string;
+  creator?: { id: string; displayName: string };
+  visibility: 'public' | 'private';
   isCollaborative: boolean;
-  licenseType: 'open' | 'invited'; // Changed from 'free'|'invited_only' to match backend
-  trackCount: number; // Track count from backend
-  totalDuration: number; // Total duration from backend
-  tracks?: PlaylistTrack[]; // Optional - only included in detailed view
+  licenseType: 'open' | 'invited';
+  trackCount: number;
+  totalDuration: number;
+  tracks?: PlaylistTrack[];
   collaborators: Collaborator[];
-  coverImageUrl?: string; // Changed from 'thumbnailUrl' to match backend
+  coverImageUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface PlaylistTrack {
   id: string;
-  title: string;
-  artist: string;
-  album?: string;
-  duration?: number;
-  thumbnailUrl?: string;
-  streamUrl?: string;
-  addedBy: string;
-  addedByName: string;
-  addedAt: string;
   position: number;
+  addedAt: string;
+  createdAt: string;
+  playlistId: string;
+  trackId: string;
+  addedById: string;
+  track: {
+    id: string;
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string;
+    duration: number;
+    previewUrl: string;
+    albumCoverUrl: string;
+    albumCoverSmallUrl: string;
+    albumCoverMediumUrl: string;
+    albumCoverBigUrl: string;
+    deezerUrl: string;
+    genres?: string;
+    releaseDate?: string;
+    available: boolean;
+    createdAt: string;
+    updatedAt: string;
+  };
+  addedBy: {
+    id: string;
+    displayName: string;
+    avatarUrl?: string;
+    email?: string;
+  };
 }
 
 export interface Collaborator {
-  userId: string;
+  id: string;
   displayName: string;
-  profilePicture?: string;
-  role: 'owner' | 'editor' | 'viewer';
-  addedAt: string;
+  avatarUrl?: string;
+  email?: string;
 }
 
 export interface CreatePlaylistData {
-  name: string; // Changed from 'title' to match backend
+  name: string;
   description?: string;
-  visibility: 'public' | 'private'; // Changed from 'isPublic' boolean to enum
+  visibility: 'public' | 'private';
   isCollaborative: boolean;
-  licenseType: 'open' | 'invited'; // Changed from 'free'|'invited_only' to match backend
+  licenseType: 'open' | 'invited';
 }
 
 export const playlistsService = {
@@ -164,7 +184,7 @@ export const playlistsService = {
     }
   },
 
-  async addTrackToPlaylist(playlistId: string, track: Omit<PlaylistTrack, 'id' | 'addedBy' | 'addedByName' | 'addedAt' | 'position'>): Promise<PlaylistTrack> {
+  async addTrackToPlaylist(playlistId: string, data: { trackId: string; position?: number }): Promise<PlaylistTrack> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
@@ -174,7 +194,7 @@ export const playlistsService = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(track)
+      body: JSON.stringify(data)
     });
 
     if (!response.ok) {
@@ -203,17 +223,17 @@ export const playlistsService = {
     }
   },
 
-  async reorderTracks(playlistId: string, trackPositions: { trackId: string; position: number }[]): Promise<void> {
+  async reorderTracks(playlistId: string, trackIds: string[]): Promise<void> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
-    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/reorder`, {
-      method: 'PUT',
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/tracks/reorder`, {
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ trackPositions })
+      body: JSON.stringify({ trackIds })
     });
 
     if (!response.ok) {
@@ -222,17 +242,15 @@ export const playlistsService = {
     }
   },
 
-  async addCollaborator(playlistId: string, userId: string, role: 'editor' | 'viewer' = 'viewer'): Promise<void> {
+  async addCollaborator(playlistId: string, userId: string): Promise<void> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
-    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/collaborators`, {
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/collaborators/${userId}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ userId, role })
+      }
     });
 
     if (!response.ok) {

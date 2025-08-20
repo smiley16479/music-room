@@ -2,6 +2,8 @@
 	import { onMount } from "svelte";
 	import { config } from '$lib/config';
 	import { goto } from "$app/navigation";
+	import { friendsService, type Friend, type Invitation } from "$lib/services/friends";
+	import { userService, type UserSearchResult } from "$lib/services/user";
 	import { authStore } from "$lib/stores/auth";
 	import { authService, type User } from "$lib/services/auth";
 	import { generateGenericAvatar, getUserAvatarUrl } from "$lib/utils/avatar";
@@ -10,11 +12,19 @@
 	type VisibilityLevel = "public" | "friends" | "private";
 
 	// Use the reactive auth store with proper store subscription
+	let { data } = $props();
+	let friends = $state<Friend[]>(data.friends || []);
+	let pendingInvitations = $state<Invitation[]>(data.pendingInvitations || []);
+	let sentInvitations = $state<Invitation[]>(data.sentInvitations || []);
+	let searchResults = $state<UserSearchResult[]>([]);
+	let searchQuery = $state("");
+	let searchLoading = $state(false);
 	let user = $state<User | null>(null);
 	let loading = $state(false);
-	let error = $state("");
+	let error = $state(data.error || "");
 	let success = $state("");
-	let activeTab = $state<"information" | "music" | "accounts">("information");
+	let activeTab = $state<"information" | "friends" | "music" | "accounts">("information");
+	let friendsSubTab = $state<"list" | "pending" | "sent" | "search">("list");
 
 	// Subscribe to auth store changes
 	$effect(() => {
@@ -249,7 +259,7 @@
 			// Listen for messages from the popup
 			const handleMessage = (event: MessageEvent) => {
 				// Check if message is from our backend
-				if (!event.origin.includes('localhost:3000') && !event.origin.includes(config.apiUrl.replace('/api', ''))) return;
+				if (!event.origin.includes(config.apiUrl.replace('/api', ''))) return;
 				
 				if (event.data.type === 'OAUTH_SUCCESS') {
 					popup.close();
@@ -341,6 +351,144 @@
 		musicPreferences.dislikedGenres = musicPreferences.dislikedGenres.filter(g => g !== genre);
 	}
 
+	// Friends management functions
+	async function loadFriendsData() {
+		if (!user) return;
+		loading = true;
+		try {
+			const [friendsData, pendingData, sentData] = await Promise.all([
+				friendsService.getFriends(),
+				friendsService.getPendingInvitations(),
+				friendsService.getSentInvitations()
+			]);
+			friends = friendsData;
+			pendingInvitations = pendingData;
+			sentInvitations = sentData;
+		} catch (err) {
+			console.error('Failed to load friends data:', err);
+			error = err instanceof Error ? err.message : 'Failed to load friends data';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function searchUsers() {
+		if (!searchQuery.trim()) {
+			searchResults = [];
+			return;
+		}
+		
+		searchLoading = true;
+		try {
+			searchResults = await userService.searchUsers(searchQuery.trim());
+		} catch (err) {
+			console.error('Failed to search users:', err);
+			error = err instanceof Error ? err.message : 'Failed to search users';
+		} finally {
+			searchLoading = false;
+		}
+	}
+
+	async function sendFriendInvitation(userId: string) {
+		loading = true;
+		error = "";
+		success = "";
+		try {
+			await friendsService.sendInvitation(userId);
+			success = "Friend invitation sent successfully!";
+			// Reload sent invitations
+			sentInvitations = await friendsService.getSentInvitations();
+		} catch (err) {
+			console.error('Failed to send invitation:', err);
+			error = err instanceof Error ? err.message : 'Failed to send friend invitation';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function respondToFriendInvitation(invitationId: string, accept: boolean) {
+		loading = true;
+		error = "";
+		success = "";
+		try {
+			await friendsService.respondToInvitation(invitationId, accept);
+			success = accept ? "Friend invitation accepted!" : "Friend invitation declined!";
+			// Reload data
+			await loadFriendsData();
+		} catch (err) {
+			console.error('Failed to respond to invitation:', err);
+			error = err instanceof Error ? err.message : 'Failed to respond to invitation';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function cancelFriendInvitation(invitationId: string) {
+		loading = true;
+		error = "";
+		success = "";
+		try {
+			await friendsService.cancelInvitation(invitationId);
+			success = "Friend invitation cancelled!";
+			// Reload sent invitations
+			sentInvitations = await friendsService.getSentInvitations();
+		} catch (err) {
+			console.error('Failed to cancel invitation:', err);
+			error = err instanceof Error ? err.message : 'Failed to cancel invitation';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function removeFriend(friendId: string) {
+		if (!confirm('Are you sure you want to remove this friend?')) return;
+		
+		loading = true;
+		error = "";
+		success = "";
+		try {
+			await friendsService.removeFriend(friendId);
+			success = "Friend removed successfully!";
+			// Reload friends list
+			friends = await friendsService.getFriends();
+		} catch (err) {
+			console.error('Failed to remove friend:', err);
+			error = err instanceof Error ? err.message : 'Failed to remove friend';
+		} finally {
+			loading = false;
+		}
+	}
+
+	// Load friends data when friends tab is opened
+	$effect(() => {
+		if (activeTab === "friends" && user) {
+			loadFriendsData();
+		}
+	});
+
+	// Clear messages after 5 seconds
+	$effect(() => {
+		if (success || error) {
+			const timeout = setTimeout(() => {
+				success = "";
+				error = "";
+			}, 5000);
+			return () => clearTimeout(timeout);
+		}
+	});
+
+	// Debounced search
+	let searchTimeout: NodeJS.Timeout;
+	$effect(() => {
+		clearTimeout(searchTimeout);
+		if (searchQuery.trim()) {
+			searchTimeout = setTimeout(searchUsers, 300);
+		} else {
+			searchResults = [];
+		}
+		return () => clearTimeout(searchTimeout);
+	});
+
 	onMount(() => {
 		if (!user) {
 			goto("/auth/login");
@@ -428,6 +576,15 @@
 					onclick={() => (activeTab = "information")}
 				>
 					Information
+				</button>
+				<button
+					class="py-2 px-1 border-b-2 font-medium text-sm {activeTab ===
+					'friends'
+						? 'border-secondary text-secondary'
+						: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					onclick={() => (activeTab = "friends")}
+				>
+					Manage Friends
 				</button>
 				<button
 					class="py-2 px-1 border-b-2 font-medium text-sm {activeTab ===
@@ -765,6 +922,435 @@
 				</div>
 			{/if}
 
+			<!-- Friends Tab -->
+			{#if activeTab === "friends"}
+				<div class="bg-white rounded-lg shadow-md p-6 mb-6">
+					<h2 class="text-xl font-bold text-gray-800 mb-4">
+						Manage Friends
+					</h2>
+					<p class="text-gray-600 mb-6">
+						Manage your friend list and invitations
+					</p>
+
+					<!-- Success/Error Messages -->
+					{#if success}
+						<div class="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded-lg">
+							{success}
+						</div>
+					{/if}
+					{#if error}
+						<div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-lg">
+							{error}
+						</div>
+					{/if}
+
+					<!-- Sub-navigation -->
+					<div class="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">
+						<button
+							class="px-4 py-2 rounded-md text-sm font-medium transition-colors {friendsSubTab === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}"
+							onclick={() => (friendsSubTab = "list")}
+						>
+							Friends ({friends.length})
+						</button>
+						<button
+							class="px-4 py-2 rounded-md text-sm font-medium transition-colors {friendsSubTab === 'pending' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}"
+							onclick={() => (friendsSubTab = "pending")}
+						>
+							Pending ({pendingInvitations.length})
+						</button>
+						<button
+							class="px-4 py-2 rounded-md text-sm font-medium transition-colors {friendsSubTab === 'sent' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}"
+							onclick={() => (friendsSubTab = "sent")}
+						>
+							Sent ({sentInvitations.length})
+						</button>
+						<button
+							class="px-4 py-2 rounded-md text-sm font-medium transition-colors {friendsSubTab === 'search' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}"
+							onclick={() => (friendsSubTab = "search")}
+						>
+							Add Friends
+						</button>
+					</div>
+
+					<!-- Friends List -->
+					{#if friendsSubTab === "list"}
+						<div>
+							<h3 class="text-lg font-semibold text-gray-800 mb-4">
+								Your Friends
+							</h3>
+							{#if friends.length === 0}
+								<div class="text-center py-8">
+									<div class="text-gray-400 text-4xl mb-4">👥</div>
+									<p class="text-gray-500">You don't have any friends yet.</p>
+									<button
+										class="mt-4 text-secondary hover:text-secondary/80 font-medium"
+										onclick={() => (friendsSubTab = "search")}
+									>
+										Find some friends to connect with!
+									</button>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									{#each friends as friend}
+										<div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+											<button 
+												class="flex items-center space-x-3 flex-1 text-left"
+												onclick={() => goto(`/users/${friend.id}`)}
+												onkeydown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														goto(`/users/${friend.id}`);
+													}
+												}}
+											>
+												<img
+													src={friend.avatarUrl || generateGenericAvatar(friend.displayName || 'User')}
+													alt={friend.displayName || 'User'}
+													class="w-12 h-12 rounded-full object-cover"
+													onerror={(e) => { 
+														const target = e.target as HTMLImageElement;
+														if (target) target.src = generateGenericAvatar(friend.displayName || 'User');
+													}}
+												/>
+												<div>
+													<h4 class="font-medium text-gray-900">
+														{friend.displayName || 'Unknown User'}
+													</h4>
+													{#if friend.bio}
+														<p class="text-sm text-gray-500">{friend.bio}</p>
+													{/if}
+													{#if friend.since}
+														<p class="text-xs text-gray-400">
+															Friends since {new Date(friend.since).toLocaleDateString()}
+														</p>
+													{/if}
+												</div>
+											</button>
+											<div class="flex items-center gap-2">
+												<button
+													type="button"
+													onclick={(e) => {
+														e.stopPropagation();
+														removeFriend(friend.id);
+													}}
+													disabled={loading}
+													class="text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
+												>
+													Remove
+												</button>
+												<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+												</svg>
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Pending Invitations -->
+					{#if friendsSubTab === "pending"}
+						<div>
+							<h3 class="text-lg font-semibold text-gray-800 mb-4">
+								Pending Invitations
+							</h3>
+							<p class="text-gray-600 mb-4">
+								Friend requests you've received
+							</p>
+							{#if pendingInvitations.length === 0}
+								<div class="text-center py-8">
+									<div class="text-gray-400 text-4xl mb-4">📬</div>
+									<p class="text-gray-500">No pending invitations.</p>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									{#each pendingInvitations as invitation}
+										<div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+											<button 
+												class="flex items-center space-x-3 flex-1 text-left"
+												onclick={() => goto(`/users/${invitation.inviter.id}`)}
+												onkeydown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														goto(`/users/${invitation.inviter.id}`);
+													}
+												}}
+											>
+												<img
+													src={invitation.inviter.avatarUrl || generateGenericAvatar(invitation.inviter.displayName || 'User')}
+													alt={invitation.inviter.displayName || 'User'}
+													class="w-12 h-12 rounded-full object-cover"
+													onerror={(e) => { 
+														const target = e.target as HTMLImageElement;
+														if (target) target.src = generateGenericAvatar(invitation.inviter.displayName || 'User');
+													}}
+												/>
+												<div>
+													<h4 class="font-medium text-gray-900">
+														{invitation.inviter.displayName || 'Unknown User'}
+													</h4>
+													{#if invitation.message}
+														<p class="text-sm text-gray-600">"{invitation.message}"</p>
+													{/if}
+													<p class="text-xs text-gray-400">
+														Sent {new Date(invitation.createdAt).toLocaleDateString()}
+													</p>
+												</div>
+											</button>
+											<div class="flex items-center gap-2">
+												<div class="flex space-x-2">
+													<button
+														type="button"
+														onclick={(e) => {
+															e.stopPropagation();
+															respondToFriendInvitation(invitation.id, true);
+														}}
+														disabled={loading}
+														class="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50"
+													>
+														Accept
+													</button>
+													<button
+														type="button"
+														onclick={(e) => {
+															e.stopPropagation();
+															respondToFriendInvitation(invitation.id, false);
+														}}
+														disabled={loading}
+														class="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+													>
+														Decline
+													</button>
+												</div>
+												<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+												</svg>
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Sent Invitations -->
+					{#if friendsSubTab === "sent"}
+						<div>
+							<h3 class="text-lg font-semibold text-gray-800 mb-4">
+								Sent Invitations
+							</h3>
+							<p class="text-gray-600 mb-4">
+								Friend requests you've sent
+							</p>
+							{#if sentInvitations.length === 0}
+								<div class="text-center py-8">
+									<div class="text-gray-400 text-4xl mb-4">📤</div>
+									<p class="text-gray-500">No sent invitations.</p>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									{#each sentInvitations as invitation}
+										<div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+											<button 
+												class="flex items-center space-x-3 flex-1 text-left"
+												onclick={() => goto(`/users/${invitation.invitee.id}`)}
+												onkeydown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														goto(`/users/${invitation.invitee.id}`);
+													}
+												}}
+											>
+												<img
+													src={invitation.invitee.avatarUrl || generateGenericAvatar(invitation.invitee.displayName || 'User')}
+													alt={invitation.invitee.displayName || 'User'}
+													class="w-12 h-12 rounded-full object-cover"
+													onerror={(e) => { 
+														const target = e.target as HTMLImageElement;
+														if (target) target.src = generateGenericAvatar(invitation.invitee.displayName || 'User');
+													}}
+												/>
+												<div>
+													<h4 class="font-medium text-gray-900">
+														{invitation.invitee.displayName || 'Unknown User'}
+													</h4>
+													{#if invitation.message}
+														<p class="text-sm text-gray-600">"{invitation.message}"</p>
+													{/if}
+													<p class="text-xs text-gray-400">
+														Sent {new Date(invitation.createdAt).toLocaleDateString()}
+													</p>
+												</div>
+											</button>
+											<div class="flex items-center gap-2">
+												<button
+													type="button"
+													onclick={(e) => {
+														e.stopPropagation();
+														cancelFriendInvitation(invitation.id);
+													}}
+													disabled={loading}
+													class="text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
+												>
+													Cancel
+												</button>
+												<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+												</svg>
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Search Users -->
+					{#if friendsSubTab === "search"}
+						<div>
+							<h3 class="text-lg font-semibold text-gray-800 mb-4">
+								Find Friends
+							</h3>
+							<p class="text-gray-600 mb-4">
+								Search for users to send friend requests
+							</p>
+							
+							<!-- Search Input -->
+							<div class="mb-6">
+								<div class="relative">
+									<input
+										type="text"
+										bind:value={searchQuery}
+										placeholder="Search by username or display name..."
+										class="w-full px-4 py-2 pl-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
+									/>
+									<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+										<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+										</svg>
+									</div>
+									{#if searchLoading}
+										<div class="absolute inset-y-0 right-0 pr-3 flex items-center">
+											<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-secondary"></div>
+										</div>
+									{/if}
+								</div>
+							</div>
+
+							<!-- Search Results -->
+							{#if searchQuery.trim() && searchResults.length === 0 && !searchLoading}
+								<div class="text-center py-8">
+									<div class="text-gray-400 text-4xl mb-4">🔍</div>
+									<p class="text-gray-500">No users found matching "{searchQuery}"</p>
+								</div>
+							{:else if searchResults.length > 0}
+								<div class="space-y-3">
+									{#each searchResults as searchUser}
+										{@const isAlreadyFriend = friends.some(f => f.id === searchUser.id)}
+										{@const hasPendingInvitation = sentInvitations.some(i => i.invitee.id === searchUser.id)}
+										{@const isCurrentUser = user && user.id === searchUser.id}
+										
+										<div class="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+											{#if !isCurrentUser}
+												<button 
+													class="flex items-center space-x-3 flex-1 text-left"
+													onclick={() => goto(`/users/${searchUser.id}`)}
+													onkeydown={(e) => {
+														if (e.key === 'Enter' || e.key === ' ') {
+															e.preventDefault();
+															goto(`/users/${searchUser.id}`);
+														}
+													}}
+												>
+													<img
+														src={searchUser.avatarUrl || generateGenericAvatar(searchUser.displayName || 'User')}
+														alt={searchUser.displayName || 'User'}
+														class="w-12 h-12 rounded-full object-cover"
+														onerror={(e) => { 
+															const target = e.target as HTMLImageElement;
+															if (target) target.src = generateGenericAvatar(searchUser.displayName || 'User');
+														}}
+													/>
+													<div>
+														<h4 class="font-medium text-gray-900">
+															{searchUser.displayName || 'Unknown User'}
+														</h4>
+														{#if searchUser.bio}
+															<p class="text-sm text-gray-600">{searchUser.bio}</p>
+														{/if}
+														{#if searchUser.musicPreferences?.favoriteGenres?.length}
+															<div class="flex flex-wrap gap-1 mt-1">
+																{#each searchUser.musicPreferences.favoriteGenres.slice(0, 3) as genre}
+																	<span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">{genre}</span>
+																{/each}
+															</div>
+														{/if}
+													</div>
+												</button>
+											{:else}
+												<div class="flex items-center space-x-3 flex-1">
+													<img
+														src={searchUser.avatarUrl || generateGenericAvatar(searchUser.displayName || 'User')}
+														alt={searchUser.displayName || 'User'}
+														class="w-12 h-12 rounded-full object-cover"
+														onerror={(e) => { 
+															const target = e.target as HTMLImageElement;
+															if (target) target.src = generateGenericAvatar(searchUser.displayName || 'User');
+														}}
+													/>
+													<div>
+														<h4 class="font-medium text-gray-900">
+															{searchUser.displayName || 'Unknown User'}
+														</h4>
+														{#if searchUser.bio}
+															<p class="text-sm text-gray-600">{searchUser.bio}</p>
+														{/if}
+														{#if searchUser.musicPreferences?.favoriteGenres?.length}
+															<div class="flex flex-wrap gap-1 mt-1">
+																{#each searchUser.musicPreferences.favoriteGenres.slice(0, 3) as genre}
+																	<span class="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">{genre}</span>
+																{/each}
+															</div>
+														{/if}
+													</div>
+												</div>
+											{/if}
+											<div class="flex items-center gap-2">
+												{#if isCurrentUser}
+													<span class="text-gray-500 text-sm">That's you!</span>
+												{:else if isAlreadyFriend}
+													<span class="text-green-600 text-sm font-medium">✓ Friends</span>
+												{:else if hasPendingInvitation}
+													<span class="text-yellow-600 text-sm font-medium">Invitation Sent</span>
+												{:else}
+													<button
+														type="button"
+														onclick={(e) => {
+															e.stopPropagation();
+															sendFriendInvitation(searchUser.id);
+														}}
+														disabled={loading}
+														class="bg-secondary text-white px-3 py-1 rounded text-sm hover:bg-secondary/80 disabled:opacity-50"
+													>
+														Send Request
+													</button>
+												{/if}
+												{#if !isCurrentUser}
+													<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+														<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+													</svg>
+												{/if}
+											</div>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Music Preferences Tab -->
 			{#if activeTab === "music"}
 				<div class="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -1066,7 +1652,7 @@
 			{/if}
 
 			<!-- Save Button (only show for editable tabs) -->
-			{#if activeTab !== "accounts"}
+			{#if activeTab !== "accounts" && activeTab !== "friends"}
 				<div class="flex justify-end">
 					<button
 						type="submit"

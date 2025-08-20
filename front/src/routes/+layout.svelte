@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Header from './Header.svelte';
+	import MusicPlayer from '$lib/components/MusicPlayer.svelte';
 	import { authStore } from '$lib/stores/auth';
 	import '../app.css';
 	
@@ -15,9 +16,12 @@
 <div class="bg-primary flex flex-col min-h-screen">
 	<Header />
 
-	<main class="flex-1">
+	<main class="flex-1 pb-20">
 		{@render children()}
 	</main>
+
+	<!-- Music Player - Fixed at bottom -->
+	<MusicPlayer />
 
 	<footer class="bg-white bg-opacity-80 border-t border-secondary/20 py-8 mt-16">
 		<div class="container mx-auto px-4 text-center">
