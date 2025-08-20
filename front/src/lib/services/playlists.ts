@@ -56,6 +56,7 @@ export interface PlaylistTrack {
 
 export interface Collaborator {
   id: string;
+  userId: string;
   displayName: string;
   avatarUrl?: string;
   email?: string;
