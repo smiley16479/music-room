@@ -15,6 +15,7 @@ import { UpdatePasswordDto } from './dto/update-password.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { PaginatedResponse } from '../common/dto/response.dto';
 import { generateGenericAvatar, getFacebookProfilePictureUrl } from 'src/common/utils/avatar.utils';
+import { MusicPreferencesDto } from './dto/music-preferences.dto';
 
 @Injectable()
 export class UserService {
@@ -347,6 +348,13 @@ export class UserService {
         'user.musicPreferences',
       ])
       .getMany();
+  }
+
+  async updateMusicPreferences(userId: string, preferences: MusicPreferencesDto): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    user.musicPreferences = preferences;
+    return this.userRepository.save(user);
   }
 
   async getUserStats(userId: string): Promise<{

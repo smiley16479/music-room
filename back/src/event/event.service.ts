@@ -477,6 +477,21 @@ export class EventService {
     return nextTrack;
   }
 
+  /** Récupère tous les events où l'utilisateur est créateur ou participant */
+  async getEventsUserCanInvite(userId: string): Promise<Event[]> {
+    const events = await this.eventRepository
+      .createQueryBuilder('event')
+      .leftJoinAndSelect('event.participants', 'participant')
+      .where('event.creatorId = :userId', { userId })
+      .orWhere('participant.id = :userId', { userId })
+      .getMany();
+
+    // affiner selon le type d'event/licence, filtre ici. Par exemple:
+    // si certains events ne permettent pas aux participants d'inviter
+
+    return events;
+  }
+
   // Invitation System
   async inviteUsers(eventId: string, inviterUserId: string, inviteeEmails: string[]): Promise<void> {
     const event = await this.findById(eventId, inviterUserId);

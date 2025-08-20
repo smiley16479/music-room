@@ -307,7 +307,11 @@ export class EmailService {
           <div style="text-align: center; margin: 30px 0;">
             <a href="${eventUrl}" 
                style="background-color: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
-              Join Event
+              Join Event on WebApp
+            </a>
+            <a href="music-room://events/12345"
+              style="background-color: #1710e4ff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
+              Join Event on MobileApp
             </a>
           </div>
           <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;">
@@ -346,7 +350,11 @@ export class EmailService {
           <div style="text-align: center; margin: 30px 0;">
             <a href="${playlistUrl}" 
                style="background-color: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
-              View Playlist
+              View Playlist on WebApp
+            </a>
+            <a href="music-room://events/12345"
+              style="background-color: #1710e4ff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
+              View Playlist on MobileApp
             </a>
           </div>
           <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;">
@@ -379,7 +387,11 @@ export class EmailService {
           <div style="text-align: center; margin: 30px 0;">
             <a href="${profileUrl}" 
                style="background-color: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
-              View Profile & Respond
+              View Profile & Respond on WebApp
+            </a>
+            <a href="music-room://events/12345"
+              style="background-color: #1710e4ff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; display: inline-block; font-weight: bold; font-size: 16px;">
+              View Profile & Respond on MobileApp
             </a>
           </div>
           <p style="color: #666; font-size: 14px; text-align: center;">

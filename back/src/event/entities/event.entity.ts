@@ -133,9 +133,17 @@ export class Event {
   })
   participants: User[];
 
+  @ManyToMany(() => User)
+  @JoinTable({
+    name: 'event_admins',
+    joinColumn: { name: 'event_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'user_id', referencedColumnName: 'id' },
+  })
+  admins: User[];
+
   @ManyToMany(() => Track)
   @JoinTable({
-    name: 'event_playlist',
+    name: 'event_playlist', // Simplement la liste des pistes de l'événement
     joinColumn: { name: 'event_id', referencedColumnName: 'id' },
     inverseJoinColumn: { name: 'track_id', referencedColumnName: 'id' },
   })

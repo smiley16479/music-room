@@ -13,6 +13,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   Inject,
+  HttpException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -73,6 +74,11 @@ export class AuthController {
     },
   })
   async register(@Body() registerDto: RegisterDto) {
+
+    this.logger.log(`register ${registerDto}`, registerDto);
+    console.log(registerDto);
+    
+
     const result = await this.authService.register(registerDto);
     return {
       success: true,
@@ -241,6 +247,55 @@ export class AuthController {
     };
   }
 
+  @Post('google/mobile-token')
+  @Public()
+  @ApiOperation({
+    summary: 'Exchange Google OAuth code for tokens (Mobile)',
+    description: 'Exchanges authorization code from mobile app for JWT tokens',
+  })
+  async googleMobileTokenExchange(
+    @Body() body: { 
+      code: string; 
+      redirectUri: string; 
+      platform: 'ios' | 'android' 
+    }
+  ) {
+    this.logger.log(`google/mobile-token exchange for ${body.platform}`);
+    
+    try {
+      // Vérifier le code avec la bonne configuration selon la plateforme
+      const googleUser = await this.authService.verifyGoogleCodeMobile(
+        body.code,
+        body.redirectUri,
+        body.platform
+      );
+      
+      // Utiliser la même logique de login que pour le web
+      const result = await this.authService.googleLogin(googleUser);
+      
+      // Retourner les tokens en JSON pour l'app mobile
+      return {
+        success: true,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        user: result.user
+      };
+      
+    } catch (error) {
+      this.logger.error(`Mobile token exchange failed: ${error.message}`, error.stack);
+      
+      // Retourner une erreur claire
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: error.response?.data?.error_description || error.message || 'Authentication failed',
+          error: 'Bad Request'
+        },
+        HttpStatus.BAD_REQUEST
+      );
+    }
+  }
+
   // Google OAuth
   @Public()
   @Get('google')
@@ -331,24 +386,6 @@ export class AuthController {
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
       const redirectUrl = `${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`;
       res.redirect(redirectUrl);
-    }
-  }
-
-  /** Même logique que GoogleAuthGuard mais retourne JSON */
-  @Post('google/mobile-token')
-  // async googleMobileTokenExchange(@Body() { code }: { code: string }) {
-  async googleMobileTokenExchange(@Body() body/* { idToken }: { idToken: string } */) {
-    console.log("body", body);
-    
-    this.logger.log(`google/mobile-token AuthCallback`);
-
-    try {
-      const googleUser = await this.authService.verifyGoogleCode(body.code);
-      // const googleUser = await this.authService.verifyGoogleIdToken(bodyidToken);
-      const result = await this.authService.googleLogin(googleUser);
-      console.log('Google login successful:', result);
-    } catch (error) {
-      this.logger.error(`google/mobile-token AuthCallback`);
     }
   }
 

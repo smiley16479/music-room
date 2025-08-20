@@ -1,0 +1,144 @@
+// Welcome Screen
+"welcome_title" = "Welcome to MusicRoom";
+"welcome_subtitle" = "Collaborate, vote, and control music together";
+"get_started" = "Get Started";
+"already_have_account" = "Already have an account?";
+"sign_in" = "Sign In";
+
+// Authentication
+"sign_up" = "Sign Up";
+"email" = "Email";
+"password" = "Password";
+"confirm_password" = "Confirm Password";
+"forgot_password" = "Forgot Password?";
+"create_account" = "Create Account";
+"or_continue_with" = "Or continue with";
+"google" = "Google";
+"facebook" = "Facebook";
+"deezer" = "Deezer";
+
+// Tab Navigation
+"home" = "Home";
+"events" = "Events";
+"playlists" = "Playlists";
+"devices" = "Devices";
+"profile" = "Profile";
+
+// Home Screen
+"discover_events" = "Discover Events";
+"your_playlists" = "Your Playlists";
+"recent_activity" = "Recent Activity";
+"music_preferences" = "Music Preferences";
+
+// Events
+"create_event" = "Create Event";
+"join_event" = "Join Event";
+"event_name" = "Event Name";
+"event_description" = "Description";
+"public_event" = "Public Event";
+"private_event" = "Private Event";
+"vote_for_tracks" = "Vote for Tracks";
+"current_playing" = "Currently Playing";
+
+// Playlists
+"create_playlist" = "Create Playlist";
+"playlist_name" = "Playlist Name";
+"collaborative" = "Collaborative";
+"add_tracks" = "Add Tracks";
+"search_music" = "Search Music";
+
+// Devices
+"my_devices" = "My Devices";
+"delegated_devices" = "Delegated Devices";
+"add_device" = "Add Device";
+"device_name" = "Device Name";
+"delegate_control" = "Delegate Control";
+
+// Profile
+"edit_profile" = "Edit Profile";
+"display_name" = "Display Name";
+"bio" = "Bio";
+"location" = "Location";
+"birth_date" = "Birth Date";
+"privacy_settings" = "Privacy Settings";
+"notification_settings" = "Notification Settings";
+"app_settings" = "App Settings";
+"language" = "Language";
+"dark_mode" = "Dark Mode";
+"sign_out" = "Sign Out";
+
+// Notifications
+"push_notifications" = "Push Notifications";
+"email_notifications" = "Email Notifications";
+"event_invitations" = "Event Invitations";
+"playlist_updates" = "Playlist Updates";
+"friend_requests" = "Friend Requests";
+"music_recommendations" = "Music Recommendations";
+
+// Common
+"save" = "Save";
+"cancel" = "Cancel";
+"delete" = "Delete";
+"edit" = "Edit";
+"done" = "Done";
+"loading" = "Loading...";
+"error" = "Error";
+"success" = "Success";
+"retry" = "Retry";
+"yes" = "Yes";
+"no" = "No";
+"ok" = "OK";
+
+// Privacy Visibility
+"public" = "Public";
+"friends_only" = "Friends Only";
+"private" = "Private";
+
+// Music Controls
+"play" = "Play";
+"pause" = "Pause";
+"skip" = "Skip";
+"previous" = "Previous";
+"volume" = "Volume";
+"shuffle" = "Shuffle";
+"repeat" = "Repeat";
+
+// Errors
+"network_error" = "Network connection error";
+"authentication_error" = "Authentication failed";
+"permission_denied" = "Permission denied";
+"invalid_input" = "Invalid input";
+"server_error" = "Server error occurred";
+"invalid_url_error" = "Invalid URL";
+"invalid_request_error" = "Invalid request";
+"invalid_response_error" = "Invalid response";
+"not_found_error" = "Not found";
+"conflict" = "Ressource already exist";
+"decoding_error" = "Failed to decode response";
+"unknown_error" = "Unknown error";
+
+// Additional UI strings
+"participants_count" = "participants";
+"upvote" = "Upvote";
+"downvote" = "Downvote";
+"event_invitation" = "Event invitation";
+"playlist_invitation" = "Playlist invitation";
+"friend_request" = "Friend request";
+"pending" = "Pending";
+"accepted" = "Accepted";
+"declined" = "Declined";
+"expired" = "Expired";
+"draft" = "Draft";
+"active" = "Active";
+"paused" = "Paused";
+"ended" = "Ended";
+"speaker" = "Speaker";
+"phone" = "Phone";
+"computer" = "Computer";
+"tablet" = "Tablet";
+"other" = "Other";
+"online" = "Online";
+"offline" = "Offline";
+"playing" = "Playing";
+"invite_only" = "Invite only";
+"location_based" = "Location based";
