@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { JwtService } from '@nestjs/jwt';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
@@ -18,11 +19,22 @@ import { EmailModule } from '../email/email.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Event, Vote, Track, User, Invitation]),
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: {
+          expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     UserModule,
     EmailModule,
   ],
   controllers: [EventController],
-  providers: [EventService, EventGateway, JwtService],
+  providers: [EventService, EventGateway],
   exports: [EventService],
 })
 export class EventModule {}

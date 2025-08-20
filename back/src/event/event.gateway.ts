@@ -11,6 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 import { Event } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
@@ -38,7 +39,10 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   private readonly logger = new Logger(EventGateway.name);
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private configService: ConfigService,
+  ) {}
 
   afterInit(server: Server) {
     this.logger.log('Events WebSocket Gateway initialized');
@@ -56,7 +60,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       }
 
       // Verify JWT token
-      const payload = this.jwtService.verify(token);
+      const payload = this.jwtService.verify(token, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
       client.userId = payload.sub;
 
       this.logger.log(`Client connected: ${client.id} (User: ${client.userId})`);
