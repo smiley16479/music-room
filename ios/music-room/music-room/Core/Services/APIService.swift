@@ -140,6 +140,17 @@ class APIService {
         let endpoint = "/events/my-event"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
+
+    /// Promote a user to admin for an event
+    func promoteUserToAdmin(eventId: String, userId: String) async throws {
+        let endpoint = "/events/" + eventId + "/admins/" + userId
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+
+    func removeAdminFromEvent(eventId: String, userId: String) async throws {
+        let endpoint = "/events/\(eventId)/admins/\(userId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
     
     func createEvent(_ eventData: [String: Any]) async throws -> Event {
         let endpoint = "/events"

@@ -301,6 +301,7 @@ struct DeezerTrackRow: View {
 struct PlaylistDetailsView: View {
     let playlist: Playlist
     @StateObject private var viewModel: PlaylistViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @State private var displayMode: DisplayMode = .list
     @State private var showingDeezerSearch = false
     @State private var showingProposedTracks = false
@@ -390,9 +391,25 @@ struct PlaylistDetailsView: View {
         }
     }
     // MARK: List View
+    // private var listView: some View {
+    //     ScrollView {
+    //         LazyVStack(spacing: 12) {
+    //             ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+    //                 TrackRowView(
+    //                     track: track,
+    //                     onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+    //                     onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+    //                     canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+    //                 )
+    //             }
+    //         }
+    //         .padding(.horizontal)
+    //     }
+    // }
+
     private var listView: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
+        List {
+            if isAdmin {
                 ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
                     TrackRowView(
                         track: track,
@@ -400,9 +417,26 @@ struct PlaylistDetailsView: View {
                         onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
                         canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
                     )
+                    .listRowInsets(EdgeInsets())
+                }
+                .onDelete { indexSet in
+                    for index in indexSet {
+                        let track = viewModel.tracks[index]
+                        viewModel.tracks.remove(at: index)
+                        // Optionnel : appel API pour supprimer côté serveur
+                    }
+                }
+            } else {
+                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+                    TrackRowView(
+                        track: track,
+                        onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+                        onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+                    )
+                    .listRowInsets(EdgeInsets())
                 }
             }
-            .padding(.horizontal)
         }
     }
     
@@ -500,12 +534,12 @@ struct AudioPlayerView: View {
   //  }
 
    private func togglePlayPause(for track: Track) {
-    guard let previewUrl = track.preview ?? track.previewUrl, let url = URL(string: previewUrl) else { return }
+    guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
     // Synchronize track state
     syncCurrentTrack(track: track)
 
     // Vérifie si le player joue déjà ce morceau
-//    let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
+    // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
 
     if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
        currentAsset.url == url {
@@ -518,6 +552,9 @@ struct AudioPlayerView: View {
             isPlaying = true
         }
     } else {
+        // Un autre morceau : pause l'ancien player
+        audioPlayer?.pause()
+        isPlaying = false
         // Nouveau morceau : crée un nouveau player et joue
         audioPlayer = AVPlayer(url: url)
         audioPlayer?.play()
