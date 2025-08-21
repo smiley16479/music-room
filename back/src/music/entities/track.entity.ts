@@ -28,7 +28,7 @@ export class Track {
   @Column({ type: 'int', comment: 'Duration in seconds' })
   duration: number;
 
-  @Column({ name: 'preview_url', type: 'varchar', length: 300, nullable: true })
+  @Column({ name: 'preview_url', nullable: true, length: 500 })
   previewUrl: string;
 
   @Column({ name: 'album_cover_url', nullable: true })
