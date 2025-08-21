@@ -59,6 +59,9 @@ export class EventService {
 
   // CRUD Operations
   async create(createEventDto: CreateEventDto, creatorId: string): Promise<Event> {
+
+    console.log('Creating event with DTO:', createEventDto);
+    
     const creator = await this.userRepository.findOne({ where: { id: creatorId } });
     if (!creator) {
       throw new NotFoundException('Creator not found');
@@ -227,6 +230,77 @@ export class EventService {
 
     this.eventGateway.notifyParticipantLeft(eventId, user);
   }
+
+  /** Promote a user to admin for an event */
+  async promoteAdmin(eventId: string, actorId: string, userId: string): Promise<void> {
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: [
+        'creator',
+        'admins',
+        'participants',
+      ]
+    });
+
+    if (!event)
+      throw new NotFoundException('Event not found');
+    // Only creator or existing admin can promote
+    if (event.creatorId !== actorId && !(event.admins?.some(a => a.id === actorId))) {
+      throw new ForbiddenException('Only creator or admin can promote another user');
+    }
+    // Check if user is a participant
+    if (!event.participants?.some(p => p.id === userId)) {
+      throw new BadRequestException('User must be a participant to be promoted');
+    }
+    // Check if already admin
+    if (event.admins?.some(a => a.id === userId)) {
+      throw new ConflictException('User is already an admin');
+    }
+    // Add user to admins relation
+    await this.eventRepository
+      .createQueryBuilder()
+      .relation(Event, 'admins')
+      .of(eventId)
+      .add(userId);
+    // Optionally notify participants
+    // this.eventGateway.notifyAdminPromoted(eventId, userId);
+  }
+
+  /** Remove a user from the admins of an event */
+  async removeAdmin(eventId: string, actorId: string, userId: string): Promise<void> {
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: [
+        'creator',
+        'admins',
+      ]
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    // Only creator or existing admin can remove
+    if (event.creatorId !== actorId && !(event.admins?.some(a => a.id === actorId))) {
+      throw new ForbiddenException('Only creator or admin can remove another admin');
+    }
+    // Can't remove creator from admins
+    if (event.creatorId === userId) {
+      throw new BadRequestException('Cannot remove creator from admins');
+    }
+    // Check if user is actually an admin
+    if (!event.admins?.some(a => a.id === userId)) {
+      throw new NotFoundException('User is not an admin');
+    }
+    // Remove user from admins relation
+    await this.eventRepository
+      .createQueryBuilder()
+      .relation(Event, 'admins')
+      .of(eventId)
+      .remove(userId);
+    // Optionally notify participants
+    // this.eventGateway.notifyAdminRemoved(eventId, userId);
+  }
+
 
   // Voting System
   async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto): Promise<VoteResult[]> {
@@ -477,18 +551,15 @@ export class EventService {
     return nextTrack;
   }
 
-  /** Récupère tous les events où l'utilisateur est créateur ou participant */
-  async getEventsUserCanInvite(userId: string): Promise<Event[]> {
+  /** Récupère tous les events où l'utilisateur est créateur ou participant, avec les admins */
+  async getEventsUserCanInviteWithAdmins(userId: string): Promise<Event[]> {
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
+      .leftJoinAndSelect('event.admins', 'admin')
       .where('event.creatorId = :userId', { userId })
       .orWhere('participant.id = :userId', { userId })
       .getMany();
-
-    // affiner selon le type d'event/licence, filtre ici. Par exemple:
-    // si certains events ne permettent pas aux participants d'inviter
-
     return events;
   }
 

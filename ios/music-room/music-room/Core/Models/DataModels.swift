@@ -230,6 +230,7 @@ struct Event: Codable, Identifiable {
     let creatorId: String
     let creator: User?
     let participants: [User]?
+    let admins: [User]?
     let playlist: [Playlist]?
     
     // MARK: - Mock Event Data:
@@ -253,6 +254,7 @@ struct Event: Codable, Identifiable {
           creatorId: "",
           creator: nil,
           participants: nil,
+          admins: nil,
           playlist: nil
           )
       ]

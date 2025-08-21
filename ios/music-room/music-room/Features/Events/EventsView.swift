@@ -138,12 +138,12 @@ struct EventsView: View {
         isLoading = true
         print("🔄 loadEvents called")
         do {
-            let allEvents = try await APIService.shared.getEvents()
             let myEvents = try await APIService.shared.getMyEvents()
+            let allEvents = try await APIService.shared.getEvents()
 
             // Fusionner en supprimant les doublons (basé sur l'id)
-            var combinedEvents = allEvents
-            for event in myEvents {
+            var combinedEvents = myEvents
+            for event in allEvents {
                 if !combinedEvents.contains(where: { $0.id == event.id }) {
                     combinedEvents.append(event)
                 }
@@ -323,7 +323,11 @@ struct CreateEventView: View {
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var errorMessage: String?
-
+    @State private var newPlaylistName: String = ""
+    @State private var selectedPlaylist: Playlist? = nil
+    @State private var showPlaylistPicker = false
+    @State private var createNewPlaylist = false
+    
     var body: some View {
         NavigationView {
             Form {
@@ -338,6 +342,17 @@ struct CreateEventView: View {
                 Section(header: Text("Visibility")) {
                     Toggle(isOn: $isPublic) {
                         Text("Public Event")
+                    }
+                }
+                Section(header: Text("Event Playlist")) {
+                    Toggle("Créer une nouvelle playlist", isOn: $createNewPlaylist)
+                    if createNewPlaylist {
+                        TextField("Nom de la playlist", text: $newPlaylistName)
+                        // ... autres champs playlist ...
+                    } else {
+                        Button(action: { showPlaylistPicker = true }) {
+                            Text(selectedPlaylist?.name ?? "Sélectionner une playlist existante")
+                        }
                     }
                 }
                 if let error = errorMessage {
@@ -359,16 +374,19 @@ struct CreateEventView: View {
                     .disabled(isSaving || name.isEmpty)
                 }
             }
+            .sheet(isPresented: $showPlaylistPicker) {
+                PlaylistPickerView(selectedPlaylist: $selectedPlaylist, showPlaylistPicker: $showPlaylistPicker)
+            }
         }
     }
-
+    
     private func saveEvent() {
         isSaving = true
         errorMessage = nil
         let eventData: [String: Any] = [
             "name": name,
             "description": description,
-            "location": location,
+            "locationName": location,
             "eventDate": ISO8601DateFormatter().string(from: date),
             "visibility": isPublic ? "public" : "private"
         ]
@@ -385,6 +403,84 @@ struct CreateEventView: View {
                     isSaving = false
                 }
             }
+        }
+    }
+    
+    // Composant interne
+    struct PlaylistPickerView: View {
+        @Binding var selectedPlaylist: Playlist?
+        @Binding var showPlaylistPicker: Bool
+        @State private var playlists: [Playlist] = []
+        @State private var isLoading = false
+        @State private var errorMessage: String?
+
+        var body: some View {
+            NavigationView {
+                VStack {
+                    Text("Si vous sélectionnez une playlist existante pour l'événement. Une copie librement éditable sera créée.")
+                      .font(.footnote)
+                      .foregroundColor(.gray)
+                      .multilineTextAlignment(.center)
+                      .padding(.horizontal)
+                    Group {
+                        if isLoading {
+                            ProgressView("Chargement des playlists...")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let error = errorMessage {
+                            VStack(spacing: 16) {
+                                Text("Erreur: \(error)")
+                                    .foregroundColor(.red)
+                                Button("Réessayer") {
+                                    Task { await loadPlaylists() }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if playlists.isEmpty {
+                            Text("Aucune playlist disponible.")
+                                .foregroundColor(.textSecondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            List(playlists) { playlist in
+                                Button {
+                                    selectedPlaylist = playlist
+                                } label: {
+                                    HStack {
+                                        Text(playlist.name)
+                                            .foregroundColor(.textPrimary)
+                                            .padding(.vertical, 8)
+                                        if selectedPlaylist?.id == playlist.id {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.musicPrimary)
+                                        }
+                                    }
+                                }
+                                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                                .listRowBackground(Color.clear)
+                            }
+                            .listStyle(PlainListStyle())
+                        }
+                    }
+                }
+                .navigationBarTitle("Playlist disponibles")
+                .navigationBarItems(trailing: Button("Terminer") {
+                    showPlaylistPicker = false
+                })
+            }
+            .task {
+                await loadPlaylists()
+            }
+        }
+
+        private func loadPlaylists() async {
+            isLoading = true
+            errorMessage = nil
+            do {
+                playlists = try await APIService.shared.getPlaylists()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
         }
     }
 }
@@ -410,7 +506,18 @@ struct EventEditView: View {
     @State private var admins: [User] = []
     @State private var isLoadingUsers = false
 
-    @State private var showInviteUserSheet = false
+    @State private var activeSheet: ActiveSheet? = nil
+    @State private var selectedAdminCandidate: User? = nil
+    /// Enum to manage active sheets
+    enum ActiveSheet: Identifiable {
+        case inviteUser, adminPicker
+        var id: Int {
+            switch self {
+            case .inviteUser: return 1
+            case .adminPicker: return 2
+            }
+        }
+    }
 
     var body: some View {
         NavigationView {
@@ -444,36 +551,31 @@ struct EventEditView: View {
                             }
                         }
                         Button("Invite User") {
-                            // inviteUser()
-                            showInviteUserSheet = true
-                        }
-                        .sheet(isPresented: $showInviteUserSheet) {
-                            InviteView(mode: .eventToUser(event: event))
-                            // InviteUserToEventView(
-                            //     event: event,
-                            //     alreadyInvited: invitedUsers
-                            // ) { newUsers in
-                            //     invitedUsers.append(contentsOf: newUsers)
-                            // }
+                            activeSheet = .inviteUser
                         }
                     }
                 }
                 Section(header: Text("Admins")) {
-                    ForEach(admins) { user in
-                        HStack {
-                            Text(user.displayName)
-                            Spacer()
-                            if user.id != event.creatorId {
-                                Button(role: .destructive) {
-                                    removeAdmin(user)
-                                } label: {
-                                    Image(systemName: "minus.circle")
+                    if admins.isEmpty {
+                        Text("No admins yet (except creator)")
+                            .foregroundColor(.textSecondary)
+                    } else {
+                        ForEach(admins) { user in
+                            HStack {
+                                Text(user.displayName)
+                                Spacer()
+                                if user.id != event.creatorId {
+                                    Button(role: .destructive) {
+                                        removeAdmin(user)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                    }
                                 }
                             }
                         }
                     }
                     Button("Add Admin") {
-                        addAdmin()
+                        activeSheet = .adminPicker
                     }
                 }
                 if let error = errorMessage {
@@ -499,17 +601,68 @@ struct EventEditView: View {
                 }
             }
             .onAppear(perform: setup)
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .inviteUser:
+                    InviteView(mode: .eventToUser(event: event))
+                case .adminPicker:
+                    NavigationView {
+                        List {
+                            ForEach(invitedUsers.filter { u in !admins.contains(where: { $0.id == u.id }) }) { user in
+                                Button {
+                                    selectedAdminCandidate = user
+                                } label: {
+                                    HStack {
+                                        Text(user.displayName)
+                                        if selectedAdminCandidate?.id == user.id {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.musicPrimary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .navigationTitle("Select Admin")
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Promote") {
+                                    promoteSelectedAdmin()
+                                    activeSheet = nil
+                                }
+                                .disabled(selectedAdminCandidate == nil)
+                            }
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Cancel") {
+                                    activeSheet = nil
+                                    selectedAdminCandidate = nil
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     private func setup() {
+
+        if let data = try? JSONEncoder().encode(event),
+          let json = try? JSONSerialization.jsonObject(with: data),
+          let prettyData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]),
+          let prettyString = String(data: prettyData, encoding: .utf8) {
+            print("🔄 EventEditView setup called\n\(prettyString)")
+        }
+
         name = event.name
         description = event.description ?? ""
         location = event.locationName ?? ""
-        date = ISO8601DateFormatter().date(from: event.eventDate ?? "") ?? Date()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        date = formatter.date(from: event.eventDate ?? "") ?? Date()
         isPublic = event.visibility == .public
         invitedUsers = event.participants ?? []
-//        admins = event.admins ?? []
+        admins = event.admins ?? []
         loadAllUsers()
     }
 
@@ -601,14 +754,40 @@ struct EventEditView: View {
     }
 
     private func addAdmin() {
-        // Ajoute le premier user non admin (à améliorer avec une vraie UI)
-        if let user = invitedUsers.first(where: { u in !admins.contains(where: { $0.id == u.id }) }) {
-            admins.append(user)
+        activeSheet = .adminPicker
+    }
+
+    private func promoteSelectedAdmin() {
+        guard let user = selectedAdminCandidate else { return }
+        Task {
+            do {
+                try await APIService.shared.promoteUserToAdmin(eventId: event.id, userId: user.id)
+                await MainActor.run {
+                    admins.append(user)
+                    // showAdminPicker = false
+                    selectedAdminCandidate = nil
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
     private func removeAdmin(_ user: User) {
-        admins.removeAll { $0.id == user.id }
+        Task {
+            do {
+                try await APIService.shared.removeAdminFromEvent(eventId: event.id, userId: user.id)
+                await MainActor.run {
+                    admins.removeAll { $0.id == user.id }
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
 
