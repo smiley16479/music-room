@@ -8,9 +8,11 @@ import {
   ManyToMany,
   JoinTable,
   JoinColumn,
+  OneToMany,
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/music/entities/track.entity';
+import { PlaylistTrack } from './playlist-track.entity';
 
 export enum PlaylistVisibility {
   PUBLIC = 'public',
@@ -82,12 +84,6 @@ export class Playlist {
   })
   collaborators: User[];
 
-  @ManyToMany(() => Track)
-  @JoinTable({
-    name: 'playlist_tracks',
-    joinColumn: { name: 'playlist_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'track_id', referencedColumnName: 'id' },
-    // orderBy: { position: 'ASC' },
-  })
-  tracks: Track[];
+  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.playlist)
+  playlistTracks: PlaylistTrack[];
 }
