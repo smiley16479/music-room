@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, onDestroy } from "svelte";
 	import { page } from "$app/stores";
 	import { authStore } from "$lib/stores/auth";
 	import { playlistsService, type Playlist } from "$lib/services/playlists";
+	import { socketService } from "$lib/services/socket";
 	import { goto, replaceState } from "$app/navigation";
 	import type { User } from "$lib/services/auth";
 
@@ -13,15 +14,10 @@
 	let loading = $state(false);
 	let error = $state("");
 	// Use the global auth store
-	let user = $state<User | null>(null);
-
-	// Subscribe to auth store changes
-	$effect(() => {
-		const unsubscribe = authStore.subscribe((value) => {
-			user = value;
-		});
-		return unsubscribe;
-	});
+	let user = $derived($authStore);
+	let isSocketConnected = $state(false);
+	let socketRetryAttempts = $state(0);
+	let maxSocketRetries = 3;
 
 	let showCreateModal = $state(false);
 	let activeTab = $state<"all" | "mine">("all");
@@ -55,6 +51,155 @@
 			playlists = data.playlists;
 		}
 	});
+
+	// Socket connection management
+	onMount(async () => {
+		// Setup socket connection for real-time updates
+		await setupSocketConnection();
+		
+		// Load playlists when component mounts
+		loadPlaylists();
+	});
+
+	onDestroy(() => {
+		// Cleanup socket connection
+		cleanupSocketConnection();
+	});
+
+	async function setupSocketConnection() {
+		try {
+			if (!socketService.isConnected()) {
+				await socketService.connect();
+			}
+
+			// Subscribe to global playlist events (not playlist-specific)
+			setupPlaylistSocketListeners();
+			
+			// Join a general playlists room for global updates
+			socketService.emit('join-playlists-room', {});
+			
+			isSocketConnected = true;
+			socketRetryAttempts = 0; // Reset retry count on successful connection
+			console.log('Socket connected for playlists page - listening for global playlist events');
+		} catch (err) {
+			console.error('Failed to set up socket connection:', err);
+			isSocketConnected = false;
+			
+			// Retry connection if we haven't exceeded max attempts
+			if (socketRetryAttempts < maxSocketRetries) {
+				socketRetryAttempts++;
+				console.log(`Retrying socket connection (${socketRetryAttempts}/${maxSocketRetries}) in 3 seconds...`);
+				setTimeout(() => {
+					setupSocketConnection();
+				}, 3000);
+			} else {
+				console.error('Max socket retry attempts reached. Operating in offline mode.');
+				error = 'Real-time updates unavailable. Please refresh the page to retry.';
+			}
+		}
+	}
+
+	function setupPlaylistSocketListeners() {
+		// Listen for playlist creation, updates, deletions
+		socketService.on('playlist-created', handlePlaylistCreated);
+		socketService.on('playlist-updated', handlePlaylistUpdated);
+		socketService.on('playlist-deleted', handlePlaylistDeleted);
+		socketService.on('playlist-track-added', handlePlaylistTrackAdded);
+		socketService.on('playlist-track-removed', handlePlaylistTrackRemoved);
+		socketService.on('playlist-tracks-reordered', handlePlaylistTracksReordered);
+		socketService.on('playlist-collaborator-added', handlePlaylistCollaboratorAdded);
+		socketService.on('playlist-collaborator-removed', handlePlaylistCollaboratorRemoved);
+	}
+
+	function cleanupSocketConnection() {
+		if (isSocketConnected) {
+			// Leave the general playlists room
+			socketService.emit('leave-playlists-room', {});
+			
+			// Remove listeners
+			socketService.off('playlist-created', handlePlaylistCreated);
+			socketService.off('playlist-updated', handlePlaylistUpdated);
+			socketService.off('playlist-deleted', handlePlaylistDeleted);
+			socketService.off('playlist-track-added', handlePlaylistTrackAdded);
+			socketService.off('playlist-track-removed', handlePlaylistTrackRemoved);
+			socketService.off('playlist-tracks-reordered', handlePlaylistTracksReordered);
+			socketService.off('playlist-collaborator-added', handlePlaylistCollaboratorAdded);
+			socketService.off('playlist-collaborator-removed', handlePlaylistCollaboratorRemoved);
+			isSocketConnected = false;
+			console.log('Cleaned up socket connection for playlists page');
+		}
+	}
+
+	// Socket event handlers for real-time updates
+	function handlePlaylistCreated(data: { playlist: Playlist }) {
+		console.log('Playlist created:', data.playlist);
+		playlists = [...playlists, data.playlist];
+	}
+
+	function handlePlaylistUpdated(data: { playlist: Playlist }) {
+		console.log('Playlist updated:', data.playlist);
+		playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
+	}
+
+	function handlePlaylistDeleted(data: { playlistId: string }) {
+		console.log('Playlist deleted:', data.playlistId);
+		playlists = playlists.filter(p => p.id !== data.playlistId);
+	}
+
+	function handlePlaylistCollaboratorAdded(data: { playlistId: string, collaborator: any, playlist?: Playlist }) {
+		console.log('Collaborator added to playlist:', data);
+		// If I was invited to a playlist, add it to my list
+		if (user && data.collaborator.userId === user.id) {
+			// If the full playlist is included, add it
+			if (data.playlist) {
+				const existingIndex = playlists.findIndex(p => p.id === data.playlistId);
+				if (existingIndex === -1) {
+					playlists = [...playlists, data.playlist];
+				}
+			} else {
+				// Otherwise, reload playlists to get the new one
+				loadPlaylists();
+			}
+		} else {
+			// Update the existing playlist's collaborator list
+			playlists = playlists.map(p => 
+				p.id === data.playlistId 
+					? { ...p, collaborators: [...p.collaborators, data.collaborator] }
+					: p
+			);
+		}
+	}
+
+	function handlePlaylistCollaboratorRemoved(data: { playlistId: string, userId: string }) {
+		console.log('Collaborator removed from playlist:', data);
+		// If I was removed from a playlist, remove it from my list (if it was private)
+		if (user && data.userId === user.id) {
+			const playlist = playlists.find(p => p.id === data.playlistId);
+			if (playlist && playlist.visibility === 'private') {
+				playlists = playlists.filter(p => p.id !== data.playlistId);
+			}
+		} else {
+			// Update the existing playlist's collaborator list
+			playlists = playlists.map(p => 
+				p.id === data.playlistId 
+					? { ...p, collaborators: p.collaborators.filter(c => c.userId !== data.userId) }
+					: p
+			);
+		}
+	}
+
+	function handlePlaylistTrackAdded(data: { playlistId: string, trackCount: number }) {
+		playlists = playlists.map(p => p.id === data.playlistId ? { ...p, trackCount: data.trackCount } : p);
+	}
+
+	function handlePlaylistTrackRemoved(data: { playlistId: string, trackCount: number }) {
+		playlists = playlists.map(p => p.id === data.playlistId ? { ...p, trackCount: data.trackCount } : p);
+	}
+
+	function handlePlaylistTracksReordered(data: { playlistId: string }) {
+		// Track count doesn't change, just trigger a re-render if needed
+		playlists = [...playlists];
+	}
 
 	// Filter and sort playlists
 	$effect(() => {
@@ -115,11 +260,6 @@
 	});
 
 	// No need for onMount to initialize user, it's handled by the store
-	onMount(() => {
-		// Load playlists when component mounts
-		loadPlaylists();
-	});
-
 	// Watch for activeTab changes specifically
 	$effect(() => {
 		// Track activeTab to trigger when it changes
@@ -183,6 +323,21 @@
 					: "Failed to create playlist";
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function deletePlaylist(playlistId: string, playlistName: string) {
+		if (!user) return;
+		
+		if (!confirm(`Are you sure you want to delete "${playlistName}"? This action cannot be undone.`)) {
+			return;
+		}
+
+		try {
+			await playlistsService.deletePlaylist(playlistId);
+			// The socket event will handle removing it from the list
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Failed to delete playlist";
 		}
 	}
 
@@ -294,45 +449,67 @@
 						id="search"
 						type="text"
 						bind:value={searchQuery}
-						placeholder="Search by playlist name, owner, or description..."
+						placeholder="Search playlists by name, owner, or description..."
 						class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 					/>
 				</div>
 			</div>
 
-			<!-- Sort Controls -->
-			<div class="flex items-center space-x-2">
-				<span class="text-sm text-gray-600 font-medium">Sort by:</span>
-				<button
-					onclick={() => handleSort("date")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'date' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Date {getSortIcon("date")}
-				</button>
-				<button
-					onclick={() => handleSort("name")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'name' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Name {getSortIcon("name")}
-				</button>
-				<button
-					onclick={() => handleSort("owner")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'owner' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Owner {getSortIcon("owner")}
-				</button>
-				<button
-					onclick={() => handleSort("tracks")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'tracks' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Tracks {getSortIcon("tracks")}
-				</button>
-				<button
-					onclick={() => handleSort("collaborators")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'collaborators' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Collaborators {getSortIcon("collaborators")}
-				</button>
+			<!-- Real-time status indicator -->
+			<div class="flex items-center space-x-4">
+				{#if isSocketConnected}
+					<div class="flex items-center text-sm text-green-600">
+						<div class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
+						Live Updates Active
+					</div>
+				{:else}
+					<div class="flex items-center text-sm text-red-500">
+						<div class="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
+						Offline Mode
+					</div>
+				{/if}
+
+				<!-- Socket connection debug info (only in development) -->
+				{#if typeof window !== 'undefined' && window.location.hostname === 'localhost'}
+					<div class="text-xs text-gray-400">
+						Debug: Socket {isSocketConnected ? 'Connected' : 'Disconnected'}
+					</div>
+				{/if}
+
+				<!-- Sort Controls -->
+				<div class="flex items-center space-x-2">
+					<span class="text-sm text-gray-600 font-medium">Sort by:</span>
+					<button
+						onclick={() => handleSort("date")}
+						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'date' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+					>
+						Date {getSortIcon("date")}
+					</button>
+					<button
+						onclick={() => handleSort("name")}
+						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'name' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+					>
+						Name {getSortIcon("name")}
+					</button>
+					<button
+						onclick={() => handleSort("owner")}
+						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'owner' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+					>
+						Owner {getSortIcon("owner")}
+					</button>
+					<button
+						onclick={() => handleSort("tracks")}
+						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'tracks' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+					>
+						Tracks {getSortIcon("tracks")}
+					</button>
+					<button
+						onclick={() => handleSort("collaborators")}
+						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'collaborators' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+					>
+						Collaborators {getSortIcon("collaborators")}
+					</button>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -419,6 +596,21 @@
 											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
 												Owner
 											</span>
+											<!-- Delete button for owners -->
+											<button
+												onclick={(e) => {
+													e.preventDefault();
+													e.stopPropagation();
+													deletePlaylist(playlist.id, playlist.name);
+												}}
+												class="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+												title="Delete playlist"
+												aria-label={`Delete ${playlist.name}`}
+											>
+												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+												</svg>
+											</button>
 										{:else if user && playlist.collaborators.some(collab => collab.userId === user!.id)}
 											<span class="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
 												Collaborator

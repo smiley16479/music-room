@@ -23,7 +23,8 @@
     console.log('MusicPlayer: Updating audio source:', {
       newSrc: playerState.currentTrack.previewUrl,
       currentSrc: currentAudioSrc,
-      track: playerState.currentTrack.title
+      track: playerState.currentTrack.title,
+      shouldAutoPlay: playerState.isPlaying
     });
     
     // Clear any existing timeout
@@ -34,6 +35,15 @@
     
     currentAudioSrc = playerState.currentTrack.previewUrl;
     audioElement.src = currentAudioSrc;
+    
+    // Auto-play if the player is in playing state
+    if (playerState.isPlaying) {
+      audioElement.load(); // Ensure the audio is loaded
+      audioElement.play().catch(error => {
+        console.error('Auto-play failed:', error);
+        musicPlayerStore.pause();
+      });
+    }
     
     // Set a timeout to clear loading state if audio doesn't load
     loadTimeout = setTimeout(() => {
@@ -85,7 +95,19 @@
   
   function handleEnded() {
     console.log('Audio: ended event');
-    musicPlayerStore.nextTrack();
+    // Check if there's a next track and auto-advance
+    if (playerState.currentTrackIndex < playerState.playlist.length - 1) {
+      musicPlayerStore.nextTrack();
+      // Auto-play the next track after a brief delay
+      setTimeout(() => {
+        if (audioElement && playerState.isPlaying) {
+          audioElement.play().catch(console.error);
+        }
+      }, 100);
+    } else {
+      // End of playlist, stop playing
+      musicPlayerStore.pause();
+    }
   }
   
   function handleCanPlay() {

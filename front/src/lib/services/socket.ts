@@ -12,7 +12,7 @@ export interface PlaylistParticipant {
 }
 
 export interface PlaylistSocketEvents {
-  // Incoming events
+  // Incoming events for participants
   'collaborator-joined': (data: { 
     playlistId: string; 
     userId: string; 
@@ -33,12 +33,21 @@ export interface PlaylistSocketEvents {
     participants: PlaylistParticipant[]; 
   }) => void;
   
-  'error': (data: { message: string; details?: string }) => void;
+  // Playlist management events
+  'playlist-created': (data: { playlist: any }) => void;
+  'playlist-updated': (data: { playlist: any }) => void;
+  'playlist-deleted': (data: { playlistId: string }) => void;
   
-  // Collaborative editing events
-  'track-added': (data: any) => void;
-  'track-removed': (data: any) => void;
-  'tracks-reordered': (data: any) => void;
+  // Collaborative editing events for tracks
+  'playlist-track-added': (data: { playlistId: string; track: any; trackCount: number }) => void;
+  'playlist-track-removed': (data: { playlistId: string; trackId: string; trackCount: number }) => void;
+  'playlist-tracks-reordered': (data: { playlistId: string; tracks: any[] }) => void;
+  
+  // Collaborator management events
+  'playlist-collaborator-added': (data: { playlistId: string; collaborator: any; playlist?: any }) => void;
+  'playlist-collaborator-removed': (data: { playlistId: string; userId: string }) => void;
+  
+  'error': (data: { message: string; details?: string }) => void;
 }
 
 class SocketService {

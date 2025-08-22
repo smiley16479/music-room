@@ -106,10 +106,12 @@ function createMusicPlayerStore() {
               albumCoverUrl: nextTrack.track.albumCoverUrl,
               previewUrl: nextTrack.track.previewUrl
             },
-            currentTime: 0
+            currentTime: 0,
+            // Keep playing state - the audio component will handle auto-play
+            isPlaying: state.isPlaying
           };
         }
-        return state;
+        return { ...state, isPlaying: false }; // Stop if no next track
       });
     },
 
@@ -130,7 +132,9 @@ function createMusicPlayerStore() {
               albumCoverUrl: prevTrack.track.albumCoverUrl,
               previewUrl: prevTrack.track.previewUrl
             },
-            currentTime: 0
+            currentTime: 0,
+            // Keep playing state - the audio component will handle auto-play
+            isPlaying: state.isPlaying
           };
         }
         return state;
