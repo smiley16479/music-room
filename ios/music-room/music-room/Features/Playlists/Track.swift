@@ -1,206 +1,97 @@
 import SwiftUI
 import Combine
-
-// MARK: - Models
-struct PlaylistTrack: Identifiable {
-    let id = UUID()
-    var title: String?
-    var artist: String?
-    var albumArt: String? // URL de l'image
-    var duration: TimeInterval?
-    var startTime: TimeInterval?
-    var endTime: TimeInterval?
-    var likes: Int = 0
-    var dislikes: Int = 0
-    var hasPlayed: Bool = false
-    var isCurrentlyPlaying: Bool = false
-    var deezerTrackId: String? // ID Deezer pour référence
-    var preview: String? // URL de preview Deezer (30 secondes)
-    
-    var voteScore: Int {
-        likes - dislikes
-    }
-    
-    var formattedDuration: String {
-        guard let duration = duration else { return "--:--" }
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-}
-
-// MARK: - Deezer API Models
-struct DeezerSearchResponse: Codable {
-    let data: [DeezerTrack]
-    let total: Int
-    let next: String?
-}
-
-struct DeezerTrack: Codable {
-    let id: Int
-    let title: String
-    let duration: Int
-    let preview: String
-    let artist: DeezerArtist
-    let album: DeezerAlbum
-    
-    var asTrack: PlaylistTrack {
-        PlaylistTrack(
-            title: title,
-            artist: artist.name,
-            albumArt: album.cover_medium,
-            duration: TimeInterval(duration),
-            deezerTrackId: String(id),
-            preview: preview
-        )
-    }
-}
-
-struct DeezerArtist: Codable {
-    let id: Int
-    let name: String
-}
-
-struct DeezerAlbum: Codable {
-    let id: Int
-    let title: String
-    let cover_small: String
-    let cover_medium: String
-    let cover_big: String
-}
-
-// MARK: - Deezer API Service
-class DeezerService: ObservableObject {
-    @Published var searchResults: [DeezerTrack] = []
-    @Published var isSearching: Bool = false
-    @Published var searchError: String?
-    
-    private var cancellables = Set<AnyCancellable>()
-    
-    func searchTracks(query: String) {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            searchResults = []
-            return
-        }
-        
-        isSearching = true
-        searchError = nil
-        
-        // URL encode the query
-        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            searchError = "Erreur d'encodage de la requête"
-            isSearching = false
-            return
-        }
-        
-        // Deezer API endpoint (CORS proxy needed for web/iOS)
-        // Note: En production, utilisez votre propre backend pour éviter les problèmes CORS
-        let urlString = "https://api.deezer.com/search?q=\(encodedQuery)&limit=20"
-        
-        guard let url = URL(string: urlString) else {
-            searchError = "URL invalide"
-            isSearching = false
-            return
-        }
-        
-        URLSession.shared.dataTaskPublisher(for: url)
-            .map(\.data)
-            .decode(type: DeezerSearchResponse.self, decoder: JSONDecoder())
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { [weak self] completion in
-                    self?.isSearching = false
-                    if case .failure(let error) = completion {
-                        self?.searchError = "Erreur de recherche: \(error.localizedDescription)"
-                        // Utiliser des données mock en cas d'erreur (pour le développement)
-                        self?.loadMockSearchResults(for: query)
-                    }
-                },
-                receiveValue: { [weak self] response in
-                    self?.searchResults = response.data
-                }
-            )
-            .store(in: &cancellables)
-    }
-    
-    // Mock data pour le développement (en cas d'erreur API)
-    private func loadMockSearchResults(for query: String) {
-        searchResults = [
-            DeezerTrack(
-                id: 1,
-                title: "Mock: \(query) - Song 1",
-                duration: 200,
-                preview: "https://example.com/preview1.mp3",
-                artist: DeezerArtist(id: 1, name: "Artist 1"),
-                album: DeezerAlbum(
-                    id: 1,
-                    title: "Album 1",
-                    cover_small: "https://via.placeholder.com/56",
-                    cover_medium: "https://via.placeholder.com/250",
-                    cover_big: "https://via.placeholder.com/500"
-                )
-            ),
-            DeezerTrack(
-                id: 2,
-                title: "Mock: \(query) - Song 2",
-                duration: 180,
-                preview: "https://example.com/preview2.mp3",
-                artist: DeezerArtist(id: 2, name: "Artist 2"),
-                album: DeezerAlbum(
-                    id: 2,
-                    title: "Album 2",
-                    cover_small: "https://via.placeholder.com/56",
-                    cover_medium: "https://via.placeholder.com/250",
-                    cover_big: "https://via.placeholder.com/500"
-                )
-            )
-        ]
-    }
-}
+import AVFoundation
 
 // MARK: - View Model
+@Observable
 class PlaylistViewModel: ObservableObject {
-    @Published var tracks: [PlaylistTrack] = []
-    @Published var currentTrackId: UUID?
-    @Published var proposedTracks: [PlaylistTrack] = [] // Tracks proposés par les utilisateurs
+    var playlist: Playlist
+    var tracks: [Track] = []
+    var currentTrackId: String?
+    var proposedTracks: [Track] = [] // Tracks proposés par les utilisateurs
+//    @State private var errorMessage: String?
     
-    init() {
+    init(playlist: Playlist) {
+        self.playlist = playlist
         loadMockData()
+    }
+
+    static var mockPlaylist: Playlist {
+        Playlist(
+            id: UUID().uuidString,
+            name: "Mock Playlist",
+            description: "Playlist de test",
+            tracks: [
+                PlaylistTrack(
+                    id: UUID().uuidString,
+                    track: Track(id: UUID().uuidString, title: "Mock Song 1", artist: "Mock Artist", duration: 180),
+                    addedBy: User.mock()
+                ),
+                PlaylistTrack(
+                    id: UUID().uuidString,
+                    track: Track(id: UUID().uuidString, title: "Mock Song 2", artist: "Mock Artist", duration: 200),
+                    addedBy: User.mock()
+                )
+            ]
+        )
     }
     
     func loadMockData() {
         tracks = [
-            PlaylistTrack(title: "Bohemian Rhapsody", artist: "Queen", albumArt: "https://via.placeholder.com/250", duration: 354, likes: 45, dislikes: 2, hasPlayed: true),
-            PlaylistTrack(title: "Imagine", artist: "John Lennon", albumArt: "https://via.placeholder.com/250", duration: 183, likes: 38, dislikes: 1, hasPlayed: true),
-            PlaylistTrack(title: "Hotel California", artist: "Eagles", albumArt: "https://via.placeholder.com/250", duration: 391, likes: 52, dislikes: 3, isCurrentlyPlaying: true),
-            PlaylistTrack(title: "Stairway to Heaven", artist: "Led Zeppelin", albumArt: "https://via.placeholder.com/250", duration: 482, likes: 41, dislikes: 5),
-            PlaylistTrack(title: "Sweet Child O' Mine", artist: "Guns N' Roses", albumArt: "https://via.placeholder.com/250", duration: 356, likes: 35, dislikes: 8),
-            PlaylistTrack(title: "Billie Jean", artist: "Michael Jackson", albumArt: "https://via.placeholder.com/250", duration: 294, likes: 48, dislikes: 2),
-            PlaylistTrack(title: "Smells Like Teen Spirit", artist: "Nirvana", albumArt: "https://via.placeholder.com/250", duration: 301, likes: 33, dislikes: 12),
-            PlaylistTrack(title: "Wonderwall", artist: "Oasis", albumArt: "https://via.placeholder.com/250", duration: 258, likes: 29, dislikes: 15)
+            // Track(id: UUID().uuidString ,title: "Bohemian Rhapsody", artist: "Queen", duration: 354, albumCoverUrl: "https://cdn-images.dzcdn.net/images/cover/90192223423fbfa45bbf4ef9f68cf9f7/250x250-000000-80-0-0.jpg", likes: 45, dislikes: 2, hasPlayed: true),
+            // Track(id: UUID().uuidString ,title: "Imagine", artist: "John Lennon", duration: 183, albumCoverUrl: "https://cdn-images.dzcdn.net/images/cover/2675a9277dfabb74c32b7a3b2c9b0170/250x250-000000-80-0-0.jpg", likes: 38, dislikes: 1, hasPlayed: true),
+            // Track(id: UUID().uuidString ,title: "Hotel California", artist: "Eagles", duration: 391, albumCoverUrl: "https://cdn-images.dzcdn.net/images/cover/7a6c7b49cfdaf4ee233f66c3070d2f40/250x250-000000-80-0-0.jpg", likes: 52, dislikes: 3, isCurrentlyPlaying: true),
+            // Track(id: UUID().uuidString ,title: "Stairway to Heaven", artist: "Led Zeppelin", duration: 482,
+            //       previewUrl: "https://cdnt-preview.dzcdn.net/api/1/1/0/9/2/0/092937978412c7b50c249d0e3664e009.mp3?hdnea=exp=1755637822~acl=/api/1/1/0/9/2/0/092937978412c7b50c249d0e3664e009.mp3*~data=user_id=0,application_id=42~hmac=26afacddc0d42b108305ce2c13ea60a8c1a80b9af460d52344ed6b58d22488c8",
+            //       albumCoverUrl: "https://cdn-images.dzcdn.net/images/cover/460a0edd96f743be03b7405eac38c633/250x250-000000-80-0-0.jpg",
+            //       likes: 41, dislikes: 5),
+            // Track(id: UUID().uuidString ,title: "Sweet Child O' Mine", artist: "Guns N' Roses", duration: 356, albumCoverUrl: "https://cdn-images.dzcdn.net/images/cover/8bfe7b3b0985d9ff0751090fb2b6f73f/250x250-000000-80-0-0.jpg", likes: 35, dislikes: 8),
+            // Track(id: UUID().uuidString ,title: "Billie Jean", artist: "Michael Jackson", duration: 294, albumCoverUrl: "https://via.placeholder.com/250", likes: 48, dislikes: 2),
+            // Track(id: UUID().uuidString ,title: "Smells Like Teen Spirit", artist: "Nirvana", duration: 301, albumCoverUrl: "https://via.placeholder.com/250", likes: 33, dislikes: 12),
+            // Track(id: UUID().uuidString ,title: "Wonderwall", artist: "Oasis", duration: 258, albumCoverUrl: "https://via.placeholder.com/250", likes: 29, dislikes: 15)
         ]
         
         // Set current track
-        if let currentTrack = tracks.first(where: { $0.isCurrentlyPlaying }) {
+        if let currentTrack = tracks.first(where: { ($0.isCurrentlyPlaying ?? false) }) {
             currentTrackId = currentTrack.id
         }
     }
-    
-    func voteTrack(id: UUID, isLike: Bool) {
-        guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
-        
-        // Only allow voting on upcoming tracks
-        if !tracks[index].hasPlayed && !tracks[index].isCurrentlyPlaying {
-            if isLike {
-                tracks[index].likes += 1
-            } else {
-                tracks[index].dislikes += 1
-            }
-            sortUpcomingTracks()
+
+    func loadPlaylistDetails() async {
+        // Appelle l’API pour récupérer les détails et les tracks
+        do {
+            let playlistTracks = try await APIService.shared.getPlaylistTracks(playlist.id).map { $0.track }
+            // Mets à jour les tracks et autres infos
+            self.tracks = playlistTracks
+            // ... autres mises à jour ...
+        } catch {
+            // Gère l’erreur
         }
     }
     
-    func addTrackToPlaylist(_ track: PlaylistTrack) {
+    func voteTrack(id: String, isLike: Bool) {
+        guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
+        
+        // Only allow voting on upcoming tracks
+        if !(tracks[index].hasPlayed ?? false) && !(tracks[index].isCurrentlyPlaying ?? false) {
+            if isLike {
+                tracks[index].likes = (tracks[index].likes ?? 0) + 1
+            } else {
+                tracks[index].dislikes = (tracks[index].dislikes ?? 0) + 1
+            }
+            sortUpcomingTracks()
+        }
+
+      // Non envoyé par http:
+      // EventsSocketService.shared.emit("vote-track", [
+      //   "eventId": myEventId,
+      //   "trackId": id,
+      //   "type": isLike ? "like" : "dislike"
+      // ])
+    }
+    
+    func addTrackToPlaylist(_ track: Track) async {
+      print("Adding track to playlist: \(track)")
         var newTrack = track
         newTrack.likes = 0
         newTrack.dislikes = 0
@@ -208,24 +99,53 @@ class PlaylistViewModel: ObservableObject {
         newTrack.isCurrentlyPlaying = false
         tracks.append(newTrack)
         sortUpcomingTracks()
+
+      let payload: [String: Any] = [
+          "deezerId": track.deezerId ?? "",
+          "title": track.title,
+          "artist": track.artist,
+          "album": track.album ?? "",
+          "albumCoverUrl": track.albumCoverUrl ?? "",
+          "previewUrl": track.previewUrl ?? "",
+          "duration": track.duration,
+          // "position": ... // optionnel si tu veux gérer la position
+      ]
+
+      Task {
+          do {
+              _ = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
+              await MainActor.run {
+//                  isSaving = false
+//                  dismiss()
+              }
+          } catch {
+              await MainActor.run {
+//                    errorMessage = error.localizedDescription
+//                    isSaving = false
+                }
+          }
+      }
+        // Forme du dto:
+        // trackId: string
+        // position?: number
     }
     
-    func addProposedTrack(_ track: PlaylistTrack) {
+    func addProposedTrack(_ track: Track) {
         proposedTracks.append(track)
     }
     
-    func approveProposedTrack(_ track: PlaylistTrack) {
-        addTrackToPlaylist(track)
+    func approveProposedTrack(_ track: Track) async {
+        await addTrackToPlaylist(track)
         proposedTracks.removeAll { $0.id == track.id }
     }
     
-    func rejectProposedTrack(_ track: PlaylistTrack) {
+    func rejectProposedTrack(_ track: Track) {
         proposedTracks.removeAll { $0.id == track.id }
     }
     
     private func sortUpcomingTracks() {
         // Find the index of the current track
-        guard let currentIndex = tracks.firstIndex(where: { $0.isCurrentlyPlaying }) else { return }
+        guard let currentIndex = tracks.firstIndex(where: { ($0.isCurrentlyPlaying ?? false) }) else { return }
         
         // Sort only upcoming tracks by vote score
         let playedTracks = tracks[0...currentIndex]
@@ -236,7 +156,7 @@ class PlaylistViewModel: ObservableObject {
         tracks = Array(playedTracks) + upcomingTracks
     }
     
-    var currentTrack: PlaylistTrack? {
+    var currentTrack: Track? {
         tracks.first(where: { $0.id == currentTrackId })
     }
 }
@@ -277,6 +197,11 @@ struct DeezerSearchView: View {
                         .foregroundColor(.red)
                         .padding(.horizontal)
                 }
+//                if let error = errorMessage {
+//                    Section {
+//                        Text(error).foregroundColor(.red)
+//                    }
+//                }
                 
                 // Search results
                 List(deezerService.searchResults, id: \.id) { deezerTrack in
@@ -297,7 +222,9 @@ struct DeezerSearchView: View {
                     playlistViewModel.addProposedTrack(track.asTrack)
                 }
                 Button("Ajouter directement", role: .none) {
-                    playlistViewModel.addTrackToPlaylist(track.asTrack)
+                    Task{
+                        await playlistViewModel.addTrackToPlaylist(track.asTrack)
+                    }
                 }
                 Button("Annuler", role: .cancel) {}
             } message: { track in
@@ -307,7 +234,7 @@ struct DeezerSearchView: View {
     }
 }
 
-// MARK: - Deezer PlaylistTrack Row
+// MARK: - Deezer Track Row
 struct DeezerTrackRow: View {
     let track: DeezerTrack
     let onAdd: () -> Void
@@ -329,7 +256,7 @@ struct DeezerTrackRow: View {
             .frame(width: 56, height: 56)
             .cornerRadius(8)
             
-            // PlaylistTrack info
+            // Track info
             VStack(alignment: .leading, spacing: 4) {
                 Text(track.title)
                     .font(.headline)
@@ -370,24 +297,41 @@ struct DeezerTrackRow: View {
     }
 }
 
-// MARK: - Playlist View (Component 1)
-struct PlaylistView: View {
-    @StateObject private var viewModel = PlaylistViewModel()
+// MARK: - Playlist Details View
+struct PlaylistDetailsView: View {
+    let playlist: Playlist
+    @StateObject private var viewModel: PlaylistViewModel
+    @EnvironmentObject var authManager: AuthenticationManager
     @State private var displayMode: DisplayMode = .list
     @State private var showingDeezerSearch = false
     @State private var showingProposedTracks = false
     
+    init(playlist: Playlist) {
+        self.playlist = playlist
+        // Crée une seule instance avec les bonnes données
+        let vm = PlaylistViewModel(playlist: playlist)
+        let playlistTracks: [Track] = (playlist.tracks ?? []).map { $0.track }
+        vm.tracks.append(contentsOf: playlistTracks)
+        _viewModel = StateObject(wrappedValue: vm)
+    }
+
     // Configuration variables
     var maxTracksToDisplay: Int = 20
     var albumArtSize: CGFloat = 180
     var carouselScrollSpeed: Double = 1.0
-    var onTrackSelected: ((PlaylistTrack) -> Void)?
+    var onTrackSelected: ((Track) -> Void)?
     
     enum DisplayMode {
         case list
         case carousel
     }
-    
+
+    // Simule si l'utilisateur est admin sur l'event (à remplacer par ta logique réelle)
+    var isAdmin: Bool {
+        // Remplace par ta logique d'authentification/permission
+        true
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header with toggle and add button
@@ -395,10 +339,7 @@ struct PlaylistView: View {
                 Text("Playlist")
                     .font(.largeTitle)
                     .fontWeight(.bold)
-                
                 Spacer()
-                
-                // Proposed tracks badge
                 if !viewModel.proposedTracks.isEmpty {
                     Button(action: {
                         showingProposedTracks.toggle()
@@ -408,8 +349,6 @@ struct PlaylistView: View {
                             .foregroundColor(.orange)
                     }
                 }
-                
-                // Add from Deezer button
                 Button(action: {
                     showingDeezerSearch.toggle()
                 }) {
@@ -417,8 +356,6 @@ struct PlaylistView: View {
                         .font(.title2)
                         .foregroundColor(.green)
                 }
-                
-                // View mode toggle
                 Button(action: {
                     withAnimation(.spring()) {
                         displayMode = displayMode == .list ? .carousel : .list
@@ -430,7 +367,12 @@ struct PlaylistView: View {
                 }
             }
             .padding()
-            
+
+            // Audio player visible seulement pour les admins
+            if isAdmin {
+               AudioPlayerView(viewModel: viewModel)
+            }
+
             // Content
             if displayMode == .list {
                 listView
@@ -444,29 +386,64 @@ struct PlaylistView: View {
         .sheet(isPresented: $showingProposedTracks) {
             ProposedTracksView(viewModel: viewModel)
         }
+        .task {
+            await viewModel.loadPlaylistDetails()
+        }
     }
-    
     // MARK: List View
+    // private var listView: some View {
+    //     ScrollView {
+    //         LazyVStack(spacing: 12) {
+    //             ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+    //                 TrackRowView(
+    //                     track: track,
+    //                     onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+    //                     onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+    //                     canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+    //                 )
+    //             }
+    //         }
+    //         .padding(.horizontal)
+    //     }
+    // }
+
     private var listView: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
+        List {
+            if isAdmin {
                 ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
                     TrackRowView(
                         track: track,
                         onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
                         onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
-                        canVote: !track.hasPlayed && !track.isCurrentlyPlaying
+                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
                     )
+                    .listRowInsets(EdgeInsets())
+                }
+                .onDelete { indexSet in
+                    for index in indexSet {
+                        let track = viewModel.tracks[index]
+                        viewModel.tracks.remove(at: index)
+                        // Optionnel : appel API pour supprimer côté serveur
+                    }
+                }
+            } else {
+                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+                    TrackRowView(
+                        track: track,
+                        onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+                        onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+                    )
+                    .listRowInsets(EdgeInsets())
                 }
             }
-            .padding(.horizontal)
         }
     }
     
     // MARK: Carousel View
     private var carouselView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: -albumArtSize * 0.4) {
+            HStack(spacing: -albumArtSize * 0.2) {
                 ForEach(Array(viewModel.tracks.enumerated()), id: \.element.id) { index, track in
                     AlbumArtView(
                         track: track,
@@ -484,6 +461,147 @@ struct PlaylistView: View {
     }
 }
 
+// MARK: Audio Player View
+struct AudioPlayerView: View {
+    @ObservedObject var viewModel: PlaylistViewModel
+    @State private var audioPlayer: AVPlayer? = nil
+    @State private var isPlaying: Bool = false
+    @State private var currentTrackIndex: Int = 0
+    @State private var volume: Float = 0.5
+
+   
+   var body: some View {
+       VStack(spacing: 8) {
+           let tracks = viewModel.tracks
+           if !tracks.isEmpty {
+               let track = tracks[currentTrackIndex]
+               Text(track.title)
+                   .font(.headline)
+               Text(track.artist)
+                   .font(.caption)
+                   .foregroundColor(.secondary)
+               HStack(spacing: 24) {
+                   Button(action: previousTrack) {
+                       Image(systemName: "backward.fill")
+                           .font(.title)
+                   }
+                   Button(action: {
+                       togglePlayPause(for: track)
+                   }) {
+                       Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                           .font(.system(size: 44))
+                           .foregroundColor(.blue)
+                   }
+                   Button(action: nextTrack) {
+                       Image(systemName: "forward.fill")
+                           .font(.title)
+                   }
+               }
+
+               // Volume slider
+               HStack {
+                   Image(systemName: "speaker.fill")
+                   Slider(value: Binding(
+                       get: { Double(volume) },
+                       set: { newValue in
+                           volume = Float(newValue)
+                           audioPlayer?.volume = volume
+                       }
+                   ), in: 0...1)
+                   Image(systemName: "speaker.wave.3.fill")
+               }
+               .padding(.horizontal)
+           }
+       }
+       .padding()
+       .onAppear {
+           audioPlayer?.volume = volume
+       }
+   }
+
+  //  private func togglePlayPause(for track: Track) {
+  //      guard let previewUrl = track.preview ?? track.previewUrl, let url = URL(string: previewUrl) else { return }
+  //      if audioPlayer == nil || audioPlayer?.currentItem?.asset as? AVURLAsset != AVURLAsset(url: url) {
+  //          audioPlayer = AVPlayer(url: url)
+  //      }
+  //      if isPlaying {
+  //          audioPlayer?.pause()
+  //          isPlaying = false
+  //      } else {
+  //          audioPlayer?.play()
+  //          isPlaying = true
+  //      }
+  //  }
+
+   private func togglePlayPause(for track: Track) {
+    guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
+    // Synchronize track state
+    syncCurrentTrack(track: track)
+
+    // Vérifie si le player joue déjà ce morceau
+    // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
+
+    if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
+       currentAsset.url == url {
+        // Même morceau : toggle play/pause
+        if isPlaying {
+            audioPlayer?.pause()
+            isPlaying = false
+        } else {
+            audioPlayer?.play()
+            isPlaying = true
+        }
+    } else {
+        // Un autre morceau : pause l'ancien player
+        audioPlayer?.pause()
+        isPlaying = false
+        // Nouveau morceau : crée un nouveau player et joue
+        audioPlayer = AVPlayer(url: url)
+        audioPlayer?.play()
+        isPlaying = true
+    }
+}
+
+   private func nextTrack() {
+       let tracks = viewModel.tracks
+       guard !tracks.isEmpty else { return }
+       // Mark previous track as played
+       if tracks.indices.contains(currentTrackIndex) {
+           viewModel.tracks[currentTrackIndex].hasPlayed = true
+           viewModel.tracks[currentTrackIndex].isCurrentlyPlaying = false
+       }
+       currentTrackIndex = (currentTrackIndex + 1) % tracks.count
+       isPlaying = false
+       let track = tracks[currentTrackIndex]
+       togglePlayPause(for: track)
+   }
+
+   private func previousTrack() {
+       let tracks = viewModel.tracks
+       guard !tracks.isEmpty else { return }
+       // Unmark hasPlayed for current track if going back
+       if tracks.indices.contains(currentTrackIndex) {
+           viewModel.tracks[currentTrackIndex].hasPlayed = false
+           viewModel.tracks[currentTrackIndex].isCurrentlyPlaying = false
+       }
+       currentTrackIndex = (currentTrackIndex - 1 + tracks.count) % tracks.count
+       isPlaying = false
+       let track = tracks[currentTrackIndex]
+       togglePlayPause(for: track)
+   }
+
+   private func syncCurrentTrack(track: Track) {
+       let tracks = viewModel.tracks
+        // Update currentTrackId in the viewModel
+        viewModel.currentTrackId = track.id
+        
+        // Update isCurrentlyPlaying for all tracks
+        for i in tracks.indices {
+            viewModel.tracks[i].isCurrentlyPlaying = (tracks[i].id == track.id)
+        }
+   }
+}
+
 // MARK: - Proposed Tracks View
 struct ProposedTracksView: View {
     @ObservedObject var viewModel: PlaylistViewModel
@@ -495,9 +613,9 @@ struct ProposedTracksView: View {
                 ForEach(viewModel.proposedTracks) { track in
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(track.title ?? "Unknown")
+                            Text(track.title)
                                 .font(.headline)
-                            Text(track.artist ?? "Unknown Artist")
+                            Text(track.artist)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -505,7 +623,9 @@ struct ProposedTracksView: View {
                         Spacer()
                         
                         Button(action: {
-                            viewModel.approveProposedTrack(track)
+                            Task {
+                                await viewModel.approveProposedTrack(track)
+                            }
                         }) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -536,9 +656,9 @@ struct ProposedTracksView: View {
     }
 }
 
-// MARK: - PlaylistTrack Row View
+// MARK: - Track Row View
 struct TrackRowView: View {
-    let track: PlaylistTrack
+    let track: Track
     let onLike: () -> Void
     let onDislike: () -> Void
     let canVote: Bool
@@ -546,7 +666,7 @@ struct TrackRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Album art
-            if let albumArt = track.albumArt, let url = URL(string: albumArt) {
+            if let albumCoverUrl = track.albumCoverUrl, let url = URL(string: albumCoverUrl) {
                 AsyncImage(url: url) { image in
                     image
                         .resizable()
@@ -570,25 +690,25 @@ struct TrackRowView: View {
                     .frame(width: 50, height: 50)
             }
             
-            // PlaylistTrack info
+            // Track info
             VStack(alignment: .leading, spacing: 4) {
-                Text(track.title ?? "Unknown Title")
+                Text(track.title)
                     .font(.headline)
                     .lineLimit(1)
                 
-                Text(track.artist ?? "Unknown Artist")
+                Text(track.artist)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
             
-            Spacer()
+             Spacer()
             
             // Status indicator
-            if track.isCurrentlyPlaying {
+            if (track.isCurrentlyPlaying ?? false) {
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundColor(.green)
-            } else if track.hasPlayed {
+            } else if (track.hasPlayed ?? false) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.gray)
             }
@@ -601,7 +721,7 @@ struct TrackRowView: View {
                             Image(systemName: "hand.thumbsup")
                                 .foregroundColor(.green)
                         }
-                        Text("\(track.likes)")
+                        Text("\((track.likes ?? 0))")
                             .font(.caption2)
                             .foregroundColor(.green)
                     }
@@ -611,21 +731,10 @@ struct TrackRowView: View {
                             Image(systemName: "hand.thumbsdown")
                                 .foregroundColor(.red)
                         }
-                        Text("\(track.dislikes)")
+                        Text("\((track.dislikes ?? 0))")
                             .font(.caption2)
                             .foregroundColor(.red)
                     }
-                }
-            } else {
-                // Just show vote counts
-                HStack(spacing: 12) {
-                    Label("\(track.likes)", systemImage: "hand.thumbsup.fill")
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                    
-                    Label("\(track.dislikes)", systemImage: "hand.thumbsdown.fill")
-                        .font(.caption)
-                        .foregroundColor(.gray)
                 }
             }
             
@@ -637,21 +746,21 @@ struct TrackRowView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(track.isCurrentlyPlaying ? Color.blue.opacity(0.1) : Color.gray.opacity(0.05))
+                .fill((track.isCurrentlyPlaying ?? false) ? Color.blue.opacity(0.1) : Color.gray.opacity(0.05))
         )
     }
 }
 
 // MARK: - Album Art View (for carousel)
 struct AlbumArtView: View {
-    let track: PlaylistTrack
+    let track: Track
     let size: CGFloat
     let index: Int
     let onTap: () -> Void
     
     var body: some View {
         VStack(spacing: 8) {
-            if let albumArt = track.albumArt, let url = URL(string: albumArt) {
+            if let albumCoverUrl = track.albumCoverUrl, let url = URL(string: albumCoverUrl) {
                 AsyncImage(url: url) { image in
                     image
                         .resizable()
@@ -668,7 +777,7 @@ struct AlbumArtView: View {
                 }
                 .cornerRadius(12)
                 .overlay(
-                    track.isCurrentlyPlaying ?
+                    (track.isCurrentlyPlaying ?? false) ?
                     Image(systemName: "speaker.wave.2.fill")
                         .foregroundColor(.white)
                         .padding()
@@ -696,7 +805,7 @@ struct AlbumArtView: View {
                                 .font(.system(size: size * 0.3))
                                 .foregroundColor(.white.opacity(0.8))
                             
-                            if track.isCurrentlyPlaying {
+                            if (track.isCurrentlyPlaying ?? false) {
                                 Image(systemName: "speaker.wave.2.fill")
                                     .foregroundColor(.white)
                                     .padding(.top)
@@ -711,18 +820,18 @@ struct AlbumArtView: View {
                         perspective: 0.5
                     )
                     .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
-                    .scaleEffect(track.isCurrentlyPlaying ? 1.1 : 1.0)
+                    .scaleEffect((track.isCurrentlyPlaying ?? false) ? 1.1 : 1.0)
                     .animation(.easeInOut(duration: 0.3), value: track.isCurrentlyPlaying)
                     .onTapGesture {
                         onTap()
                     }
                 
-                Text(track.title ?? "Unknown")
+                Text(track.title)
                     .font(.caption)
                     .lineLimit(1)
                     .frame(width: size)
                 
-                Text(track.artist ?? "Unknown Artist")
+                Text(track.artist)
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -731,552 +840,12 @@ struct AlbumArtView: View {
         }
     }
 }
-// MARK: - Now Playing View (Component 2)
-struct NowPlayingView: View {
-    @StateObject private var viewModel = PlaylistViewModel()
-    
-    // Configuration variables
-    var showVoteButtons: Bool = true
-    var artworkSize: CGFloat = 300
-    var onVote: ((Bool) -> Void)?
-    
-    // External data injection
-    var externalTrack: PlaylistTrack?
-    
-    private var displayTrack: PlaylistTrack? {
-        externalTrack ?? viewModel.currentTrack
-    }
-    
-    var body: some View {
-        VStack(spacing: 30) {
-            // Artwork
-            if let albumArt = displayTrack?.albumArt, let url = URL(string: albumArt) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: artworkSize, height: artworkSize)
-                        .clipped()
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.gray.opacity(0.3))
-                        .overlay(
-                            ProgressView()
-                        )
-                        .frame(width: artworkSize, height: artworkSize)
-                }
-                .cornerRadius(20)
-                .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
-            } else {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: artworkSize * 0.4))
-                            .foregroundColor(.white.opacity(0.8))
-                    )
-                    .frame(width: artworkSize, height: artworkSize)
-                    .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
-            }
-            
-            // PlaylistTrack info
-            VStack(spacing: 8) {
-                Text(displayTrack?.title ?? "No PlaylistTrack Playing")
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-                
-                Text(displayTrack?.artist ?? "Unknown Artist")
-                    .font(.title3)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal)
-            
-            // Duration info
-            if let track = displayTrack {
-                HStack {
-                    Text("Duration:")
-                        .foregroundColor(.secondary)
-                    Text(track.formattedDuration)
-                        .fontWeight(.medium)
-                }
-                .font(.callout)
-            }
-            
-            // Vote buttons (if enabled and track is playing)
-            if showVoteButtons, let track = displayTrack, track.isCurrentlyPlaying {
-                HStack(spacing: 40) {
-                    VStack {
-                        Button(action: { onVote?(true) }) {
-                            Circle()
-                                .fill(Color.green.opacity(0.2))
-                                .frame(width: 60, height: 60)
-                                .overlay(
-                                    Image(systemName: "hand.thumbsup.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.green)
-                                )
-                        }
-                        Text("\(track.likes)")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
-                    
-                    VStack {
-                        Button(action: { onVote?(false) }) {
-                            Circle()
-                                .fill(Color.red.opacity(0.2))
-                                .frame(width: 60, height: 60)
-                                .overlay(
-                                    Image(systemName: "hand.thumbsdown.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.red)
-                                )
-                        }
-                        Text("\(track.dislikes)")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                }
-            }
-            
-            // Playback controls placeholder
-            HStack(spacing: 30) {
-                Button(action: {}) {
-                    Image(systemName: "backward.fill")
-                        .font(.title2)
-                        .foregroundColor(.primary)
-                }
-                .disabled(true)
-                
-                Button(action: {}) {
-                    Image(systemName: "play.fill")
-                        .font(.largeTitle)
-                        .foregroundColor(.primary)
-                }
-                .disabled(true)
-                
-                Button(action: {}) {
-                    Image(systemName: "forward.fill")
-                        .font(.title2)
-                        .foregroundColor(.primary)
-                }
-                .disabled(true)
-            }
-            .padding(.top, 20)
-            
-            Spacer()
-        }
-        .padding()
-    }
-}
 
-// MARK: - Queue View (Component 3)
-struct QueueView: View {
-    @StateObject private var viewModel = PlaylistViewModel()
-    @State private var isExpanded = false
-    
-    // Configuration variables
-    var maxTracksInCollapsed: Int = 3
-    var showVoteControls: Bool = true
-    var backgroundColor: Color = Color(UIColor.systemBackground)
-    
-    var upcomingTracks: [PlaylistTrack] {
-        guard let currentIndex = viewModel.tracks.firstIndex(where: { $0.isCurrentlyPlaying }) else {
-            return Array(viewModel.tracks.prefix(maxTracksInCollapsed))
-        }
-        return Array(viewModel.tracks.suffix(from: currentIndex + 1))
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                Label("File d'attente", systemImage: "list.bullet.below.rectangle")
-                    .font(.headline)
-                
-                Spacer()
-                
-                if upcomingTracks.count > maxTracksInCollapsed {
-                    Button(action: {
-                        withAnimation(.spring()) {
-                            isExpanded.toggle()
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Text(isExpanded ? "Réduire" : "Voir tout")
-                                .font(.caption)
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                        }
-                        .foregroundColor(.blue)
-                    }
-                }
-            }
-            .padding(.horizontal)
-            
-            // Tracks list
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(Array(upcomingTracks.prefix(isExpanded ? upcomingTracks.count : maxTracksInCollapsed).enumerated()), id: \.element.id) { index, track in
-                        QueueTrackRow(
-                            track: track,
-                            position: index + 1,
-                            showVoteControls: showVoteControls,
-                            onVote: { isLike in
-                                viewModel.voteTrack(id: track.id, isLike: isLike)
-                            }
-                        )
-                    }
-                }
-                .padding(.horizontal)
-            }
-            .frame(maxHeight: isExpanded ? .infinity : nil)
-            
-            // Remaining tracks indicator
-            if !isExpanded && upcomingTracks.count > maxTracksInCollapsed {
-                Text("+ \(upcomingTracks.count - maxTracksInCollapsed) autres morceaux")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal)
-            }
-        }
-        .padding(.vertical)
-        .background(backgroundColor)
-        .cornerRadius(20)
-        .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: -5)
-    }
-}
-
-// MARK: - Queue PlaylistTrack Row
-struct QueueTrackRow: View {
-    let track: PlaylistTrack
-    let position: Int
-    let showVoteControls: Bool
-    let onVote: (Bool) -> Void
-    
-    @State private var hasVoted = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Position
-            Text("\(position)")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-                .frame(width: 20)
-            
-            // Album art thumbnail
-            if let albumArt = track.albumArt, let url = URL(string: albumArt) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                }
-                .frame(width: 40, height: 40)
-                .cornerRadius(6)
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    )
-            }
-            
-            // PlaylistTrack info
-            VStack(alignment: .leading, spacing: 2) {
-                Text(track.title ?? "Unknown")
-                    .font(.subheadline)
-                    .lineLimit(1)
-                
-                Text(track.artist ?? "Unknown Artist")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            
-            Spacer()
-            
-            // Vote score
-            if track.voteScore != 0 {
-                HStack(spacing: 2) {
-                    Image(systemName: track.voteScore > 0 ? "arrow.up" : "arrow.down")
-                        .font(.caption2)
-                    Text("\(abs(track.voteScore))")
-                        .font(.caption)
-                }
-                .foregroundColor(track.voteScore > 0 ? .green : .red)
-            }
-            
-            // Vote controls
-            if showVoteControls && !hasVoted {
-                HStack(spacing: 12) {
-                    Button(action: {
-                        onVote(true)
-                        hasVoted = true
-                    }) {
-                        Image(systemName: "hand.thumbsup")
-                            .font(.callout)
-                            .foregroundColor(.green)
-                    }
-                    
-                    Button(action: {
-                        onVote(false)
-                        hasVoted = true
-                    }) {
-                        Image(systemName: "hand.thumbsdown")
-                            .font(.callout)
-                            .foregroundColor(.red)
-                    }
-                }
-            }
-            
-            // Duration
-            Text(track.formattedDuration)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.05))
-        )
-    }
-}
-
-// MARK: - Main App View (Example Integration)
-struct ContentView: View {
-    @State private var selectedTab = 0
-    
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            // Playlist Tab
-            PlaylistView()
-                .tabItem {
-                    Label("Playlist", systemImage: "music.note.list")
-                }
-                .tag(0)
-            
-            // Now Playing Tab
-            NowPlayingView()
-                .tabItem {
-                    Label("En cours", systemImage: "play.circle.fill")
-                }
-                .tag(1)
-            
-            // Queue Tab
-            QueueView()
-                .tabItem {
-                    Label("File d'attente", systemImage: "list.bullet")
-                }
-                .tag(2)
-        }
-    }
-}
-
-// MARK: - Combined Dashboard View (All components in one screen)
-struct DashboardView: View {
-    @StateObject private var viewModel = PlaylistViewModel()
-    @State private var showingDeezerSearch = false
-    
-    var body: some View {
-        NavigationView {
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Now Playing Section
-                        VStack(alignment: .leading) {
-                            Text("En cours")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-                            
-                            if let currentTrack = viewModel.currentTrack {
-                                NowPlayingCard(track: currentTrack)
-                                    .padding(.horizontal)
-                            } else {
-                                Text("Aucun morceau en cours")
-                                    .foregroundColor(.secondary)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.gray.opacity(0.1))
-                                    .cornerRadius(12)
-                                    .padding(.horizontal)
-                            }
-                        }
-                        
-                        // Queue Section
-                        VStack(alignment: .leading) {
-                            HStack {
-                                Text("File d'attente")
-                                    .font(.title2)
-                                    .fontWeight(.bold)
-                                
-                                Spacer()
-                                
-                                Button(action: {
-                                    showingDeezerSearch.toggle()
-                                }) {
-                                    Image(systemName: "plus.circle.fill")
-                                        .foregroundColor(.blue)
-                                }
-                            }
-                            .padding(.horizontal)
-                            
-                            QueueView(maxTracksInCollapsed: 5)
-                                .padding(.horizontal)
-                        }
-                        
-                        // Full Playlist
-                        VStack(alignment: .leading) {
-                            Text("Playlist complète")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
-                            
-                            PlaylistView(maxTracksToDisplay: 50)
-                        }
-                    }
-                    .padding(.vertical)
-                }
-            }
-            .navigationTitle("Party Playlist")
-            .navigationBarTitleDisplayMode(.large)
-            .sheet(isPresented: $showingDeezerSearch) {
-                DeezerSearchView(playlistViewModel: viewModel)
-            }
-        }
-    }
-}
-
-// MARK: - Now Playing Card (Compact version for dashboard)
-struct NowPlayingCard: View {
-    let track: PlaylistTrack
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            // Album art
-            if let albumArt = track.albumArt, let url = URL(string: albumArt) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.3))
-                        .overlay(ProgressView())
-                }
-                .frame(width: 80, height: 80)
-                .cornerRadius(12)
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.purple.opacity(0.6), Color.blue.opacity(0.6)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .foregroundColor(.white.opacity(0.8))
-                    )
-                    .frame(width: 80, height: 80)
-            }
-            
-            // PlaylistTrack info
-            VStack(alignment: .leading, spacing: 8) {
-                Text(track.title ?? "Unknown")
-                    .font(.headline)
-                    .lineLimit(1)
-                
-                Text(track.artist ?? "Unknown Artist")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                
-                // Progress bar placeholder
-                GeometryReader { geometry in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.gray.opacity(0.2))
-                        .overlay(
-                            HStack {
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(Color.blue)
-                                    .frame(width: geometry.size.width * 0.3)
-                                Spacer()
-                            }
-                        )
-                }
-                .frame(height: 4)
-                
-                // Duration and votes
-                HStack {
-                    Text(track.formattedDuration)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
-                    
-                    Label("\(track.likes)", systemImage: "hand.thumbsup.fill")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                    
-                    Label("\(track.dislikes)", systemImage: "hand.thumbsdown.fill")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-            }
-            
-            Spacer()
-            
-            // Animated speaker icon
-            Image(systemName: "speaker.wave.2.fill")
-                .font(.title2)
-                .foregroundColor(.blue)
-                .symbolEffect(.pulse)
-        }
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.blue.opacity(0.05))
-        )
-    }
-}
-    
 // MARK: - Preview Provider
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
-        Group {
-            ContentView()
-                .previewDisplayName("Tab View")
-            
-            DashboardView()
-                .previewDisplayName("Dashboard")
-            
-            PlaylistView()
-                .previewDisplayName("Playlist")
-            
-            NowPlayingView()
-                .previewDisplayName("Now Playing")
-            
-            QueueView()
-                .previewDisplayName("Queue")
-        }
+        PlaylistDetailsView(playlist: PlaylistViewModel.mockPlaylist)
+            .previewDisplayName("PlaylistDetails")
     }
 }
 

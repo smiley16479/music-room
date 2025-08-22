@@ -358,4 +358,40 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       });
     }
   }
+
+  // NON ON LES FAIT PASSER PAR HTTP
+  // Vote sur un track (like/dislike)
+  @SubscribeMessage('vote-track')
+  async handleVoteTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId, type }: { eventId: string; trackId: string; type: 'like' | 'dislike' }
+  ) {
+    if (!client.userId) {
+      client.emit('error', { message: 'Authentication required' });
+      return;
+    }
+    // Ici tu peux appeler ton EventService pour enregistrer le vote
+    // await this.eventService.voteTrack(eventId, trackId, client.userId, type);
+    // Broadcast le résultat à tous les participants
+    this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('vote-updated', {
+      eventId,
+      vote: { trackId, userId: client.userId, type },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // Synchronisation de l'état du player (play/pause/next/previous/position/volume)
+  @SubscribeMessage('playback-state')
+  async handlePlaybackState(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, state }: { eventId: string; state: any }
+  ) {
+    if (!client.userId) return;
+    // Broadcast à tous les participants
+    this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('playback-state-updated', {
+      eventId,
+      state,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }

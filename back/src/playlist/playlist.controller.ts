@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 
 import { PlaylistService } from './playlist.service';
@@ -30,6 +31,8 @@ import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swag
 @Controller('playlists')
 @UseGuards(JwtAuthGuard)
 export class PlaylistController {
+  private readonly logger = new Logger(PlaylistController.name);
+  
   constructor(private readonly playlistService: PlaylistService) {}
 
   @Post()
@@ -271,6 +274,9 @@ export class PlaylistController {
     @Body() addTrackDto: AddTrackToPlaylistDto,
     @CurrentUser() user: User,
   ) {
+
+    this.logger.debug('✅ addTrack() entered');
+
     const track = await this.playlistService.addTrack(id, user.id, addTrackDto);
     return {
       success: true,

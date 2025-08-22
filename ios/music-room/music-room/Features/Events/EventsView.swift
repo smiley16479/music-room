@@ -1,36 +1,49 @@
 import SwiftUI
 
 struct EventsView: View {
+    @State private var editingEvent: Event? = nil
     @State private var events: [Event] = []
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var showingCreateEvent = false
     @State private var selectedFilter: EventFilter = .all
     
+    @EnvironmentObject private var authManager: AuthenticationManager
+
     var filteredEvents: [Event] {
         var filtered = events
-        
+
+        // Filtrage par texte
         if !searchText.isEmpty {
             filtered = filtered.filter { event in
                 event.name.localizedCaseInsensitiveContains(searchText) ||
                 event.description?.localizedCaseInsensitiveContains(searchText) == true
             }
         }
-        
+
+        // Filtrage par type
         switch selectedFilter {
         case .all:
             break
         case .myEvents:
-            // Filter events created by current user
-            break
+            if let currentUserId = authManager.currentUser?.id {
+                filtered = filtered.filter { $0.creatorId == currentUserId }
+            }
         case .joined:
-            // Filter events user has joined
-            break
+            if let currentUserId = authManager.currentUser?.id {
+                filtered = filtered.filter { event in
+                    event.participants?.contains(where: { $0.id == currentUserId }) == true
+                }
+            }
         case .nearby:
-            // Filter events based on location
-            break
+            // Exemple simple : filtre sur la même ville que l'utilisateur
+            if let userLocation = authManager.currentUser?.location?.lowercased() {
+                filtered = filtered.filter { event in
+                    event.locationName?.lowercased().contains(userLocation) == true
+                }
+            }
         }
-        
+
         return filtered
     }
     
@@ -73,9 +86,13 @@ struct EventsView: View {
                     )
                 } else {
                     List(filteredEvents) { event in
-                        EventListItem(event: event)
-                            .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
-                            .listRowBackground(Color.clear)
+                        Button {
+                            editingEvent = event
+                        } label: {
+                            EventListItem(event: event)
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                        .listRowBackground(Color.clear)
                     }
                     .listStyle(PlainListStyle())
                 }
@@ -96,8 +113,21 @@ struct EventsView: View {
         .sheet(isPresented: $showingCreateEvent) {
             CreateEventView()
         }
+        .sheet(item: $editingEvent) { event in
+            EventEditView(event: event, onEventUpdated: { updatedEvent in
+                // Remplace l'event dans la liste
+                if let idx = events.firstIndex(where: { $0.id == updatedEvent.id }) {
+                    events[idx] = updatedEvent
+                }
+            }, onEventDeleted: { deletedEvent in
+                // Retire l'event de la liste
+                events.removeAll { $0.id == deletedEvent.id }
+            })
+        }
         .task {
+          if !isLoading {
             await loadEvents()
+          }
         }
         .refreshable {
             await loadEvents()
@@ -106,11 +136,26 @@ struct EventsView: View {
     
     private func loadEvents() async {
         isLoading = true
-        
+        print("🔄 loadEvents called")
         do {
-            events = try await APIService.shared.getEvents()
+            let myEvents = try await APIService.shared.getMyEvents()
+            let allEvents = try await APIService.shared.getEvents()
+
+            // Fusionner en supprimant les doublons (basé sur l'id)
+            var combinedEvents = myEvents
+            for event in allEvents {
+                if !combinedEvents.contains(where: { $0.id == event.id }) {
+                    combinedEvents.append(event)
+                }
+            }
+            events = combinedEvents
+
         } catch {
-            print("Failed to load events: \(error)")
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                // Ignore l’erreur d’annulation
+            } else {
+                print("Failed to load events: \(error)")
+            }
         }
         
         isLoading = false
@@ -255,7 +300,7 @@ struct EventListItem: View {
             return .green
         case .paused:
             return .orange
-        case .draft:
+        case .upcoming:
             return .blue
         case .ended:
             return .gray
@@ -278,7 +323,11 @@ struct CreateEventView: View {
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var errorMessage: String?
-
+    @State private var newPlaylistName: String = ""
+    @State private var selectedPlaylist: Playlist? = nil
+    @State private var showPlaylistPicker = false
+    @State private var createNewPlaylist = false
+    
     var body: some View {
         NavigationView {
             Form {
@@ -293,6 +342,17 @@ struct CreateEventView: View {
                 Section(header: Text("Visibility")) {
                     Toggle(isOn: $isPublic) {
                         Text("Public Event")
+                    }
+                }
+                Section(header: Text("Event Playlist")) {
+                    Toggle("Créer une nouvelle playlist", isOn: $createNewPlaylist)
+                    if createNewPlaylist {
+                        TextField("Nom de la playlist", text: $newPlaylistName)
+                        // ... autres champs playlist ...
+                    } else {
+                        Button(action: { showPlaylistPicker = true }) {
+                            Text(selectedPlaylist?.name ?? "Sélectionner une playlist existante")
+                        }
                     }
                 }
                 if let error = errorMessage {
@@ -314,16 +374,19 @@ struct CreateEventView: View {
                     .disabled(isSaving || name.isEmpty)
                 }
             }
+            .sheet(isPresented: $showPlaylistPicker) {
+                PlaylistPickerView(selectedPlaylist: $selectedPlaylist, showPlaylistPicker: $showPlaylistPicker)
+            }
         }
     }
-
+    
     private func saveEvent() {
         isSaving = true
         errorMessage = nil
         let eventData: [String: Any] = [
             "name": name,
             "description": description,
-            "location": location,
+            "locationName": location,
             "eventDate": ISO8601DateFormatter().string(from: date),
             "visibility": isPublic ? "public" : "private"
         ]
@@ -339,6 +402,480 @@ struct CreateEventView: View {
                     errorMessage = error.localizedDescription
                     isSaving = false
                 }
+            }
+        }
+    }
+    
+    // Composant interne
+    struct PlaylistPickerView: View {
+        @Binding var selectedPlaylist: Playlist?
+        @Binding var showPlaylistPicker: Bool
+        @State private var playlists: [Playlist] = []
+        @State private var isLoading = false
+        @State private var errorMessage: String?
+
+        var body: some View {
+            NavigationView {
+                VStack {
+                    Text("Si vous sélectionnez une playlist existante pour l'événement. Une copie librement éditable sera créée.")
+                      .font(.footnote)
+                      .foregroundColor(.gray)
+                      .multilineTextAlignment(.center)
+                      .padding(.horizontal)
+                    Group {
+                        if isLoading {
+                            ProgressView("Chargement des playlists...")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if let error = errorMessage {
+                            VStack(spacing: 16) {
+                                Text("Erreur: \(error)")
+                                    .foregroundColor(.red)
+                                Button("Réessayer") {
+                                    Task { await loadPlaylists() }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if playlists.isEmpty {
+                            Text("Aucune playlist disponible.")
+                                .foregroundColor(.textSecondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            List(playlists) { playlist in
+                                Button {
+                                    selectedPlaylist = playlist
+                                } label: {
+                                    HStack {
+                                        Text(playlist.name)
+                                            .foregroundColor(.textPrimary)
+                                            .padding(.vertical, 8)
+                                        if selectedPlaylist?.id == playlist.id {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.musicPrimary)
+                                        }
+                                    }
+                                }
+                                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                                .listRowBackground(Color.clear)
+                            }
+                            .listStyle(PlainListStyle())
+                        }
+                    }
+                }
+                .navigationBarTitle("Playlist disponibles")
+                .navigationBarItems(trailing: Button("Terminer") {
+                    showPlaylistPicker = false
+                })
+            }
+            .task {
+                await loadPlaylists()
+            }
+        }
+
+        private func loadPlaylists() async {
+            isLoading = true
+            errorMessage = nil
+            do {
+                playlists = try await APIService.shared.getPlaylists()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+}
+
+// MARK: - Event Edit View
+struct EventEditView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var event: Event
+    var onEventUpdated: (Event) -> Void
+    var onEventDeleted: (Event) -> Void
+
+    @State private var name: String = ""
+    @State private var description: String = ""
+    @State private var location: String = ""
+    @State private var date: Date = Date()
+    @State private var isPublic: Bool = true
+    @State private var isSaving = false
+    @State private var isDeleting = false
+    @State private var errorMessage: String?
+
+    @State private var invitedUsers: [User] = []
+    @State private var allUsers: [User] = []
+    @State private var admins: [User] = []
+    @State private var isLoadingUsers = false
+
+    @State private var activeSheet: ActiveSheet? = nil
+    @State private var selectedAdminCandidate: User? = nil
+    /// Enum to manage active sheets
+    enum ActiveSheet: Identifiable {
+        case inviteUser, adminPicker
+        var id: Int {
+            switch self {
+            case .inviteUser: return 1
+            case .adminPicker: return 2
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Event Info")) {
+                    TextField("Name", text: $name)
+                    TextField("Description", text: $description)
+                }
+                Section(header: Text("Location & Date")) {
+                    TextField("Location", text: $location)
+                    DatePicker("Date", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                }
+                Section(header: Text("Visibility")) {
+                    Toggle(isOn: $isPublic) {
+                        Text("Public Event")
+                    }
+                }
+                Section(header: Text("Invited Users")) {
+                    if isLoadingUsers {
+                        ProgressView()
+                    } else {
+                        ForEach(invitedUsers) { user in
+                            HStack {
+                                Text(user.displayName)
+                                Spacer()
+                                Button(role: .destructive) {
+                                    removeUser(user)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                            }
+                        }
+                        Button("Invite User") {
+                            activeSheet = .inviteUser
+                        }
+                    }
+                }
+                Section(header: Text("Admins")) {
+                    if admins.isEmpty {
+                        Text("No admins yet (except creator)")
+                            .foregroundColor(.textSecondary)
+                    } else {
+                        ForEach(admins) { user in
+                            HStack {
+                                Text(user.displayName)
+                                Spacer()
+                                if user.id != event.creatorId {
+                                    Button(role: .destructive) {
+                                        removeAdmin(user)
+                                    } label: {
+                                        Image(systemName: "minus.circle")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Button("Add Admin") {
+                        activeSheet = .adminPicker
+                    }
+                }
+                if let error = errorMessage {
+                    Section {
+                        Text(error).foregroundColor(.red)
+                    }
+                }
+                Section {
+                    Button("Delete Event", role: .destructive) {
+                        deleteEvent()
+                    }
+                }
+            }
+            .navigationTitle("Edit Event")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") { saveEvent() }
+                        .disabled(isSaving || name.isEmpty)
+                }
+            }
+            .onAppear(perform: setup)
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .inviteUser:
+                    InviteView(mode: .eventToUser(event: event))
+                case .adminPicker:
+                    NavigationView {
+                        List {
+                            ForEach(invitedUsers.filter { u in !admins.contains(where: { $0.id == u.id }) }) { user in
+                                Button {
+                                    selectedAdminCandidate = user
+                                } label: {
+                                    HStack {
+                                        Text(user.displayName)
+                                        if selectedAdminCandidate?.id == user.id {
+                                            Spacer()
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(.musicPrimary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .navigationTitle("Select Admin")
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Promote") {
+                                    promoteSelectedAdmin()
+                                    activeSheet = nil
+                                }
+                                .disabled(selectedAdminCandidate == nil)
+                            }
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Cancel") {
+                                    activeSheet = nil
+                                    selectedAdminCandidate = nil
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func setup() {
+
+        if let data = try? JSONEncoder().encode(event),
+          let json = try? JSONSerialization.jsonObject(with: data),
+          let prettyData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]),
+          let prettyString = String(data: prettyData, encoding: .utf8) {
+            print("🔄 EventEditView setup called\n\(prettyString)")
+        }
+
+        name = event.name
+        description = event.description ?? ""
+        location = event.locationName ?? ""
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        date = formatter.date(from: event.eventDate ?? "") ?? Date()
+        isPublic = event.visibility == .public
+        invitedUsers = event.participants ?? []
+        admins = event.admins ?? []
+        loadAllUsers()
+    }
+
+    private func saveEvent() {
+        isSaving = true
+        errorMessage = nil
+        let eventData: [String: Any] = [
+            "name": name,
+            "description": description,
+            "locationName": location,
+            "eventDate": ISO8601DateFormatter().string(from: date),
+            "visibility": isPublic ? "public" : "private",
+            "admins": admins.map { $0.id }, // il n'y a pas en db
+            "participants": invitedUsers.map { $0.id } // il n'y a pas en db
+        ]
+        Task {
+            do {
+                let updated = try await APIService.shared.updateEvent(eventId: event.id, eventData)
+                await MainActor.run {
+                    event = updated
+                    onEventUpdated(updated)
+                    isSaving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isSaving = false
+                }
+            }
+        }
+    }
+
+    private func deleteEvent() {
+        isDeleting = true
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await APIService.shared.deleteEvent(event.id)
+                await MainActor.run {
+                    onEventDeleted(event)
+                    isDeleting = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    isDeleting = false
+                }
+            }
+        }
+    }
+
+    private func loadAllUsers() {
+        isLoadingUsers = true
+        Task {
+            do {
+//                allUsers = try await APIService.shared.getAllUsers()
+            } catch {
+                // ignore pour l'instant
+            }
+            isLoadingUsers = false
+        }
+    }
+
+    private func inviteUser() {
+        // Affiche une liste d'utilisateurs à inviter (à améliorer avec une vraie UI)
+        if let user = allUsers.first(where: { u in !invitedUsers.contains(where: { $0.id == u.id }) }) {
+            invitedUsers.append(user)
+        }
+    }
+
+    
+    private func removeUser(_ user: User) {
+        Task{
+            do {
+                _ = try await APIService.shared.removeUserFromEvent(id: event.id, userId: user.id)
+                await MainActor.run {
+                    invitedUsers.removeAll { $0.id == user.id }
+                }
+            }
+            catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+
+    }
+
+    private func addAdmin() {
+        activeSheet = .adminPicker
+    }
+
+    private func promoteSelectedAdmin() {
+        guard let user = selectedAdminCandidate else { return }
+        Task {
+            do {
+                try await APIService.shared.promoteUserToAdmin(eventId: event.id, userId: user.id)
+                await MainActor.run {
+                    admins.append(user)
+                    // showAdminPicker = false
+                    selectedAdminCandidate = nil
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func removeAdmin(_ user: User) {
+        Task {
+            do {
+                try await APIService.shared.removeAdminFromEvent(eventId: event.id, userId: user.id)
+                await MainActor.run {
+                    admins.removeAll { $0.id == user.id }
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Invite To Event View
+enum InviteMode {
+    case userToEvent(user: User)
+    case eventToUser(event: Event)
+}
+
+struct InviteView: View {
+    let mode: InviteMode
+    @State private var items: [Any] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
+
+    var body: some View {
+        NavigationView {
+            List {
+                if isLoading {
+                    ProgressView()
+                } else {
+                    ForEach(items.indices, id: \.self) { idx in
+                        Button {
+                            invite(at: idx)
+                        } label: {
+                            switch mode {
+                            case .userToEvent:
+                                let event = items[idx] as! Event
+                                Text(event.name)
+                            case .eventToUser:
+                                let user = items[idx] as! User
+                                Text(user.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(modeTitle)
+            .onAppear { loadItems() }
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+
+    private var modeTitle: String {
+        switch mode {
+        case .userToEvent: return "Inviter à un événement"
+        case .eventToUser: return "Inviter un utilisateur"
+        }
+    }
+
+    private func loadItems() {
+        isLoading = true
+        Task {
+            do {
+                switch mode {
+                case .userToEvent(let user):
+                    items = try await APIService.shared.getMyEvents().map { $0 as Any }
+                case .eventToUser(let event):
+                    items = try await APIService.shared.getUserFriends()
+//                    To do:
+//                    items = try await APIService.shared.getInvitableUsers(for: event.id).map { $0 as Any }
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+
+    private func invite(at idx: Int) {
+        Task {
+            do {
+                switch mode {
+                case .userToEvent(let user):
+                    let event = items[idx] as! Event
+                    try await APIService.shared.inviteUsersToEvent(eventId: event.id, [user.email])
+                    toastMessage = "Invitation envoyée à \(user.displayName)"
+                case .eventToUser(let event):
+                    let user = items[idx] as! User
+                    try await APIService.shared.inviteUsersToEvent(eventId: event.id, [user.email])
+                    toastMessage = "Invitation envoyée à \(user.displayName)"
+                }
+                showToast = true
+            } catch {
+                toastMessage = error.localizedDescription
+                showToast = true
             }
         }
     }

@@ -107,7 +107,7 @@ struct ProfileView: View {
             MusicPreferencesView()
         }
         .sheet(isPresented: $showingFriends) {
-            FriendsView()
+            FriendsView(showingFriends: $showingFriends)
         }
         .sheet(isPresented: $showingHelp) {
             HelpSupportView()
@@ -124,11 +124,17 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Music Preferences View
+// MARK: - Music Preferences 
 struct MusicPreferencesView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authManager: AuthenticationManager
+
     @State private var favoriteGenres: [String] = []
     @State private var favoriteArtists: String = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
 
     var body: some View {
         NavigationView {
@@ -142,20 +148,68 @@ struct MusicPreferencesView: View {
                 Section(header: Text("Favorite Artists")) {
                     TextField("Add artists (comma separated)", text: $favoriteArtists)
                 }
+                if let error = errorMessage {
+                    Text(error).foregroundColor(.red)
+                }
             }
             .navigationTitle("music_preferences".localized)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("cancel".localized) { dismiss() }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("done".localized) { dismiss() }
+                    Button("save".localized) {
+                        Task { await savePreferences() }
+                    }
+                    .disabled(isSaving)
                 }
             }
         }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+        .onAppear {
+            // Pré-remplir avec les préférences existantes
+            if let prefs = authManager.currentUser?.musicPreferences {
+                favoriteGenres = prefs.favoriteGenres ?? []
+                favoriteArtists = prefs.favoriteArtists?.joined(separator: ", ") ?? ""
+            }
+        }
+    }
+
+    private func savePreferences() async {
+        isSaving = true
+        errorMessage = nil
+        let genres = favoriteGenres.filter { !$0.isEmpty }
+        let artists = favoriteArtists
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        let prefs: [String: Any] = [
+            "favoriteGenres": genres,
+            "favoriteArtists": artists
+        ]
+        do {
+            let updatedUser = try await APIService.shared.updateMusicPreferences(prefs)
+            await MainActor.run {
+                authManager.currentUser = updatedUser
+                toastMessage = "Preferences saved ✓"
+                showToast = true
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                toastMessage = "Error: \(error.localizedDescription)"
+                showToast = true
+            }
+        }
+        isSaving = false
     }
 }
-
-// MARK: - Friends View
+// MARK: - Friends
 struct FriendsView: View {
+    @Binding var showingFriends: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var friends: [User] = []
     @State private var search: String = ""
@@ -174,7 +228,7 @@ struct FriendsView: View {
             VStack {
                 List {
 
-                    SearchingFriendsSubView(
+                    SearchingFriendsView(
                       friends: $friends,
                       selectedFriend: $selectedFriend,
                       showProfile : $showProfile,
@@ -200,7 +254,10 @@ struct FriendsView: View {
                 }
                 .sheet(isPresented: $showProfile) {
                     if let user = selectedFriend {
-                        FriendProfileView(user: user)
+                        FriendProfileView(user: user, showingFriends: $showingFriends) { removedUser in
+                            // Mise à jour locale de la liste friends
+                            friends.removeAll { $0.id == removedUser.id }
+                        }
                     }
                 }
                 if let error = errorMessage {
@@ -223,7 +280,7 @@ struct FriendsView: View {
         errorMessage = nil
         Task {
             do {
-                friends = try await APIService.shared.searchUserFriends()
+                friends = try await APIService.shared.getUserFriends()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -248,9 +305,8 @@ struct FriendsView: View {
     }
 }
 
-// MARK: - Friends SubViews
-
-struct SearchingFriendsSubView: View {
+// MARK: - Searching Friends
+struct SearchingFriendsView: View {
     @Binding var friends: [User]
     @Binding var selectedFriend: User?
     @Binding var showProfile: Bool
@@ -294,8 +350,6 @@ struct SearchingFriendsSubView: View {
                 }
             }
         }
-        
-        
         if isSearching {
             Section(header: Text("Find new friends")) {
                 if isLoading {
@@ -350,11 +404,15 @@ struct SearchingFriendsSubView: View {
     }
 }
 
-// MARK: - Friend Profile View
+// MARK: - Friend Profile
 struct FriendProfileView: View {
     let user: User
+    @Binding var showingFriends: Bool
+    var onFriendRemoved: ((User) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var showInviteMenu = false
+    @State private var showInviteToEvent = false
+    @State private var showInviteToPlaylist = false
+    @EnvironmentObject var tabManager: MainTabManager
     @State private var showCancelAlert = false
     @State private var errorMessage: String?
 
@@ -398,22 +456,26 @@ struct FriendProfileView: View {
                     }
                     HStack(spacing: 16) {
                         Button("Invite to Event") {
-                            showInviteMenu = true
+                            showInviteToEvent = true
                         }
                         .buttonStyle(.borderedProminent)
                         Button("Invite to Playlist") {
-                            showInviteMenu = true
+                            showInviteToPlaylist = true
                         }
                         .buttonStyle(.bordered)
                         Button("Cancel this friendship") {
                             showCancelAlert = true
                         }
                         .buttonStyle(.bordered)
-                        .tint(.red) // couleur bouton
+                        .tint(.red)
                         .alert("Cancel this friendship?", isPresented: $showCancelAlert) {
                             Button("Yes, cancel", role: .destructive) {
                                 Task {
                                     do {
+                                        await MainActor.run {
+                                            onFriendRemoved?(user)
+                                            dismiss()
+                                        }
                                         try await APIService.shared.removeFriend(friendId: user.id)
                                     } catch {
                                         errorMessage = error.localizedDescription
@@ -435,12 +497,16 @@ struct FriendProfileView: View {
                     Button("done".localized) { dismiss() }
                 }
             }
+            .sheet(isPresented: $showInviteToEvent) {
+              InviteView(mode: .userToEvent(user: user))
+            }
+            // Sheet pour playlist à ajouter plus tard
         }
     }
 }
 
 
-// MARK: - Help & Support View
+// MARK: - Help & Support 
 struct HelpSupportView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -709,7 +775,7 @@ struct EditProfileView: View {
     }
 }
 
-// MARK: - App Settings View
+// MARK: - App Settings
 struct AppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var themeManager: ThemeManager
@@ -879,88 +945,3 @@ struct ToggleSettingRow: View {
         .environmentObject(LocalizationManager())
         .environmentObject(AuthenticationManager())
 }
-
-
-
-//Section(header: Text("Your Friends")) {
-//    if friends.isEmpty {
-//        Text("No friends yet.").foregroundColor(.secondary)
-//    } else {
-//        ForEach(friends.filter { search.isEmpty ? true : $0.displayName.localizedCaseInsensitiveContains(search) }, id: \.id) { friend in
-//            Button(action: {
-//                selectedFriend = friend
-//                showProfile = true
-//            }) {
-//                HStack {
-//                    if let url = friend.avatarUrl, let imageUrl = URL(string: url) {
-//                        AsyncImage(url: imageUrl) { img in
-//                            img.resizable().aspectRatio(contentMode: .fill)
-//                        } placeholder: {
-//                            Image(systemName: "person.crop.circle").foregroundColor(.gray)
-//                        }
-//                        .frame(width: 40, height: 40)
-//                        .clipShape(Circle())
-//                    } else {
-//                        Image(systemName: "person.crop.circle").foregroundColor(.gray)
-//                            .frame(width: 40, height: 40)
-//                    }
-//                    Text(friend.displayName)
-//                        .font(.body)
-//                    Spacer()
-//                }
-//            }
-//        }
-//    }
-//}
-
-// if isSearching {
-//     Section(header: Text("Find new friends")) {
-//         if isLoading {
-//             ProgressView()
-//         } else if !searchResults.isEmpty {
-//             ForEach(searchResults, id: \.id) { user in
-//                 HStack {
-//                     if let url = user.avatarUrl, let imageUrl = URL(string: url) {
-//                         AsyncImage(url: imageUrl) { img in
-//                             img.resizable().aspectRatio(contentMode: .fill)
-//                         } placeholder: {
-//                             Image(systemName: "person.crop.circle").foregroundColor(.gray)
-//                         }
-//                         .frame(width: 40, height: 40)
-//                         .clipShape(Circle())
-//                     } else {
-//                         Image(systemName: "person.crop.circle").foregroundColor(.gray)
-//                             .frame(width: 40, height: 40)
-//                     }
-//                     VStack(alignment: .leading) {
-//                         Text(user.displayName).font(.body)
-//                         Text(user.email).font(.caption).foregroundColor(.secondary)
-//                     }
-//                     Spacer()
-//                     Button("Add") {
-//                         Task {
-//                             do {
-//                                 try await APIService.shared.sendFriendRequest(inviteeId: user.id)
-//                                 // Optionnel : feedback visuel
-//                                 await MainActor.run {
-//                                     toastMessage = "Invitation envoyée ✓"
-//                                     errorMessage = nil
-//                                     showToast = true
-//                                 }
-//                             } catch {
-//                                 errorMessage = error.localizedDescription
-//                                 await MainActor.run {
-//                                     toastMessage = "Erreur : \(error.localizedDescription)"
-//                                     showToast = true
-//                                 }
-//                             }
-//                         }
-//                     }
-//                     .buttonStyle(.borderedProminent)
-//                 }
-//             }
-//         } else {
-//             Text("No users found.").foregroundColor(.secondary)
-//         }
-//     }
-// }

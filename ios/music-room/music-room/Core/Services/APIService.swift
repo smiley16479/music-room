@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 class APIService {
     static let shared = APIService()
@@ -58,13 +59,18 @@ class APIService {
         let endpoint = "/users/me"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
     }
-    
+
+    func updateMusicPreferences(_ updateData: [String: Any]) async throws -> User {
+        let endpoint = "/users/me/preferences"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
+    }
+
     func searchUsers(query: String) async throws -> [User] {
         let endpoint = "/users/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
 
-    func searchUserFriends() async throws -> [User] {
+    func getUserFriends() async throws -> [User] {
       let endpoint = "/users/me/friends"
       return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
@@ -129,10 +135,47 @@ class APIService {
         let endpoint = "/events"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
+
+    func getMyEvents() async throws -> [Event] {
+        let endpoint = "/events/my-event"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+
+    /// Promote a user to admin for an event
+    func promoteUserToAdmin(eventId: String, userId: String) async throws {
+        let endpoint = "/events/" + eventId + "/admins/" + userId
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+
+    func removeAdminFromEvent(eventId: String, userId: String) async throws {
+        let endpoint = "/events/\(eventId)/admins/\(userId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
     
     func createEvent(_ eventData: [String: Any]) async throws -> Event {
         let endpoint = "/events"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: eventData)
+    }
+    
+    func deleteEvent(_ id: String) async throws {
+        let endpoint = "/events/\(id)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
+    
+    func updateEvent(eventId: String, _ updateData: [String: Any]) async throws -> Event {
+        let endpoint = "/events/\(eventId)"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
+    }
+    
+    func inviteUsersToEvent(eventId: String, _ usersEmails: [String]) async throws {
+        let endpoint = "/events/\(eventId)/invite"
+        let body = ["emails": usersEmails] // Encapsulation dans un dictionnaire JSON
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    func removeUserFromEvent(id: String, userId: String) async throws {
+        let endpoint = "/events/\(id)/participant/\(userId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
     }
     
     // MARK: - Playlists Endpoints
@@ -141,8 +184,18 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
+    func getPlaylistTracks(_ playlistId: String) async throws -> [PlaylistTrack] {
+        let endpoint = "/playlists/\(playlistId)/tracks"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
     func createPlaylist(_ playlistData: [String: Any]) async throws -> Playlist {
         let endpoint = "/playlists"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: playlistData)
+    }
+
+    func addMusicToPlaylist(_ playlistId: String, _ playlistData: [String: Any]) async throws -> PlaylistTrack {
+        let endpoint = "/playlists/\(playlistId)/tracks"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: playlistData)
     }
     
@@ -211,23 +264,24 @@ class APIService {
                 // Décoder d'abord le wrapper
                 let decoder = JSONDecoder()
                 let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
-
-                if let dataValue = apiResponse.data {
-                    print("✅ APIResponse decoder done")
-                } else {
-                    print("❌ APIResponse decoder failed")
-                }
                 
                 // Vérifier le succès et extraire data
                 if apiResponse.success, let responseData = apiResponse.data {
+                    print("✅ APIResponse contain data")
                     return responseData
+                } else if T.self == EmptyResponse.self {
+                    return EmptyResponse() as! T
                 } else {
-                    // Si pas de succès, utiliser le message d'erreur
                     let errorMessage = apiResponse.message ?? apiResponse.error ?? "Unknown error"
-                    print("❌ API Error: \(errorMessage)")
+                    print("❌ APIResponse don't contain data: \(errorMessage)")
                     throw APIError.serverError
                 }
 
+                case 400:
+                    if let apiError = try? JSONDecoder().decode(APIResponse<T>.self, from: data) {
+                        throw APIError.serverMessage(apiError.message ?? "")
+                    }
+                    throw APIError.unknownError(httpResponse.statusCode)
                 case 401:
                     throw APIError.unauthorized
                 case 403:
@@ -282,7 +336,8 @@ enum APIError: LocalizedError {
     case networkError
     case decodingFailed
     case unknownError(Int)
-    
+    case serverMessage(String)
+
     var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -307,6 +362,8 @@ enum APIError: LocalizedError {
             return "decoding_error".localized
         case .unknownError(let code):
             return "unknown_error".localized + " (\(code))"
+        default:
+            return String(describing: self)
         }
     }
 }
@@ -325,9 +382,111 @@ struct APIResponse<T: Codable>: Codable {
     let data: T?
     let timestamp: String?
     let error: String?
+    let statusCode: Int?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        data = try container.decodeIfPresent(T.self, forKey: .data)
+        timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        statusCode = try container.decodeIfPresent(Int.self, forKey: .statusCode)
+    }
     
-    // Pour gérer les cas où data pourrait être absent en cas d'erreur
-    var isSuccess: Bool {
-        return success && data != nil
+    private enum CodingKeys: String, CodingKey {
+        case success, message, data, timestamp, error, statusCode
+    }
+}
+
+
+// MARK: - Deezer API Service
+class DeezerService: ObservableObject {
+    @Published var searchResults: [DeezerTrack] = []
+    @Published var isSearching: Bool = false
+    @Published var searchError: String?
+    
+    private var cancellables = Set<AnyCancellable>()
+    
+    func searchTracks(query: String) {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            searchResults = []
+            return
+        }
+        
+        isSearching = true
+        searchError = nil
+        
+        // URL encode the query
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            searchError = "Erreur d'encodage de la requête"
+            isSearching = false
+            return
+        }
+        
+        // Deezer API endpoint (CORS proxy needed for web/iOS)
+        // Note: En production, utilisez votre propre backend pour éviter les problèmes CORS
+        let urlString = "https://api.deezer.com/search?q=\(encodedQuery)&limit=20"
+        
+        guard let url = URL(string: urlString) else {
+            searchError = "URL invalide"
+            isSearching = false
+            return
+        }
+        
+        URLSession.shared.dataTaskPublisher(for: url)
+            .map(\.data)
+            .decode(type: DeezerSearchResponse.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] completion in
+                    self?.isSearching = false
+                    if case .failure(let error) = completion {
+                        self?.searchError = "Erreur de recherche: \(error.localizedDescription)"
+                        // Utiliser des données mock en cas d'erreur (pour le développement)
+                        self?.loadMockSearchResults(for: query)
+                    }
+                },
+                receiveValue: { [weak self] response in
+                    // MARK: - DEBUG DEEZER
+                    // print("Deezer Search Results: \(response.data) tracks found")
+                    self?.searchResults = response.data
+                }
+            )
+            .store(in: &cancellables)
+    }
+    
+    // Mock data pour le développement (en cas d'erreur API)
+    private func loadMockSearchResults(for query: String) {
+        searchResults = [
+            DeezerTrack(
+                id: 1,
+                title: "Mock: \(query) - Song 1",
+                duration: 200,
+                preview: "https://example.com/preview1.mp3",
+                artist: DeezerArtist(id: 1, name: "Artist 1"),
+                album: DeezerAlbum(
+                    id: 1,
+                    title: "Album 1",
+                    cover_small: "https://via.placeholder.com/56",
+                    cover_medium: "https://via.placeholder.com/250",
+                    cover_big: "https://via.placeholder.com/500"
+                )
+            ),
+            DeezerTrack(
+                id: 2,
+                title: "Mock: \(query) - Song 2",
+                duration: 180,
+                preview: "https://example.com/preview2.mp3",
+                artist: DeezerArtist(id: 2, name: "Artist 2"),
+                album: DeezerAlbum(
+                    id: 2,
+                    title: "Album 2",
+                    cover_small: "https://via.placeholder.com/56",
+                    cover_medium: "https://via.placeholder.com/250",
+                    cover_big: "https://via.placeholder.com/500"
+                )
+            )
+        ]
     }
 }

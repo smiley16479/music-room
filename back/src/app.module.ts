@@ -15,6 +15,7 @@ import { InvitationModule } from './invitation/invitation.module';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 
 @Module({
   imports: [
@@ -49,10 +50,15 @@ import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
   controllers: [AppController],
   providers: [AppService,
     // // Global JWT Guard
-    // {
-    //   provide: APP_GUARD,
-    //   useClass: JwtAuthGuard,
-    // },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    // 2. Guard de permissions (vérifie @RequirePermissions)
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
+    },
     // // Global Auth Exception Filter
     // {
     //   provide: APP_FILTER,

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A3A0D7E2E55EB3F008C53D1 /* SocketIO in Frameworks */ = {isa = PBXBuildFile; productRef = 7A3A0D7D2E55EB3F008C53D1 /* SocketIO */; };
 		7AC21E422E46B08200D94464 /* FacebookCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7AC21E412E46B08200D94464 /* FacebookCore */; };
 		7AC21E442E46B08200D94464 /* FacebookLogin in Frameworks */ = {isa = PBXBuildFile; productRef = 7AC21E432E46B08200D94464 /* FacebookLogin */; };
 		7AC21E462E46B08200D94464 /* FacebookShare in Frameworks */ = {isa = PBXBuildFile; productRef = 7AC21E452E46B08200D94464 /* FacebookShare */; };
@@ -72,6 +73,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7AC21E422E46B08200D94464 /* FacebookCore in Frameworks */,
+				7A3A0D7E2E55EB3F008C53D1 /* SocketIO in Frameworks */,
 				7AC21E442E46B08200D94464 /* FacebookLogin in Frameworks */,
 				7AC21E462E46B08200D94464 /* FacebookShare in Frameworks */,
 			);
@@ -145,6 +147,7 @@
 				7AC21E412E46B08200D94464 /* FacebookCore */,
 				7AC21E432E46B08200D94464 /* FacebookLogin */,
 				7AC21E452E46B08200D94464 /* FacebookShare */,
+				7A3A0D7D2E55EB3F008C53D1 /* SocketIO */,
 			);
 			productName = "music-room";
 			productReference = 7AD648AF2E460D2B00173CD0 /* music-room.app */;
@@ -231,6 +234,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7AC21E402E46B08200D94464 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */,
+				7A3A0D772E55BCF2008C53D1 /* XCRemoteSwiftPackageReference "socket" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7AD648B02E460D2B00173CD0 /* Products */;
@@ -609,6 +613,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		7A3A0D772E55BCF2008C53D1 /* XCRemoteSwiftPackageReference "socket" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/socketio/socket.io-client-swift";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
 		7AC21E402E46B08200D94464 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/facebook/facebook-ios-sdk";
@@ -620,6 +632,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7A3A0D7D2E55EB3F008C53D1 /* SocketIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A3A0D772E55BCF2008C53D1 /* XCRemoteSwiftPackageReference "socket" */;
+			productName = SocketIO;
+		};
 		7AC21E412E46B08200D94464 /* FacebookCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 7AC21E402E46B08200D94464 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */;

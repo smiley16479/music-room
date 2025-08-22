@@ -25,6 +25,7 @@ import { Public } from '../auth/decorators/public.decorator';
 
 import { User } from 'src/user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { log } from 'console';
 
 @ApiTags('Events')
 @Controller('events')
@@ -39,6 +40,9 @@ export class EventController {
   })
   @ApiBody({ type: CreateEventDto })
   async create(@Body() createEventDto: CreateEventDto, @CurrentUser() user: User) {
+
+    console.log('Creating event with DTO:', createEventDto);
+
     const event = await this.eventService.create(createEventDto, user.id);
     return {
       success: true,
@@ -90,10 +94,11 @@ export class EventController {
   @ApiQuery({ type: PaginationDto })
   async getMyEvent(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
     const { page, limit, skip } = paginationDto;
-    
-    // This would be a separate method in the service for user's event
-    const events = await this.eventService.getEventsUserCanInvite(user.id);
+    // Récupère les events avec les admins
+    const events = await this.eventService.getEventsUserCanInviteWithAdmins(user.id);
 
+    console.log("events", events);
+    
     return {
       success: true,
       message: 'User event retrieved successfully',
@@ -233,6 +238,36 @@ export class EventController {
     };
   }
 
+  @Post(':id/admins/:userId')
+  @ApiOperation({
+    summary: 'Promote user to admin',
+    description: 'Adds a user as admin to the event (creator or admin only)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'The ID of the user to promote',
+    required: true
+  })
+  async promoteAdmin(
+    @Param('id') eventId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: User,
+  ) {
+    await this.eventService.promoteAdmin(eventId, user.id, userId);
+    return {
+      success: true,
+      message: 'User promoted to admin',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   /** TO DO: permissions */
   @Delete(':id/participant/:userId')
   @ApiOperation({
@@ -260,6 +295,36 @@ export class EventController {
     return {
       success: true,
       message: 'Participant removed successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Delete(':id/admins/:userId')
+  @ApiOperation({
+    summary: 'Remove admin from event',
+    description: 'Removes a user from the admins of the event (creator or admin only)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'The ID of the admin to remove',
+    required: true
+  })
+  async removeAdmin(
+    @Param('id') eventId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: User,
+  ) {
+    await this.eventService.removeAdmin(eventId, user.id, userId);
+    return {
+      success: true,
+      message: 'Admin removed from event',
       timestamp: new Date().toISOString(),
     };
   }

@@ -12,3 +12,7 @@ node-v*/
 #documentation
 cheat_sheet_IOS_navigation.pages
 prompt
+*.xcuserstate
+*.xcworkspace/xcuserdata
+*.xcodeproj/xcuserdata
+DerivedData/

@@ -128,7 +128,7 @@
 "accepted" = "Accepted";
 "declined" = "Declined";
 "expired" = "Expired";
-"draft" = "Draft";
+"upcoming" = "Soon";
 "active" = "Active";
 "paused" = "Paused";
 "ended" = "Ended";
@@ -140,5 +140,5 @@
 "online" = "Online";
 "offline" = "Offline";
 "playing" = "Playing";
-"invite_only" = "Invite only";
+"invited" = "Invite only";
 "location_based" = "Location based";
