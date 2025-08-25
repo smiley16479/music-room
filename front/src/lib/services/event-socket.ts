@@ -5,28 +5,31 @@ import type { Event, User, Vote, VoteResult, Track } from './events';
 
 export interface EventSocketEvents {
   // Connection events
-  'joined-event': (data: { eventId: string; room: string }) => void;
-  'user-joined': (data: { userId: string; socketId: string; timestamp: string }) => void;
-  'user-left': (data: { userId: string; socketId: string; timestamp: string }) => void;
-  
-  // Participant events
-  'participant-joined': (data: { eventId: string; user: User }) => void;
-  'participant-left': (data: { eventId: string; user: User }) => void;
-  
+  'joined-event': (data: { userId: string; displayName: string; avatarUrl?: string; createdAt: string; updatedAt: string }) => void;
+  'left-event': (data: { userId: string; }) => void;
+  'user-joined': (data: { userId: string; displayName: string; avatarUrl?: string; socketId: string }) => void;
+  'user-left': (data: { userId: string; }) => void;
+  'current-participants': (data: { eventId: string; participants: any[]; timestamp: string }) => void;
+
+  // Admin changes
+  'admin-added': (data: { eventId: string; userId: string; }) => void;
+  'admin-removed': (data: { eventId: string; userId: string; }) => void;
+
   // Event updates
+  'event-created': (data: { event: Event }) => void;
   'event-updated': (data: { eventId: string; event: Event }) => void;
   'event-deleted': (data: { eventId: string }) => void;
-  
+
   // Voting events
-  'vote-updated': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
+  'vote-added': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
   'vote-removed': (data: { eventId: string; trackId: string; results: VoteResult[] }) => void;
-  'voting-results': (data: { eventId: string; results: VoteResult[] }) => void;
-  
+
   // Track management
   'track-added': (data: { eventId: string; track: Track }) => void;
   'track-removed': (data: { eventId: string; trackId: string }) => void;
+  'tracks-reordered': (data: { eventId: string; trackOrder: string[] }) => void;
   'current-track-changed': (data: { eventId: string; track: Track | null; startedAt: string | null }) => void;
-  
+
   // Error handling
   'error': (data: { message: string; details?: string }) => void;
 }
@@ -38,11 +41,11 @@ class EventSocketService {
   private currentEventId: string | null = null;
   private authFailures = 0;
   private maxAuthFailures = 3;
-  
+
   connect(): Promise<Socket> {
     return new Promise((resolve, reject) => {
       const token = authService.getAuthToken();
-      
+
       if (!token) {
         reject(new Error('No authentication token available'));
         return;
@@ -71,16 +74,16 @@ class EventSocketService {
 
       this.socket.on('connect_error', (error) => {
         console.error('Events socket connection error:', error);
-        
+
         // Check if it's an authentication error
         if (error.message && (
-          error.message.includes('Invalid token') || 
+          error.message.includes('Invalid token') ||
           error.message.includes('Authentication failed') ||
           error.message.includes('secret or public key must be provided')
         )) {
           this.authFailures++;
           console.warn(`Authentication failure ${this.authFailures}/${this.maxAuthFailures}`);
-          
+
           if (this.authFailures >= this.maxAuthFailures) {
             console.error('Max authentication failures reached, stopping reconnection attempts');
             this.disconnect();
@@ -88,13 +91,13 @@ class EventSocketService {
             return;
           }
         }
-        
+
         reject(error);
       });
 
       this.socket.on('disconnect', (reason) => {
         console.log('Events socket disconnected:', reason);
-        
+
         // Only reconnect for non-auth related disconnections
         if (reason === 'io server disconnect' && this.authFailures < this.maxAuthFailures) {
           // Server disconnected us, reconnect manually
@@ -114,7 +117,7 @@ class EventSocketService {
       console.error('Max reconnection attempts reached');
       return;
     }
-    
+
     // Don't reconnect if we have too many auth failures
     if (this.authFailures >= this.maxAuthFailures) {
       console.error('Too many authentication failures, not attempting to reconnect');
@@ -123,7 +126,7 @@ class EventSocketService {
 
     this.reconnectAttempts++;
     console.log(`Attempting to reconnect events socket (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-    
+
     setTimeout(() => {
       this.connect().catch((error) => {
         console.error('Reconnection failed:', error);
@@ -149,12 +152,12 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     // Leave current event if any
     if (this.currentEventId && this.currentEventId !== eventId) {
       this.leaveEvent(this.currentEventId);
     }
-    
+
     this.socket.emit('join-event', { eventId });
     this.currentEventId = eventId;
   }
@@ -163,9 +166,9 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('leave-event', { eventId });
-    
+
     if (this.currentEventId === eventId) {
       this.currentEventId = null;
     }
@@ -176,7 +179,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('vote', { eventId, trackId, type, weight });
   }
 
@@ -185,7 +188,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('remove-vote', { eventId, trackId });
   }
 
@@ -194,7 +197,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('get-voting-results', { eventId });
   }
 
@@ -203,7 +206,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('add-track', { eventId, trackId });
   }
 
@@ -212,7 +215,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('play-track', { eventId, trackId });
   }
 
@@ -220,7 +223,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('pause-track', { eventId });
   }
 
@@ -228,7 +231,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit('skip-track', { eventId });
   }
 
@@ -237,7 +240,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.on(event as string, callback as any);
   }
 
@@ -245,7 +248,7 @@ class EventSocketService {
     if (!this.socket) {
       return;
     }
-    
+
     if (callback) {
       this.socket.off(event as string, callback as any);
     } else {
@@ -257,7 +260,7 @@ class EventSocketService {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
-    
+
     this.socket.emit(event, data);
   }
 
@@ -267,40 +270,6 @@ class EventSocketService {
 
   getCurrentEventId(): string | null {
     return this.currentEventId;
-  }
-
-  // Convenience methods for common socket operations
-  joinEventRoom(eventId: string) {
-    return this.joinEvent(eventId);
-  }
-
-  leaveEventRoom(eventId: string) {
-    return this.leaveEvent(eventId);
-  }
-
-  // Event listener convenience methods
-  onEventUpdated(callback: (event: Event) => void) {
-    this.on('event-updated', (data) => callback(data.event));
-  }
-
-  onVotingUpdated(callback: (results: VoteResult[]) => void) {
-    this.on('voting-results', (data) => callback(data.results));
-  }
-
-  onParticipantJoined(callback: (user: User) => void) {
-    this.on('participant-joined', (data) => callback(data.user));
-  }
-
-  onParticipantLeft(callback: (user: User) => void) {
-    this.on('participant-left', (data) => callback(data.user));
-  }
-
-  onTrackAdded(callback: (track: Track) => void) {
-    this.on('track-added', (data) => callback(data.track));
-  }
-
-  onTrackVoted(callback: (vote: Vote) => void) {
-    this.on('vote-updated', (data) => callback(data.vote));
   }
 }
 

@@ -32,17 +32,37 @@ class MusicPlayerService {
   async initializeForRoom(roomContext: RoomContext, playlist: PlaylistTrack[] = []): Promise<void> {
     this.currentRoom = roomContext;
     
+    console.log('MusicPlayerService: Initializing for room with playlist:', playlist.length, 'tracks');
+    
     // Set initial playlist
     if (playlist.length > 0) {
       musicPlayerStore.setPlaylist(playlist, 0);
+      console.log('MusicPlayerService: Playlist set in store');
+      
+      // Also set the first track as current but don't start playing
+      const firstTrack = playlist[0];
+      musicPlayerStore.setCurrentTrack({
+        id: firstTrack.track.id,
+        title: firstTrack.track.title,
+        artist: firstTrack.track.artist,
+        album: firstTrack.track.album,
+        duration: firstTrack.track.duration || 30,
+        albumCoverUrl: firstTrack.track.albumCoverUrl,
+        previewUrl: firstTrack.track.previewUrl
+      }, playlist, 0);
+      console.log('MusicPlayerService: First track set as current');
     }
 
     // Calculate permissions
     const permissions = await this.calculatePermissions(roomContext);
     musicPlayerStore.setCanControl(permissions.canControl);
+    
+    console.log('MusicPlayerService: Permissions set - canControl:', permissions.canControl);
 
     // Connect to room socket
     await this.connectToRoom(roomContext);
+    
+    console.log('MusicPlayerService: Initialization complete');
   }
 
   /**
@@ -221,7 +241,7 @@ class MusicPlayerService {
       title: track.track.title,
       artist: track.track.artist,
       album: track.track.album,
-      duration: track.track.duration,
+      duration: track.track.duration || 30, // Default to 30 seconds for previews
       albumCoverUrl: track.track.albumCoverUrl,
       previewUrl: track.track.previewUrl
     }, playerState.playlist, trackIndex);
@@ -263,8 +283,18 @@ class MusicPlayerService {
 
   /**
    * Add a track to the current playlist
+   * @param track - The full track object containing all required fields
+   * @param position - Optional position in the playlist
    */
-  async addTrack(trackId: string, position?: number): Promise<void> {
+  async addTrack(track: {
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string;
+    albumCoverUrl?: string;
+    previewUrl?: string;
+    duration?: number;
+  }, position?: number): Promise<void> {
     if (!this.currentRoom || this.currentRoom.type !== 'playlist') {
       throw new Error('Can only add tracks to playlists');
     }
@@ -275,7 +305,10 @@ class MusicPlayerService {
     }
 
     try {
-      await playlistsService.addTrackToPlaylist(this.currentRoom.id, { trackId, position });
+      await playlistsService.addTrackToPlaylist(this.currentRoom.id, {
+        ...track,
+        position
+      });
       // The socket event will update the UI
     } catch (error) {
       console.error('Failed to add track:', error);

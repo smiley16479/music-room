@@ -5,73 +5,103 @@
   import { socketService } from '$lib/services/socket';
   import { devicesService } from '$lib/services/devices';
   
-  let audioElement: HTMLAudioElement;
-  let progressSlider: HTMLInputElement;
-  let volumeSlider: HTMLInputElement;
-  let isDragging = false;
-  let showVolumeControl = false;
+  let audioElement = $state<HTMLAudioElement>();
+  let progressSlider = $state<HTMLInputElement>();
+  let volumeSlider = $state<HTMLInputElement>();
+  let isDragging = $state(false);
+  let showVolumeControl = $state(false);
   
-  // Subscribe to stores
-  $: playerState = $musicPlayerStore;
-  $: user = $authStore;
+  // Subscribe to stores using Svelte 5 runes
+  let playerState = $derived($musicPlayerStore);
+  let user = $derived($authStore);
+  
+  // Debug effect to track store changes (only for major state changes)
+  $effect(() => {
+    if (playerState.currentTrack) {
+      console.log('MusicPlayer: Ready with track:', playerState.currentTrack.title, '| Can Control:', playerState.canControl);
+    } else if (playerState.playlist.length > 0) {
+      console.log('MusicPlayer: Ready with playlist of', playerState.playlist.length, 'tracks');
+    }
+  });
   
   let currentAudioSrc = '';
   let loadTimeout: NodeJS.Timeout | null = null;
   
-  // Update audio source when track changes
-  $: if (audioElement && playerState.currentTrack?.previewUrl && currentAudioSrc !== playerState.currentTrack.previewUrl) {
-    console.log('MusicPlayer: Updating audio source:', {
-      newSrc: playerState.currentTrack.previewUrl,
-      currentSrc: currentAudioSrc,
-      track: playerState.currentTrack.title,
-      shouldAutoPlay: playerState.isPlaying
-    });
-    
-    // Clear any existing timeout
-    if (loadTimeout) {
-      clearTimeout(loadTimeout);
-      loadTimeout = null;
-    }
-    
-    currentAudioSrc = playerState.currentTrack.previewUrl;
-    audioElement.src = currentAudioSrc;
-    
-    // Auto-play if the player is in playing state
-    if (playerState.isPlaying) {
-      audioElement.load(); // Ensure the audio is loaded
-      audioElement.play().catch(error => {
-        console.error('Auto-play failed:', error);
-        musicPlayerStore.pause();
+  // Update audio source when track changes using Svelte 5 effect
+  $effect(() => {
+    if (audioElement && playerState.currentTrack?.previewUrl && currentAudioSrc !== playerState.currentTrack.previewUrl) {
+      console.log('MusicPlayer: Updating audio source:', {
+        newSrc: playerState.currentTrack.previewUrl,
+        currentSrc: currentAudioSrc,
+        track: playerState.currentTrack.title,
+        shouldAutoPlay: playerState.isPlaying
       });
-    }
-    
-    // Set a timeout to clear loading state if audio doesn't load
-    loadTimeout = setTimeout(() => {
-      if (playerState.isLoading) {
-        console.warn('Audio load timeout, clearing loading state');
-        musicPlayerStore.setLoading(false);
-      }
-      loadTimeout = null;
-    }, 5000); // 5 second timeout
-    
-    // Clear timeout when audio loads successfully
-    const handleLoadSuccess = () => {
-      console.log('Audio loaded successfully');
+      
+      // Clear any existing timeout
       if (loadTimeout) {
         clearTimeout(loadTimeout);
         loadTimeout = null;
       }
-    };
-    
-    audioElement.addEventListener('canplay', handleLoadSuccess, { once: true });
-    audioElement.addEventListener('loadeddata', handleLoadSuccess, { once: true });
-  }
+      
+      currentAudioSrc = playerState.currentTrack.previewUrl;
+      audioElement.src = currentAudioSrc;
+      audioElement.load(); // Force reload of the audio
+      
+      // Auto-play if the player is in playing state
+      if (playerState.isPlaying) {
+        // Small delay to ensure audio is loaded
+        setTimeout(() => {
+          audioElement?.play().catch(error => {
+            console.warn('Auto-play failed (this is expected on first user interaction):', error);
+            musicPlayerStore.pause();
+          });
+        }, 100);
+      }
+      
+      // Set a timeout to clear loading state if audio doesn't load
+      loadTimeout = setTimeout(() => {
+        if (playerState.isLoading) {
+          console.warn('Audio load timeout, clearing loading state');
+          musicPlayerStore.setLoading(false);
+        }
+        loadTimeout = null;
+      }, 5000); // 5 second timeout
+      
+      // Clear timeout when audio loads successfully
+      const handleLoadSuccess = () => {
+        console.log('Audio loaded successfully');
+        if (loadTimeout) {
+          clearTimeout(loadTimeout);
+          loadTimeout = null;
+        }
+      };
+      
+      audioElement.addEventListener('canplay', handleLoadSuccess, { once: true });
+      audioElement.addEventListener('loadeddata', handleLoadSuccess, { once: true });
+    }
+  });
 
-  // Handle the case where currentTrack is set but has no previewUrl
-  $: if (playerState.currentTrack && !playerState.currentTrack.previewUrl) {
-    console.warn('Current track has no preview URL:', playerState.currentTrack);
-    musicPlayerStore.setLoading(false);
-  }
+  // Handle the case where currentTrack is set but has no previewUrl using Svelte 5 effect
+  $effect(() => {
+    if (playerState.currentTrack && !playerState.currentTrack.previewUrl) {
+      console.warn('Current track has no preview URL:', playerState.currentTrack);
+      musicPlayerStore.setLoading(false);
+    }
+  });
+
+  // Sync audio element play/pause state with store
+  $effect(() => {
+    if (audioElement && audioElement.src) {
+      if (playerState.isPlaying && audioElement.paused) {
+        audioElement.play().catch(error => {
+          console.warn('Play failed:', error);
+          musicPlayerStore.pause();
+        });
+      } else if (!playerState.isPlaying && !audioElement.paused) {
+        audioElement.pause();
+      }
+    }
+  });
   
   function formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
@@ -121,20 +151,19 @@
   }
   
   function handleError(event: Event) {
-    console.error('Audio error:', event);
     const audioError = audioElement?.error;
     if (audioError) {
-      console.error('Audio error details:', {
-        code: audioError.code,
-        message: audioError.message,
-        MEDIA_ERR_ABORTED: audioError.MEDIA_ERR_ABORTED,
-        MEDIA_ERR_NETWORK: audioError.MEDIA_ERR_NETWORK,
-        MEDIA_ERR_DECODE: audioError.MEDIA_ERR_DECODE,
-        MEDIA_ERR_SRC_NOT_SUPPORTED: audioError.MEDIA_ERR_SRC_NOT_SUPPORTED
-      });
+      // Only log detailed error in development mode, show user-friendly messages
+      if (audioError.code === MediaError.MEDIA_ERR_NETWORK) {
+        console.info('Preview not available: Network/CORS restriction');
+      } else if (audioError.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+        console.info('Preview not available: Format not supported');
+      } else {
+        console.info('Preview not available: Media load failed');
+      }
     }
     musicPlayerStore.setLoading(false);
-    musicPlayerStore.pause();
+    // Don't automatically pause on error - let user try to play manually
   }
 
   async function handlePlayPause() {
@@ -156,13 +185,66 @@
             audioElement.pause();
             musicPlayerStore.pause();
           } else {
+            // Check if audio has failed to load before trying to play
+            if (audioElement.error) {
+              console.warn('Cannot play: Audio failed to load due to CORS/403 error');
+              console.info('This track preview is not available due to licensing restrictions');
+              return;
+            }
+            
+            // Ensure audio is loaded before playing
+            if (audioElement.src !== playerState.currentTrack.previewUrl) {
+              audioElement.src = playerState.currentTrack.previewUrl;
+              audioElement.load();
+              
+              // Wait for audio to load or fail before trying to play
+              const loadPromise = new Promise<void>((resolve, reject) => {
+                const onCanPlay = () => {
+                  cleanup();
+                  resolve();
+                };
+                const onError = () => {
+                  cleanup();
+                  reject(new Error('Audio failed to load'));
+                };
+                const cleanup = () => {
+                  audioElement?.removeEventListener('canplay', onCanPlay);
+                  audioElement?.removeEventListener('error', onError);
+                };
+                
+                if (audioElement) {
+                  audioElement.addEventListener('canplay', onCanPlay, { once: true });
+                  audioElement.addEventListener('error', onError, { once: true });
+                }
+                
+                // Timeout after 3 seconds
+                setTimeout(() => {
+                  cleanup();
+                  reject(new Error('Audio load timeout'));
+                }, 3000);
+              });
+              
+              try {
+                await loadPromise;
+              } catch (loadError) {
+                const errorMessage = loadError instanceof Error ? loadError.message : 'Unknown error';
+                console.warn('Audio preview not available:', errorMessage);
+                console.info('This track preview cannot be played due to licensing or CORS restrictions');
+                return;
+              }
+            }
+            
             await audioElement.play();
             musicPlayerStore.play();
           }
+        } else if (!playerState.currentTrack?.previewUrl) {
+          console.warn('No preview URL available for current track');
         }
       }
     } catch (error) {
-      console.error('Playback error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn('Playback failed:', errorMessage);
+      console.info('This track preview cannot be played due to browser security policies or licensing restrictions');
       musicPlayerStore.setLoading(false);
       musicPlayerStore.pause();
     }
@@ -284,10 +366,12 @@
     });
   }
   
-  // Reactive updates
-  $: if (audioElement) {
-    audioElement.volume = (playerState.isMuted ? 0 : playerState.volume) / 100;
-  }
+  // Reactive updates using Svelte 5 effect
+  $effect(() => {
+    if (audioElement) {
+      audioElement.volume = (playerState.isMuted ? 0 : playerState.volume) / 100;
+    }
+  });
   
   onMount(() => {
     setupSocketListeners();
@@ -329,8 +413,11 @@
 ></audio>
 
 <!-- Music Player UI -->
-{#if playerState.currentTrack}
-<div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+{#if playerState.currentTrack || playerState.playlist.length > 0}
+<div class="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-secondary shadow-2xl z-50" style="min-height: 80px;">
+  <div class="bg-secondary/10 text-center py-1 text-xs text-secondary font-medium">
+    🎵 Music Player Active
+  </div>
   <div class="container mx-auto px-4 py-3">
     <!-- Progress Bar -->
     <div class="w-full mb-3">
@@ -357,7 +444,7 @@
     <div class="flex items-center justify-between">
       <!-- Track Info -->
       <div class="flex items-center space-x-3 flex-1 min-w-0">
-        {#if playerState.currentTrack.albumCoverUrl}
+        {#if playerState.currentTrack?.albumCoverUrl}
           <img 
             src={playerState.currentTrack.albumCoverUrl} 
             alt="Album cover"
@@ -373,11 +460,32 @@
         
         <div class="min-w-0 flex-1">
           <h4 class="text-sm font-medium text-gray-900 truncate">
-            {playerState.currentTrack.title}
+            {playerState.currentTrack?.title || 'Ready to play'}
           </h4>
           <p class="text-xs text-gray-500 truncate">
-            {playerState.currentTrack.artist}
+            {playerState.currentTrack?.artist || `${playerState.playlist.length} tracks available`}
           </p>
+          {#if playerState.currentTrack}
+            {#if playerState.currentTrack.previewUrl}
+              {#if audioElement?.error}
+                <p class="text-xs text-red-600">
+                  Preview Unavailable (Licensing)
+                </p>
+              {:else}
+                <p class="text-xs text-blue-600">
+                  30s Preview Available
+                </p>
+              {/if}
+            {:else}
+              <p class="text-xs text-orange-600">
+                No Preview Available
+              </p>
+            {/if}
+          {:else}
+            <p class="text-xs text-gray-600">
+              Click play on any track to start
+            </p>
+          {/if}
         </div>
       </div>
 
@@ -397,9 +505,14 @@
 
         <button
           onclick={handlePlayPause}
-          disabled={!playerState.canControl || playerState.isLoading}
+          disabled={!playerState.canControl || playerState.isLoading || (!playerState.currentTrack && playerState.playlist.length === 0) || (!!audioElement?.error && !!playerState.currentTrack?.previewUrl)}
           class="p-3 bg-secondary text-white rounded-full hover:bg-secondary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title={playerState.isPlaying ? 'Pause' : 'Play'}
+          title={
+            !playerState.currentTrack ? 'Select a track to play' :
+            audioElement?.error && playerState.currentTrack?.previewUrl ? 'Preview unavailable due to licensing restrictions' :
+            !playerState.currentTrack?.previewUrl ? 'No preview available for this track' :
+            playerState.isPlaying ? 'Pause preview' : 'Play preview'
+          }
         >
           {#if playerState.isLoading}
             <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">

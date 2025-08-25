@@ -220,6 +220,28 @@ class SocketService {
     this.socket.emit(event, data);
   }
 
+  // Track management methods
+  emitTrackAdded(playlistId: string, track: any) {
+    this.emit('track-added', { playlistId, track });
+  }
+
+  emitTrackRemoved(playlistId: string, trackId: string) {
+    this.emit('track-removed', { playlistId, trackId });
+  }
+
+  emitTracksReordered(playlistId: string, trackIds: string[]) {
+    this.emit('tracks-reordered', { playlistId, trackIds });
+  }
+
+  // Collaborator management methods
+  emitCollaboratorAdded(playlistId: string, userId: string) {
+    this.emit('collaborator-added', { playlistId, userId });
+  }
+
+  emitCollaboratorRemoved(playlistId: string, userId: string) {
+    this.emit('collaborator-removed', { playlistId, userId });
+  }
+
   isConnected(): boolean {
     return this.socket?.connected ?? false;
   }

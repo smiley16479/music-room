@@ -1,5 +1,6 @@
 import { config } from '$lib/config';
 import { authService } from './auth';
+import { socketService } from './socket';
 
 export interface Playlist {
   id: string;
@@ -185,7 +186,16 @@ export const playlistsService = {
     }
   },
 
-  async addTrackToPlaylist(playlistId: string, data: { trackId: string; position?: number }): Promise<PlaylistTrack> {
+  async addTrackToPlaylist(playlistId: string, data: {
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string;
+    albumCoverUrl?: string;
+    previewUrl?: string;
+    duration?: number;
+    position?: number;
+  }): Promise<PlaylistTrack> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
@@ -204,6 +214,16 @@ export const playlistsService = {
     }
 
     const result = await response.json();
+    
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTrackAdded(playlistId, result.data);
+      }
+    } catch (error) {
+      console.warn('Failed to emit track added event:', error);
+    }
+    
     return result.data;
   },
 
@@ -221,6 +241,15 @@ export const playlistsService = {
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to remove track');
+    }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTrackRemoved(playlistId, trackId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit track removed event:', error);
     }
   },
 
@@ -241,6 +270,15 @@ export const playlistsService = {
       const result = await response.json();
       throw new Error(result.message || 'Failed to reorder tracks');
     }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTracksReordered(playlistId, trackIds);
+      }
+    } catch (error) {
+      console.warn('Failed to emit tracks reordered event:', error);
+    }
   },
 
   async addCollaborator(playlistId: string, userId: string): Promise<void> {
@@ -258,6 +296,15 @@ export const playlistsService = {
       const result = await response.json();
       throw new Error(result.message || 'Failed to add collaborator');
     }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitCollaboratorAdded(playlistId, userId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit collaborator added event:', error);
+    }
   },
 
   async removeCollaborator(playlistId: string, userId: string): Promise<void> {
@@ -274,6 +321,15 @@ export const playlistsService = {
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to remove collaborator');
+    }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitCollaboratorRemoved(playlistId, userId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit collaborator removed event:', error);
     }
   }
 };

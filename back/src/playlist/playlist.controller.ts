@@ -274,9 +274,6 @@ export class PlaylistController {
     @Body() addTrackDto: AddTrackToPlaylistDto,
     @CurrentUser() user: User,
   ) {
-
-    this.logger.debug('✅ addTrack() entered');
-
     const track = await this.playlistService.addTrack(id, user.id, addTrackDto);
     return {
       success: true,

@@ -66,7 +66,15 @@
 
 		try {
 			// Use the same approach as EnhancedMusicSearchModal
-			await playlistsService.addTrackToPlaylist(playlistId, { trackId: deezerTrack.id });
+			await playlistsService.addTrackToPlaylist(playlistId, {
+			  deezerId: deezerTrack.id,
+			  title: deezerTrack.title,
+			  artist: deezerTrack.artist,
+			  album: deezerTrack.album,
+			  albumCoverUrl: deezerTrack.albumCoverUrl || deezerTrack.albumCoverMediumUrl,
+			  previewUrl: deezerTrack.previewUrl,
+			  duration: deezerTrack.duration
+			});
 			onTrackAdded();
 		} catch (error) {
 			searchError = error instanceof Error ? error.message : 'Failed to add track';
@@ -89,7 +97,7 @@
 </script>
 
 <!-- Search Modal -->
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
 	<div class="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden">
 		<!-- Header -->
 		<div class="p-6 border-b border-gray-200">

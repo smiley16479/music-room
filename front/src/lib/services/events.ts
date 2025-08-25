@@ -12,39 +12,40 @@ export interface Event {
   status: 'upcoming' | 'live' | 'ended';
   allowsVoting: boolean; // Whether voting is enabled
   coverImageUrl?: string; // Event cover image
-  
+
   // Host information
   hostId: string; // Alias for creatorId
   hostName: string; // Host display name
-  
+
   // Location data
   latitude?: number;
   longitude?: number;
   locationRadius?: number;
   locationName?: string;
   location?: string; // Formatted location string
-  
+
   // Time constraints
   votingStartTime?: string;
   votingEndTime?: string;
   eventDate?: string;
   eventEndDate?: string;
   startDate?: string; // Alias for eventDate
-  
+
   // Current playing
   currentTrackId?: string;
   currentTrackStartedAt?: string;
   currentTrack?: Track;
-  
+
   maxVotesPerUser: number;
-  
+
   // Relations
   creatorId: string;
   creator: User;
   participants: User[];
+  admins?: User[]; // Event administrators
   playlist: Track[];
   votes: Vote[];
-  
+
   // Stats
   stats?: {
     participantCount: number;
@@ -52,7 +53,7 @@ export interface Event {
     trackCount: number;
     isUserParticipating: boolean;
   };
-  
+
   createdAt: string;
   updatedAt: string;
 }
@@ -95,7 +96,7 @@ export interface Vote {
   type: 'upvote' | 'downvote';
   weight: number;
   createdAt: string;
-  
+
   // Relations
   user?: User;
   track?: Track;
@@ -113,19 +114,19 @@ export interface CreateEventData {
   description?: string;
   visibility?: 'public' | 'private';
   licenseType?: 'open' | 'invited' | 'location_based';
-  
+
   // Location data for location-based events
   latitude?: number;
   longitude?: number;
   locationRadius?: number;
   locationName?: string;
-  
+
   // Time constraints for location-based events
   votingStartTime?: string;
   votingEndTime?: string;
   eventDate?: string;
   eventEndDate?: string;
-  
+
   maxVotesPerUser?: number;
 }
 
@@ -314,7 +315,7 @@ export async function getVotingResults(eventId: string): Promise<VoteResult[]> {
 export async function addTrackToEvent(eventId: string, trackId: string): Promise<void>;
 export async function addTrackToEvent(eventId: string, trackData: Partial<Track>): Promise<void>;
 export async function addTrackToEvent(eventId: string, trackIdOrData: string | Partial<Track>): Promise<void> {
-  const body = typeof trackIdOrData === 'string' 
+  const body = typeof trackIdOrData === 'string'
     ? { trackId: trackIdOrData }
     : trackIdOrData;
 
@@ -361,5 +362,90 @@ export async function inviteToEvent(eventId: string, emails: string[]): Promise<
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.message || 'Failed to send invitations');
+  }
+}
+
+// Event control functions
+export async function startEvent(eventId: string): Promise<Event> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/start`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to start event');
+  }
+
+  const result = await response.json();
+  return result.data || result;
+}
+
+export async function endEvent(eventId: string): Promise<Event> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/end`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to end event');
+  }
+
+  const result = await response.json();
+  return result.data || result;
+}
+
+export async function playNextTrack(eventId: string): Promise<Track | null> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/next-track`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to play next track');
+  }
+
+  const result = await response.json();
+  return result.data?.track || null;
+}
+
+export async function promoteUserToAdmin(eventId: string, userId: string): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/admins/${userId}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to promote user to admin');
+  }
+}
+
+export async function removeUserFromAdmin(eventId: string, userId: string): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/admins/${userId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to remove admin');
   }
 }

@@ -6,13 +6,23 @@
 
 	let { 
 		playlistId,
+		eventId,
 		onTrackAdded = () => {},
 		onClose = () => {}
 	}: {
-		playlistId: string;
+		playlistId?: string;
+		eventId?: string;
 		onTrackAdded?: () => void;
 		onClose?: () => void;
 	} = $props();
+
+	// Ensure we have either playlistId or eventId, but not both
+	if (!playlistId && !eventId) {
+		throw new Error('Either playlistId or eventId must be provided');
+	}
+	if (playlistId && eventId) {
+		throw new Error('Cannot provide both playlistId and eventId');
+	}
 
 	let searchQuery = $state('');
 	let searchResults = $state<DeezerTrack[]>([]);
@@ -136,8 +146,19 @@
 		searchError = '';
 
 		try {
-			// Send just the trackId to the backend
-			await playlistsService.addTrackToPlaylist(playlistId, { trackId: deezerTrack.id });
+			const trackData = {
+				deezerId: deezerTrack.id,
+				title: deezerTrack.title,
+				artist: deezerTrack.artist,
+				album: deezerTrack.album,
+				albumCoverUrl: deezerTrack.albumCoverUrl || deezerTrack.albumCoverMediumUrl,
+				previewUrl: deezerTrack.previewUrl,
+				duration: deezerTrack.duration
+			};
+
+			// Add to playlist
+			await playlistsService.addTrackToPlaylist(playlistId, trackData);
+			
 			onTrackAdded();
 		} catch (error) {
 			searchError = error instanceof Error ? error.message : 'Failed to add track';
@@ -184,12 +205,14 @@
 </script>
 
 <!-- Enhanced Search Modal -->
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-	<div class="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden">
+<div class="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4">
+	<div class="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden mt-[5vh]">
 		<!-- Header -->
 		<div class="p-6 border-b border-gray-200">
 			<div class="flex justify-between items-center mb-4">
-				<h2 class="text-xl font-bold text-gray-800">Add Music to Playlist</h2>
+				<h2 class="text-xl font-bold text-gray-800">
+					Add Music to {playlistId ? 'Playlist' : 'Event'}
+				</h2>
 				<button 
 					onclick={onClose}
 					aria-label="Close modal"

@@ -149,6 +149,28 @@ export class EventController {
     };
   }
 
+  @Get(':id/results')
+  @Public()
+  @ApiOperation({
+    summary: 'Get voting results (alias)',
+    description: 'Returns the current voting results for tracks in an event (alias for voting-results)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event to get voting results for',
+    required: true
+  })
+  async getResults(@Param('id') id: string, @CurrentUser() user?: User) {
+    // This is an alias for getVotingResults
+    const results = await this.eventService.getVotingResults(id, user?.id);
+    return {
+      success: true,
+      data: results,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Patch(':id')
   @ApiOperation({
     summary: 'Update event',
@@ -261,14 +283,53 @@ export class EventController {
     @CurrentUser() user: User,
   ) {
     await this.eventService.promoteAdmin(eventId, user.id, userId);
+    
+    // Return updated event data with new admin list
+    const updatedEvent = await this.eventService.findById(eventId, user.id);
+    
     return {
       success: true,
       message: 'User promoted to admin',
+      data: updatedEvent,
       timestamp: new Date().toISOString(),
     };
   }
 
-  /** TO DO: permissions */
+  @Post(':id/participant/:userId')
+  @ApiOperation({
+    summary: 'Add participant to event',
+    description: 'Allows an event admin to add a specific user as participant to the event',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'userId',
+    type: String,
+    description: 'The ID of the user to add as participant',
+    required: true
+  })
+  async addParticipantByAdmin(
+    @Param('id') eventId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() admin: User,
+  ) {
+    await this.eventService.addParticipant(eventId, userId);
+    
+    // Return updated event data with new participant list
+    const updatedEvent = await this.eventService.findById(eventId, admin.id);
+    
+    return {
+      success: true,
+      message: 'Participant added successfully',
+      data: updatedEvent,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Delete(':id/participant/:userId')
   @ApiOperation({
     summary: 'Remove participant from event',
@@ -292,9 +353,14 @@ export class EventController {
     @CurrentUser() admin: User,
   ) {
     await this.eventService.removeParticipant(eventId, userId);
+    
+    // Return updated event data with updated participant list
+    const updatedEvent = await this.eventService.findById(eventId, admin.id);
+    
     return {
       success: true,
       message: 'Participant removed successfully',
+      data: updatedEvent,
       timestamp: new Date().toISOString(),
     };
   }
@@ -322,9 +388,14 @@ export class EventController {
     @CurrentUser() user: User,
   ) {
     await this.eventService.removeAdmin(eventId, user.id, userId);
+    
+    // Return updated event data with updated admin list
+    const updatedEvent = await this.eventService.findById(eventId, user.id);
+    
     return {
       success: true,
       message: 'Admin removed from event',
+      data: updatedEvent,
       timestamp: new Date().toISOString(),
     };
   }

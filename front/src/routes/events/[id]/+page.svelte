@@ -1,27 +1,36 @@
-<svelte:head>
-	<title>{event?.name || event?.title || 'Event'} - Music Room</title>
-	<meta name="description" content="Join the live music event and vote for tracks" />
-</svelte:head>
-
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
-	import { authStore } from '$lib/stores/auth';
-	import { authService } from '$lib/services/auth';
-	import { 
-		getEvent, 
-		joinEvent as joinEventAPI, 
+	import { onMount, onDestroy } from "svelte";
+	import { page } from "$app/stores";
+	import { goto } from "$app/navigation";
+	import { authStore } from "$lib/stores/auth";
+	import { authService } from "$lib/services/auth";
+	import { config } from "$lib/config";
+	import {
+		getEvent,
 		leaveEvent as leaveEventAPI,
 		voteForTrackSimple,
 		removeVote,
 		getVotingResults,
 		addTrackToEvent,
 		inviteToEvent,
+		updateEvent,
+		deleteEvent,
+		startEvent,
+		endEvent,
+		playNextTrack as playNextTrackAPI,
+		promoteUserToAdmin,
+		removeUserFromAdmin,
 		type Event,
-		type VoteResult 
-	} from '$lib/services/events';
-	import { eventSocketService } from '$lib/services/event-socket';
+		type VoteResult,
+		type Track,
+		type User,
+	} from "$lib/services/events";
+	import { eventSocketService } from "$lib/services/event-socket";
+	import { playlistsService, type Playlist } from "$lib/services/playlists";
+	import { deezerService, type DeezerTrack } from "$lib/services/deezer";
+	import { musicPlayerService } from "$lib/services/musicPlayer";
+	import { musicPlayerStore } from "$lib/stores/musicPlayer";
+	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
 
 	interface PageData {
 		event?: Event;
@@ -31,27 +40,152 @@
 	let event: Event | null = $state(data.event || null);
 	let user = $derived($authStore);
 	let loading = $state(false);
-	let error = $state('');
+	let error = $state("");
 	let votingResults: VoteResult[] = $state([]);
 	let showInviteModal = $state(false);
 	let showAddTrackModal = $state(false);
-	let inviteEmails = $state('');
+	let showPlaylistModal = $state(false);
+	let showEditModal = $state(false);
+	let showDeleteConfirm = $state(false);
+	let showPromoteModal = $state(false);
+	let showAddAdminModal = $state(false);
+	let inviteEmails = $state("");
+	let addAdminEmail = $state("");
 	let votingCooldown = new Set<string>();
-	
+	let userPlaylists: Playlist[] = $state([]);
+	let selectedUserId = $state("");
+	let isSocketConnected = $state(false);
+
+	// Music search state
+	let searchQuery = $state("");
+	let searchResults = $state<DeezerTrack[]>([]);
+	let topTracks = $state<DeezerTrack[]>([]);
+	let isSearching = $state(false);
+	let isLoadingTop = $state(false);
+	let searchError = $state("");
+	let isAddingTrack = $state<string | null>(null);
+	let activeTab = $state<"search" | "top">("search");
+
+	// Music player state
+	let isPlaying = $state(false);
+	let currentPlayingTrack: string | null = $state(null);
+	let audioElement: HTMLAudioElement | null = null;
+	let isMusicPlayerInitialized = $state(false);
+	let showMusicSearchModal = $state(false);
+	let draggedIndex: number | null = null;
+
+	// Music player store state
+	const playerState = $derived($musicPlayerStore);
+
 	let newTrack = $state({
-		title: '',
-		artist: '',
-		album: '',
+		title: "",
+		artist: "",
+		album: "",
 		duration: 0,
-		thumbnailUrl: '',
-		streamUrl: ''
+		thumbnailUrl: "",
+		streamUrl: "",
+	});
+
+	// Edit event form
+	let editEventData = $state({
+		name: "",
+		description: "",
+		licenseType: "open" as "open" | "invited" | "location_based",
+		visibility: "public" as "public" | "private",
+		locationName: "",
 	});
 
 	let eventId = $derived($page.params.id);
-	let isParticipating = $derived(
-		user && event && event.participants?.some((p: any) => p.id === user.id)
-	);
+	// Remove isParticipating check since all users on the page are participants
 	let isCreator = $derived(user && event && event.creatorId === user.id);
+	let isAdmin = $derived(
+		user &&
+			event &&
+			(event.creatorId === user.id ||
+				event.admins?.some((admin: User) => admin.id === user.id)),
+	);
+
+	// Event status and permissions
+	let eventStatus = $derived(() => {
+		if (!event?.eventDate || !event?.eventEndDate) return "upcoming";
+		const now = new Date();
+		const start = new Date(event.eventDate);
+		const end = new Date(event.eventEndDate);
+
+		if (now >= start && now < end) return "live";
+		if (now < start) return "upcoming";
+		return "ended";
+	});
+
+	let canVoteForTracks = $derived(() => {
+		if (!user || !event) return false;
+
+		// Can't vote on ended events
+		if (eventStatus() === "ended") return false;
+
+		// Can't vote on currently playing track
+		if (
+			currentPlayingTrack &&
+			event.playlist?.find((t) => t.id === currentPlayingTrack)
+		) {
+			return false;
+		}
+
+		// Check license restrictions
+		switch (event.licenseType) {
+			case "open":
+				return true;
+			case "invited":
+				return event.participants.some((p) => p.id === user.id);
+			case "location_based":
+				// TODO: Implement location-based voting validation
+				return false;
+			default:
+				return false;
+		}
+	});
+
+	// Sorted playlist with voting restrictions
+	function sortedPlaylistTracks() {
+		if (!event?.playlist) return [];
+
+		return [...event.playlist].sort((a: Track, b: Track) => {
+			// Currently playing track stays at top
+			if (currentPlayingTrack === a.id) return -1;
+			if (currentPlayingTrack === b.id) return 1;
+
+			// Then sort by vote count
+			return (
+				(b.voteCount || b.votes || 0) - (a.voteCount || a.votes || 0)
+			);
+		});
+	}
+
+	// Participants sorted by role
+	let sortedParticipants = $derived(() => {
+		if (!event?.participants) return [];
+
+		return [...event.participants].sort((a: User, b: User) => {
+			// Owner first
+			if (a.id === event!.creatorId) return -1;
+			if (b.id === event!.creatorId) return 1;
+
+			// Then admins
+			const aIsAdmin = event!.admins?.some(
+				(admin: User) => admin.id === a.id,
+			);
+			const bIsAdmin = event!.admins?.some(
+				(admin: User) => admin.id === b.id,
+			);
+			if (aIsAdmin && !bIsAdmin) return -1;
+			if (bIsAdmin && !aIsAdmin) return 1;
+
+			// Then alphabetically
+			return (a.displayName || a.username || "").localeCompare(
+				b.displayName || b.username || "",
+			);
+		});
+	});
 
 	// Real-time connection status
 	let socketConnected = $state(false);
@@ -60,125 +194,393 @@
 	onMount(async () => {
 		// Load initial event data from props or fetch it
 		if (data?.event) {
-			event = data.event;
+			event = {
+				...data.event,
+				// Start with empty participants - they will be populated via socket events
+				participants: [],
+			};
+			initializeEditForm();
 		} else {
 			await loadEvent();
 		}
 
-		// Connect to socket if user is authenticated and has a valid token
-		if (user && eventId && authService.getAuthToken()) {
+		// Load user playlists for adding tracks
+		if (user) {
 			try {
-				await eventSocketService.connect();
-				eventSocketService.joinEventRoom(eventId);
-				socketConnected = true;
-
-				// Setup socket listeners
-				eventSocketService.onEventUpdated((updatedEvent) => {
-					event = updatedEvent;
-				});
-
-				eventSocketService.onVotingUpdated((results) => {
-					votingResults = results;
-				});
-
-				eventSocketService.onParticipantJoined((participant) => {
-					if (event && !event.participants.find(p => p.id === participant.id)) {
-						event.participants = [...event.participants, participant];
-					}
-				});
-
-				eventSocketService.onParticipantLeft((user) => {
-					if (event) {
-						event.participants = event.participants.filter(p => p.id !== user.id);
-					}
-				});
-
-				eventSocketService.onTrackAdded((track) => {
-					if (event && !event.playlist.find(t => t.id === track.id)) {
-						event.playlist = [...event.playlist, track];
-					}
-				});
-
-				eventSocketService.onTrackVoted((vote) => {
-					if (event) {
-						const track = event.playlist.find(t => t.id === vote.trackId);
-						if (track) {
-							track.voteCount = (track.voteCount || 0) + 1;
-							event.playlist = [...event.playlist];
-						}
-					}
-				});
-			} catch (error) {
-				console.error('Failed to connect to socket:', error);
-				socketConnected = false;
-				// Continue without real-time features
+				userPlaylists = await playlistsService.getPlaylists(
+					false,
+					user.id,
+				);
+			} catch (err) {
+				console.error("Failed to load user playlists:", err);
 			}
-		} else {
-			console.warn('Socket connection skipped: user not authenticated or no event ID');
+		}
+
+		// Set up socket connection for real-time collaborative features
+		if (eventId && user) {
+			await setupSocketConnection(eventId);
+		} else if (eventId && !user) {
+			// Wait a bit for user to be loaded from auth store
+			setTimeout(async () => {
+				const currentUser = $authStore;
+				if (currentUser && eventId) {
+					await setupSocketConnection(eventId);
+				}
+			}, 1000);
+		}
+
+		// Initialize music player for this event
+		if (event && user) {
+			await initializeMusicPlayer();
 		}
 	});
 
 	onDestroy(() => {
-		if (eventId) {
-			eventSocketService.leaveEventRoom(eventId);
+		if (eventId && isSocketConnected) {
+			cleanupSocketConnection(eventId);
 		}
-		eventSocketService.disconnect();
+
+		// Clean up audio
+		if (audioElement) {
+			audioElement.pause();
+			audioElement = null;
+		}
+
+		// Cleanup music player
+		if (isMusicPlayerInitialized) {
+			musicPlayerService.leaveRoom();
+			isMusicPlayerInitialized = false;
+		}
 	});
+
+	async function setupSocketConnection(playlistId: string) {
+		try {
+			if (!eventSocketService.isConnected()) {
+				await eventSocketService.connect();
+			}
+
+			// Set up event-specific collaboration listeners
+			setupEventSocketListeners();
+
+			isSocketConnected = true;
+		} catch (err) {
+			console.error("Failed to set up socket connection:", err);
+			error = "Failed to connect to real-time updates";
+		}
+	}
+
+	function setupEventSocketListeners() {
+		if (!eventId) return;
+		eventSocketService.joinEvent(eventId);
+		// Listen for real-time event updates (metadata changes)
+		eventSocketService.on("event-updated", handleEventUpdated);
+		eventSocketService.on("track-added", handleTrackAdded);
+		eventSocketService.on("track-removed", handleTrackRemoved);
+		eventSocketService.on("tracks-reordered", handleTracksReordered);
+		eventSocketService.on(
+			"current-track-changed",
+			handleCurrentTrackChanged,
+		);
+		eventSocketService.on("vote-added", handleVoteUpdated);
+		eventSocketService.on("vote-removed", handleVoteRemoved);
+		eventSocketService.on("user-joined", handleParticipantAdded);
+		eventSocketService.on("user-left", handleParticipantRemoved);
+		eventSocketService.on("joined-event", handleJoinedEvent);
+		eventSocketService.on("left-event", handleLeavedEvent);
+		eventSocketService.on("admin-added", handleAdminAdded);
+		eventSocketService.on("admin-removed", handleAdminRemoved);
+		eventSocketService.on(
+			"current-participants",
+			handleCurrentParticipants,
+		);
+	}
+
+	function cleanupSocketConnection(eventId: string) {
+		try {
+			// Leave the specific event room
+			eventSocketService.leaveEvent(eventId);
+
+			// Clean up event listeners
+			eventSocketService.off("event-updated", handleEventUpdated);
+			eventSocketService.off("track-added", handleTrackAdded);
+			eventSocketService.off("track-removed", handleTrackRemoved);
+			eventSocketService.off("tracks-reordered", handleTracksReordered);
+			eventSocketService.off(
+				"current-track-changed",
+				handleCurrentTrackChanged,
+			);
+			eventSocketService.off("user-joined", handleParticipantAdded);
+			eventSocketService.off("user-left", handleParticipantRemoved);
+			eventSocketService.off("vote-added", handleVoteUpdated);
+			eventSocketService.off("vote-removed", handleVoteRemoved);
+			eventSocketService.off("joined-event", handleJoinedEvent);
+			eventSocketService.off("left-event", handleLeavedEvent);
+			eventSocketService.off("admin-added", handleAdminAdded);
+			eventSocketService.off("admin-removed", handleAdminRemoved);
+			eventSocketService.off(
+				"current-participants",
+				handleCurrentParticipants,
+			);
+
+			isSocketConnected = false;
+		} catch (err) {
+			console.error("Failed to clean up socket connection:", err);
+		}
+	}
+
+	function handleAdminAdded(data: { eventId: string; userId: string }) {
+		if (event && event.admins && data.eventId === event.id) {
+			if (!event.admins.some((admin) => admin.id === data.userId)) {
+				event.admins.push({
+					id: data.userId,
+					userId: data.userId,
+					displayName: "New Admin",
+					createdAt: new Date().toISOString(),
+					updatedAt: new Date().toISOString(),
+					email: "",
+				});
+				// Force reactivity update
+				event = { ...event };
+			}
+		}
+	}
+
+	function handleAdminRemoved(data: { eventId: string; userId: string }) {
+		if (event && event.admins && data.eventId === event.id) {
+			const initialCount = event.admins.length;
+			event.admins = event.admins.filter(
+				(admin) => admin.id !== data.userId,
+			);
+			if (event.admins.length !== initialCount) {
+				// Force reactivity update
+				event = { ...event };
+			}
+		}
+	}
+
+	function handleEventUpdated(data: { event: Event }) {
+		if (event && data.event.id === event.id) {
+			event = { ...event, ...data.event };
+		}
+	}
+
+	function handleTrackAdded(data: { track: Track }) {
+		if (event) {
+			event.playlist.push(data.track);
+		}
+	}
+	function handleTrackRemoved(data: { trackId: string }) {
+		if (event) {
+			event.playlist = event.playlist.filter(
+				(t) => t.id !== data.trackId,
+			);
+		}
+	}
+	function handleTracksReordered(data: { trackOrder: string[] }) {
+		if (event && event.playlist) {
+			const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
+			event.playlist = data.trackOrder
+				.map((id) => trackMap.get(id))
+				.filter((t): t is Track => t !== undefined);
+		}
+	}
+	function handleCurrentTrackChanged(data: {
+		track: Track | null;
+		startedAt: string | null;
+	}) {
+		currentPlayingTrack = data.track ? data.track.id : null;
+		if (data.track && data.startedAt) {
+			// If a new track started, set up audio element
+			if (audioElement) {
+				audioElement.pause();
+				audioElement = null;
+			}
+			audioElement = new Audio(data.track.streamUrl);
+			audioElement.currentTime =
+				(Date.now() - new Date(data.startedAt).getTime()) / 1000;
+			if (isPlaying) {
+				audioElement.play().catch((err) => {
+					console.error("Failed to play audio:", err);
+				});
+			}
+		} else {
+			// No track is playing
+			if (audioElement) {
+				audioElement.pause();
+				audioElement = null;
+			}
+		}
+	}
+	function handleVoteUpdated(data: {
+		eventId: string;
+		vote: { trackId: string; userId: string };
+		results: VoteResult[];
+	}) {
+		if (event && data.eventId === event.id) {
+			votingResults = data.results;
+			// Update vote counts in playlist
+			if (event.playlist) {
+				event.playlist = event.playlist.map((track) => {
+					const result = votingResults.find(
+						(r) => r.track.id === track.id,
+					);
+					return {
+						...track,
+						voteCount: result ? result.voteCount : 0,
+						votes: result ? result.voteCount : 0,
+					};
+				});
+			}
+		}
+	}
+	function handleVoteRemoved(data: {
+		eventId: string;
+		trackId: string;
+		results: VoteResult[];
+	}) {
+		if (event && data.eventId === event.id) {
+			votingResults = data.results;
+			// Update vote counts in playlist
+			if (event.playlist) {
+				event.playlist = event.playlist.map((track) => {
+					const result = votingResults.find(
+						(r) => r.track.id === track.id,
+					);
+					return {
+						...track,
+						voteCount: result ? result.voteCount : 0,
+						votes: result ? result.voteCount : 0,
+					};
+				});
+			}
+		}
+	}
+	function handleParticipantAdded(data: any) {
+		if (event) {
+			if (
+				!event.participants.some(
+					(p) => p.id === data.userId || p.userId === data.userId,
+				)
+			) {
+				event.participants.push({
+					id: data.userId, // Use id as primary property
+					userId: data.userId, // Keep userId for compatibility
+					displayName: data.displayName || "Unknown User",
+					avatarUrl: data.avatarUrl || undefined,
+					email: data.email || "",
+					createdAt: data.createdAt || new Date().toISOString(),
+					updatedAt: data.updatedAt || new Date().toISOString(),
+				});
+				// Force reactivity update
+				event = { ...event };
+			}
+		}
+	}
+	function handleParticipantRemoved(data: any) {
+		if (event) {
+			const participantsBefore = $state.snapshot(event.participants);
+			const initialCount = event.participants.length;
+
+			// Debug: show which participants would be kept
+			const remainingParticipants = event.participants.filter(
+				(p) => p.id !== data.userId && p.userId !== data.userId,
+			);
+			event.participants = remainingParticipants;
+			// Force reactivity update
+			event = { ...event };
+		}
+	}
+	function handleJoinedEvent(data: any) {
+		if (event) {
+		}
+	}
+	function handleLeavedEvent(data: any) {
+		if (event) {
+			// This is when we ourselves leave an event
+			event.participants = event.participants.filter(
+				(p) => p.id !== data.userId,
+			);
+			// Force reactivity update
+			event = { ...event };
+		}
+	}
+
+	function handleCurrentParticipants(data: any) {
+		if (event && data.eventId === event.id) {
+			// Set the current participants list to only include currently connected users
+			// Ensure consistent property naming (both id and userId)
+			event.participants = (data.participants || []).map(
+				(participant: any) => ({
+					id: participant.userId || participant.id,
+					userId: participant.userId || participant.id,
+					displayName: participant.displayName || "Unknown User",
+					avatarUrl: participant.avatarUrl || undefined,
+					email: participant.email || "",
+					createdAt:
+						participant.createdAt || new Date().toISOString(),
+					updatedAt:
+						participant.updatedAt || new Date().toISOString(),
+				}),
+			);
+			// Force reactivity update
+			event = { ...event };
+		}
+	}
+
+	function initializeEditForm() {
+		if (event) {
+			editEventData = {
+				name: event.name,
+				description: event.description || "",
+				licenseType: event.licenseType,
+				visibility: event.visibility,
+				locationName: event.locationName || "",
+			};
+		}
+	}
 
 	// Load event data
 	async function loadEvent() {
 		if (!eventId) return;
-		
+
 		loading = true;
-		error = '';
-		
+		error = "";
+
 		try {
 			const loadedEvent = await getEvent(eventId);
-			
+
 			// Transform event data to ensure compatibility
 			event = {
 				...loadedEvent,
 				title: loadedEvent.title || loadedEvent.name,
-				isPublic: loadedEvent.visibility === 'public',
+				isPublic: loadedEvent.visibility === "public",
 				hostId: loadedEvent.hostId || loadedEvent.creatorId,
-				hostName: loadedEvent.creator?.displayName || 'Unknown Host',
+				hostName: loadedEvent.creator?.displayName || "Unknown Host",
 				startDate: loadedEvent.startDate || loadedEvent.eventDate,
 				location: loadedEvent.location || loadedEvent.locationName,
 				allowsVoting: loadedEvent.allowsVoting !== false, // Default to true
-				playlist: (loadedEvent.playlist || []).map(track => ({
+				playlist: (loadedEvent.playlist || []).map((track) => ({
 					...track,
 					voteCount: track.voteCount || track.votes || 0,
-					votes: track.voteCount || track.votes || 0
+					votes: track.voteCount || track.votes || 0,
 				})),
-				participants: (loadedEvent.participants || []).map(participant => ({
-					...participant,
-					userId: participant.userId || participant.id,
-					username: participant.username || participant.displayName
-				}))
+				// Start with empty participants - they will be populated via socket events
+				participants: [],
 			};
-			
+
+			initializeEditForm();
+
 			// Load voting results if user can vote
-			if (user && isParticipant && event.allowsVoting) {
+			if (user && event.allowsVoting) {
 				votingResults = await getVotingResults(eventId);
 			}
+
+			// Initialize music player for this event
+			await initializeMusicPlayer();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load event';
+			error = err instanceof Error ? err.message : "Failed to load event";
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function joinEvent() {
-		if (!user || !eventId) {
-			goto('/auth/login');
-			return;
-		}
-
-		try {
-			await joinEventAPI(eventId);
-			await loadEvent();
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to join event';
 		}
 	}
 
@@ -189,74 +591,324 @@
 			await leaveEventAPI(eventId);
 			await loadEvent();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to leave event';
+			error =
+				err instanceof Error ? err.message : "Failed to leave event";
 		}
 	}
 
-	async function handleVoteForTrack(trackId: string) {
-		if (!user || !eventId || votingCooldown.has(trackId)) {
-			if (!user) goto('/auth/login');
-			return;
-		}
-
-		// Prevent rapid voting
-		votingCooldown.add(trackId);
-		setTimeout(() => votingCooldown.delete(trackId), 2000);
+	async function addPlaylistToEvent(playlistId: string) {
+		if (!user || !eventId) return;
 
 		try {
-			await voteForTrackSimple(eventId, trackId);
+			loading = true;
+			const playlistTracks =
+				await playlistsService.getPlaylistTracks(playlistId);
+
+			// Add each track to the event
+			for (const playlistTrack of playlistTracks) {
+				const track = playlistTrack.track;
+				await addTrackToEvent(eventId, {
+					title: track.title,
+					artist: track.artist,
+					album: track.album,
+					duration: track.duration,
+					thumbnailUrl: track.albumCoverUrl,
+					streamUrl: track.previewUrl,
+				});
+			}
+
+			showPlaylistModal = false;
 			await loadEvent();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to vote for track';
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to add playlist to event";
+		} finally {
+			loading = false;
 		}
 	}
 
-	async function addTrack(event: SubmitEvent) {
+	async function handleEditEvent(event: SubmitEvent) {
 		event.preventDefault();
-		if (!user || !eventId) {
-			goto('/auth/login');
-			return;
-		}
+		if (!user || !eventId || !isCreator || !isAdmin) return;
 
 		try {
-			await addTrackToEvent(eventId, newTrack);
-			showAddTrackModal = false;
-			// Reset form
-			newTrack = {
-				title: '',
-				artist: '',
-				album: '',
-				duration: 0,
-				thumbnailUrl: '',
-				streamUrl: ''
-			};
+			await updateEvent(eventId, editEventData);
+			showEditModal = false;
 			await loadEvent();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to add track';
+			error =
+				err instanceof Error ? err.message : "Failed to update event";
 		}
 	}
 
+	async function handleDeleteEvent() {
+		if (!user || !eventId || !isCreator) return;
+
+		try {
+			await deleteEvent(eventId);
+			goto("/events");
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to delete event";
+		}
+	}
+
+	async function handlePromoteUserToAdmin() {
+		if (!user || !eventId || !isCreator || !isAdmin || !selectedUserId)
+			return;
+
+		try {
+			await promoteUserToAdmin(eventId, selectedUserId);
+			showPromoteModal = false;
+			selectedUserId = "";
+		} catch (err) {
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to promote user to admin";
+		}
+	}
+
+	async function handleAddAdminByEmail() {
+		if (
+			!user ||
+			!eventId ||
+			!isCreator ||
+			!isAdmin ||
+			!addAdminEmail.trim()
+		)
+			return;
+
+		try {
+			// First, try to find user by email or username
+			const response = await fetch(
+				`${config.apiUrl}/api/users/search?q=${encodeURIComponent(addAdminEmail.trim())}`,
+				{
+					headers: {
+						Authorization: `Bearer ${authService.getAuthToken()}`,
+						"Content-Type": "application/json",
+					},
+				},
+			);
+
+			if (!response.ok) {
+				throw new Error("Failed to find user");
+			}
+
+			const result = await response.json();
+			const users = result.data || [];
+
+			if (users.length === 0) {
+				throw new Error("No user found with that email or username");
+			}
+
+			const targetUser = users[0]; // Take the first match
+			await promoteUserToAdmin(eventId, targetUser.id);
+			showAddAdminModal = false;
+			addAdminEmail = "";
+			await loadEvent();
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Failed to add admin";
+		}
+	}
+
+	// Music search functions
+	async function searchTracks() {
+		if (!searchQuery.trim()) {
+			searchResults = [];
+			return;
+		}
+
+		isSearching = true;
+		searchError = "";
+
+		try {
+			const response = await deezerService.searchTracks({
+				query: searchQuery,
+				limit: 20,
+			});
+			searchResults = response?.data || [];
+		} catch (err) {
+			searchError = "Failed to search tracks. Please try again.";
+			console.error("Search error:", err);
+		} finally {
+			isSearching = false;
+		}
+	}
+
+	async function loadTopTracks() {
+		isLoadingTop = true;
+		try {
+			const response = await deezerService.getTopTracks(20);
+			topTracks = response?.data || [];
+		} catch (error) {
+			console.error("Failed to load top tracks:", error);
+		} finally {
+			isLoadingTop = false;
+		}
+	}
+
+	// Load top tracks when modal opens
+	$effect(() => {
+		if (showAddTrackModal && topTracks.length === 0) {
+			loadTopTracks();
+		}
+	});
+
+	// Load playlists when modal opens
+	$effect(() => {
+		if (showPlaylistModal && userPlaylists.length === 0) {
+			loadUserPlaylists();
+		}
+	});
+
+	async function loadUserPlaylists() {
+		if (!user) return;
+
+		try {
+			loading = true;
+			// Get user's own playlists
+			const myPlaylists = await playlistsService.getPlaylists(
+				undefined,
+				user.id,
+			);
+			// Get public playlists
+			const publicPlaylists = await playlistsService.getPlaylists(true);
+
+			// Combine and deduplicate
+			const allPlaylists = [...myPlaylists];
+			publicPlaylists.forEach((publicPlaylist) => {
+				if (!allPlaylists.some((p) => p.id === publicPlaylist.id)) {
+					allPlaylists.push(publicPlaylist);
+				}
+			});
+
+			userPlaylists = allPlaylists;
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to load playlists";
+		} finally {
+			loading = false;
+		}
+	}
+
+	// Debounced search
+	let searchTimeout: NodeJS.Timeout;
+	$effect(() => {
+		if (searchQuery) {
+			clearTimeout(searchTimeout);
+			searchTimeout = setTimeout(searchTracks, 300);
+		} else {
+			searchResults = [];
+		}
+	});
+
+	async function removeAdmin(userId: string) {
+		if (!user || !eventId || !isCreator || !isAdmin) return;
+
+		try {
+			await removeUserFromAdmin(eventId, userId);
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to remove admin";
+		}
+	}
+
+	// Music control functions - These will be replaced by the music player service
+
+	async function pauseMusic() {
+		if (!isAdmin || !eventId) return;
+
+		try {
+			isPlaying = false;
+			eventSocketService.pauseTrack(eventId);
+
+			if (audioElement) {
+				audioElement.pause();
+			}
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to pause music";
+		}
+	}
+
+	async function resumeMusic() {
+		if (!isAdmin || !eventId) return;
+
+		try {
+			isPlaying = true;
+			eventSocketService.emit("music-resume", { eventId });
+
+			if (audioElement) {
+				await audioElement.play();
+			}
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to resume music";
+		}
+	}
+
+	async function playNextTrack() {
+		if (!isAdmin || !eventId || !event?.playlist) return;
+
+		try {
+			// Find next track in sorted order
+			const sortedTracks = sortedPlaylistTracks();
+			const currentIndex = sortedTracks.findIndex(
+				(t) => t.id === currentPlayingTrack,
+			);
+			const nextTrack = sortedTracks[currentIndex + 1];
+
+			if (nextTrack) {
+				await playTrack(currentIndex + 1);
+			} else {
+				// No more tracks, stop playing
+				currentPlayingTrack = null;
+				isPlaying = false;
+				if (audioElement) {
+					audioElement.pause();
+					audioElement = null;
+				}
+			}
+		} catch (err) {
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to play next track";
+		}
+	}
+
+	// Helper functions for UI
 	function formatDate(dateString: string) {
-		return new Date(dateString).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
+		return new Date(dateString).toLocaleDateString("en-US", {
+			year: "numeric",
+			month: "short",
+			day: "numeric",
+			hour: "2-digit",
+			minute: "2-digit",
 		});
 	}
 
 	function formatDuration(seconds: number) {
 		const minutes = Math.floor(seconds / 60);
 		const remainingSeconds = seconds % 60;
-		return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+		return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 	}
 
-	// Helper functions for avatar colors
 	function getAvatarColor(name: string): string {
 		const colors = [
-			'#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-			'#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+			"#FF6B6B",
+			"#4ECDC4",
+			"#45B7D1",
+			"#96CEB4",
+			"#FFEAA7",
+			"#DDA0DD",
+			"#98D8C8",
+			"#F7DC6F",
+			"#BB8FCE",
+			"#85C1E9",
 		];
 		let hash = 0;
 		for (let i = 0; i < name.length; i++) {
@@ -267,8 +919,16 @@
 
 	function getAvatarColorSecondary(name: string): string {
 		const colors = [
-			'#FF5252', '#26A69A', '#2196F3', '#66BB6A', '#FFD54F',
-			'#BA68C8', '#4DB6AC', '#FDD835', '#AB47BC', '#42A5F5'
+			"#FF5252",
+			"#26A69A",
+			"#2196F3",
+			"#66BB6A",
+			"#FFD54F",
+			"#BA68C8",
+			"#4DB6AC",
+			"#FDD835",
+			"#AB47BC",
+			"#42A5F5",
 		];
 		let hash = 0;
 		for (let i = 0; i < name.length; i++) {
@@ -281,602 +941,1671 @@
 		return name.charAt(0).toUpperCase();
 	}
 
-	// Update computed properties to work with both old and new data structures
-	const isParticipant = $derived(user && event?.participants?.some((p: any) => (p.id || p.userId) === user.id));
-	const isHost = $derived(user && event && ((event as any).hostId === user.id || event.creatorId === user.id));
-	const canVote = $derived(event && ((event as any).allowsVoting !== false) && isParticipant); // Default to true if not specified
-	const sortedPlaylist = $derived(event?.playlist?.sort((a: any, b: any) => (b.voteCount || b.votes || 0) - (a.voteCount || a.votes || 0)) || []);
+	function getUserRole(userId: string): string {
+		if (!event) return "Participant";
+		if (event.creatorId === userId) return "Owner";
+		if (event.admins?.some((admin) => admin.id === userId)) return "Admin";
+		return "Participant";
+	}
+
+	function getUserBadgeClass(role: string): string {
+		switch (role) {
+			case "Owner":
+				return "bg-yellow-100 text-yellow-800";
+			case "Admin":
+				return "bg-purple-100 text-purple-800";
+			default:
+				return "bg-gray-100 text-gray-600";
+		}
+	}
+
+	function canRemoveAdmin(userId: string): boolean {
+		return Boolean(
+			(isCreator || isAdmin) &&
+				userId !== user?.id &&
+				getUserRole(userId) === "Admin",
+		);
+	}
+
+	function getTrackStatus(track: Track): "current" | "played" | "upcoming" {
+		if (currentPlayingTrack === track.id) return "current";
+		return "upcoming";
+	}
+
+	const canEdit = $derived(isAdmin);
+
+	// Filter tracks based on search query
+	function filteredTracks() {
+		if (!event?.playlist) return [];
+		if (!searchQuery.trim()) return sortedPlaylistTracks();
+
+		const query = searchQuery.toLowerCase().trim();
+		return sortedPlaylistTracks().filter(
+			(track) =>
+				track.title.toLowerCase().includes(query) ||
+				track.artist.toLowerCase().includes(query) ||
+				track.album?.toLowerCase().includes(query) ||
+				(event &&
+					event.participants
+						.find((p) => p.id === track.addedBy)
+						?.displayName?.toLowerCase()
+						.includes(query)),
+		);
+	}
+
+	// Drag and drop functions
+	function handleDragStart(event: DragEvent, index: number) {
+		draggedIndex = index;
+		if (event.dataTransfer) {
+			event.dataTransfer.effectAllowed = "move";
+		}
+	}
+
+	function handleDragOver(event: DragEvent) {
+		event.preventDefault();
+		if (event.dataTransfer) {
+			event.dataTransfer.dropEffect = "move";
+		}
+	}
+
+	async function handleDrop(event: DragEvent, dropIndex: number) {
+		event.preventDefault();
+		if (draggedIndex === null || draggedIndex === dropIndex || !eventId)
+			return;
+		draggedIndex = null;
+	}
+
+	// Music player initialization and control
+	async function initializeMusicPlayer() {
+		if (!event || !user || isMusicPlayerInitialized) return;
+
+		try {
+			if (!event.playlist || event.playlist.length === 0) {
+				console.warn(
+					"Cannot initialize music player: event has no tracks",
+				);
+				return;
+			}
+
+			// Create room context for the music player
+			const roomContext = {
+				type: "event" as const,
+				id: event.id,
+				ownerId: event.creatorId || "",
+				participants: event.participants.map((p) => p.id),
+				licenseType: (event.licenseType === "location_based"
+					? "location-time"
+					: event.licenseType) as
+					| "open"
+					| "invited"
+					| "location-time",
+				visibility: event.visibility,
+			};
+
+			console.log("Initializing music player with context:", roomContext);
+			console.log("Event tracks:", event.playlist.length);
+
+			// Convert event tracks to playlist track format
+			const playlistTracks = event.playlist.map((track, index) => ({
+				id: track.id,
+				position: index + 1,
+				addedAt: track.createdAt || new Date().toISOString(),
+				createdAt: track.createdAt || new Date().toISOString(),
+				playlistId: event!.id,
+				trackId: track.id,
+				addedById: track.addedBy || event!.creatorId || "",
+				track: {
+					id: track.id,
+					deezerId: track.deezerId || "",
+					title: track.title,
+					artist: track.artist,
+					album: track.album || "",
+					duration: track.duration || 0,
+					previewUrl: track.streamUrl || track.previewUrl || "",
+					albumCoverUrl: track.thumbnailUrl || "",
+					albumCoverSmallUrl: track.thumbnailUrl || "",
+					albumCoverMediumUrl: track.thumbnailUrl || "",
+					albumCoverBigUrl: track.thumbnailUrl || "",
+					deezerUrl: "",
+					available: true,
+					createdAt: track.createdAt || new Date().toISOString(),
+					updatedAt: track.updatedAt || new Date().toISOString(),
+				},
+				addedBy: {
+					id: track.addedBy || event!.creatorId || "",
+					displayName:
+						event!.participants.find((p) => p.id === track.addedBy)
+							?.displayName || "Unknown",
+				},
+			}));
+
+			// Initialize music player with event tracks
+			await musicPlayerService.initializeForRoom(
+				roomContext,
+				playlistTracks || [],
+			);
+			isMusicPlayerInitialized = true;
+
+			console.log("Music player initialized successfully");
+			console.log("Current player state:", $musicPlayerStore);
+		} catch (err) {
+			console.error("Failed to initialize music player:", err);
+		}
+	}
+
+	async function playTrack(trackIndex: number) {
+		try {
+			// Don't try to play if music player isn't initialized
+			if (!isMusicPlayerInitialized) {
+				console.warn(
+					"Music player not initialized, attempting to initialize first...",
+				);
+				await initializeMusicPlayer();
+
+				if (!isMusicPlayerInitialized) {
+					console.error(
+						"Failed to initialize music player before playing track",
+					);
+					error =
+						"Music player not available. Please refresh the page.";
+					setTimeout(() => (error = ""), 3000);
+					return;
+				}
+			}
+
+			// Check if trackIndex is valid
+			if (
+				!event?.playlist ||
+				trackIndex >= event.playlist.length ||
+				trackIndex < 0
+			) {
+				console.error("Invalid track index:", {
+					trackIndex,
+					playlistLength: event?.playlist?.length,
+				});
+				error = `Cannot play track: invalid track position (${trackIndex + 1})`;
+				setTimeout(() => (error = ""), 3000);
+				return;
+			}
+
+			console.log("Playing track at index:", trackIndex);
+			console.log("Track data:", event.playlist[trackIndex]);
+
+			await musicPlayerService.playTrack(trackIndex);
+		} catch (err) {
+			console.error("Play track error:", err);
+			error = err instanceof Error ? err.message : "Failed to play track";
+			setTimeout(() => (error = ""), 3000);
+		}
+	}
+
+	async function removeTrack(trackId: string) {
+		if (!user || !eventId) return;
+
+		try {
+			// Find the track in the event playlist
+			const track = event?.playlist?.find((t) => t.id === trackId);
+			if (!track) {
+				error = "Track not found";
+				return;
+			}
+
+			// Remove track from event (you may need to implement this API call)
+			// For now, we'll just show an error that this feature isn't implemented
+			error = "Track removal from events is not yet implemented";
+			setTimeout(() => (error = ""), 3000);
+		} catch (err) {
+			error =
+				err instanceof Error ? err.message : "Failed to remove track";
+		}
+	}
 </script>
 
+<svelte:head>
+	<title>{event?.name || event?.title || "Event"} - Music Room</title>
+	<meta
+		name="description"
+		content="Join the live music event and vote for tracks"
+	/>
+</svelte:head>
+
 {#if loading}
-<div class="flex justify-center items-center min-h-[400px]">
-	<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-secondary"></div>
-</div>
-{:else if error && !event}
-<div class="container mx-auto px-4 py-8">
-	<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-		{error}
+	<div class="flex justify-center items-center min-h-[400px]">
+		<div
+			class="animate-spin rounded-full h-12 w-12 border-b-2 border-secondary"
+		></div>
 	</div>
-</div>
+{:else if error && !event}
+	<div class="container mx-auto px-4 py-8">
+		<div
+			class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded"
+		>
+			{error}
+		</div>
+	</div>
 {:else if event}
-<div class="container mx-auto px-4 py-8">
-	<!-- Event Header -->
-	<div class="bg-white rounded-lg shadow-md p-6 mb-8">
-		<div class="flex items-start space-x-6">
-			{#if event.coverImageUrl}
-			<img src={event.coverImageUrl} alt={event.title} class="w-32 h-32 rounded-lg object-cover" />
-			{:else}
-			<div class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center">
-				<svg class="w-16 h-16 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
-				</svg>
-			</div>
-			{/if}
-			
-			<div class="flex-1">
-				<div class="flex justify-between items-start mb-4">
-					<div>
-						<h1 class="font-family-main text-3xl font-bold text-gray-800 mb-2">{event.title}</h1>
-						{#if event.description}
-						<p class="text-gray-600 mb-4">{event.description}</p>
-						{/if}
-					</div>
-					
-					<div class="flex space-x-2">
-						<span class="px-3 py-1 text-sm rounded-full {event.isPublic ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-							{event.isPublic ? 'Public' : 'Private'}
-						</span>
-						{#if event.allowsVoting}
-						<span class="px-3 py-1 text-sm rounded-full bg-purple-100 text-purple-800">
-							Voting Enabled
-						</span>
-						{/if}
-					</div>
-				</div>
-				
-				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-4">
-					<div>
-						<span class="font-medium">Host:</span>
-						<span class="ml-1">{event?.hostName}</span>
-					</div>
-					
-					{#if event?.location}
-					<div>
-						<span class="font-medium">Location:</span>
-						<span class="ml-1">{event.location}</span>
-					</div>
-					{/if}
-					
-					{#if event?.startDate}
-					<div>
-						<span class="font-medium">Start:</span>
-						<span class="ml-1">{formatDate(event.startDate)}</span>
-					</div>
-					{/if}
-					
-					<div>
-						<span class="font-medium">Participants:</span>
-						<span class="ml-1">{event?.participants?.length || 0}</span>
-					</div>
-				</div>
-				
-				{#if user}
-				<div class="flex space-x-3">
-					{#if isParticipant}
-						{#if !isHost}
-						<button 
-							onclick={leaveEvent}
-							class="border border-red-500 text-red-500 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors"
+	<div class="container mx-auto px-4 py-8">
+		<!-- Event Header -->
+		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
+			<div class="flex items-start space-x-6">
+				{#if event.coverImageUrl}
+					<img
+						src={event.coverImageUrl}
+						alt={event.title}
+						class="w-32 h-32 rounded-lg object-cover"
+					/>
+				{:else}
+					<div
+						class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center"
+					>
+						<svg
+							class="w-16 h-16 text-white"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
 						>
-							Leave Event
-						</button>
-						{/if}
-					{:else}
-						<button 
-							onclick={joinEvent}
-							class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
-						>
-							Join Event
-						</button>
-					{/if}
-				</div>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+							></path>
+						</svg>
+					</div>
 				{/if}
+
+				<div class="flex-1">
+					<div class="flex justify-between items-start mb-4">
+						<div>
+							<h1
+								class="font-family-main text-3xl font-bold text-gray-800 mb-2"
+							>
+								{event.name || event.title}
+							</h1>
+							{#if event.description}
+								<p class="text-gray-600 mb-4">
+									{event.description}
+								</p>
+							{/if}
+						</div>
+
+						<div class="flex space-x-2">
+							<span
+								class="px-3 py-1 text-sm rounded-full {event.visibility ===
+								'public'
+									? 'bg-green-100 text-green-800'
+									: 'bg-blue-100 text-blue-800'}"
+							>
+								{event.visibility === "public"
+									? "Public"
+									: "Private"}
+							</span>
+							{#if event.allowsVoting}
+								<span
+									class="px-3 py-1 text-sm rounded-full bg-purple-100 text-purple-800"
+								>
+									Voting Enabled
+								</span>
+							{/if}
+						</div>
+					</div>
+
+					<div
+						class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-4"
+					>
+						<div>
+							<span class="font-medium">Host:</span>
+							<span class="ml-1"
+								>{event?.creator?.displayName ||
+									event?.hostName ||
+									"Unknown"}</span
+							>
+						</div>
+
+						{#if event?.locationName || event?.location}
+							<div>
+								<span class="font-medium">Location:</span>
+								<span class="ml-1"
+									>{event.locationName ||
+										event.location}</span
+								>
+							</div>
+						{/if}
+
+						{#if event?.eventDate || event?.startDate}
+							<div>
+								<span class="font-medium">Start:</span>
+								<span class="ml-1"
+									>{formatDate(
+										event.eventDate ||
+											event.startDate ||
+											"",
+									)}</span
+								>
+							</div>
+						{/if}
+
+						<div>
+							<span class="font-medium">Participants:</span>
+							<span class="ml-1"
+								>{event?.participants?.length || 0}</span
+							>
+						</div>
+					</div>
+
+					{#if user}
+						<div class="flex space-x-3">
+							{#if !isCreator}
+								<button
+									onclick={leaveEvent}
+									class="border border-red-500 text-red-500 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors"
+								>
+									Leave Event
+								</button>
+							{/if}
+
+							<!-- Admin/Owner Controls -->
+							{#if isAdmin}
+								<div class="flex space-x-2">
+									<!-- Music Control -->
+									{#if eventStatus() === "live"}
+										{#if isPlaying}
+											<button
+												onclick={pauseMusic}
+												class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors flex items-center space-x-2"
+											>
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+													/>
+												</svg>
+												<span>Pause</span>
+											</button>
+										{:else}
+											<button
+												onclick={resumeMusic}
+												class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors flex items-center space-x-2"
+											>
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h6m6-9a9 9 0 11-18 0 9 9 0 0118 0z"
+													/>
+												</svg>
+												<span>Play</span>
+											</button>
+										{/if}
+
+										<button
+											onclick={playNextTrack}
+											class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
+										>
+											<svg
+												class="w-4 h-4"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+											<span>Next</span>
+										</button>
+									{/if}
+
+									<!-- Edit Event -->
+									{#if isAdmin || isCreator}
+										<button
+											onclick={() =>
+												(showEditModal = true)}
+											class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors"
+										>
+											Edit
+										</button>
+
+										<button
+											onclick={() =>
+												(showAddAdminModal = true)}
+											class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors"
+										>
+											Add Admin
+										</button>
+										<button
+											onclick={() =>
+												(showDeleteConfirm = true)}
+											class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
+										>
+											Delete Event
+										</button>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
-		
-		<!-- Event Status -->
-		{#if isParticipant}
-			<div class="mt-6 p-4 bg-gradient-to-r from-secondary/5 to-secondary/10 rounded-lg border border-secondary/20">
-				<div class="flex items-center justify-between mb-3">
-					<h3 class="font-semibold text-secondary">Event Status</h3>
-					{#if event?.status === 'live'}
-						<div class="flex items-center text-sm text-green-600">
-							<div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
-							Live
-						</div>
-					{/if}
-				</div>
-				
-				{#if event?.currentTrack}
-					<div class="text-sm text-gray-600">
-						<span class="font-medium">Now Playing:</span>
-						<span class="ml-2">{event.currentTrack.title} by {event.currentTrack.artist}</span>
-					</div>
-				{:else}
-					<p class="text-sm text-gray-600">No track currently playing. Add some music to get started! 🎵</p>
-				{/if}
-				
-				<div class="mt-2 text-xs text-gray-500">
-					💡 {canVote ? 'You can vote for tracks to influence the playlist order.' : 'Join the event to participate in voting!'}
-				</div>
+
+		{#if error}
+			<div
+				class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6"
+			>
+				{error}
 			</div>
 		{/if}
-	</div>
 
-	{#if error}
-	<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-		{error}
-	</div>
-	{/if}
-
-	<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 		<!-- Playlist -->
-		<div class="lg:col-span-2">
-			<div class="bg-white rounded-lg shadow-md p-6">
-				<div class="flex justify-between items-center mb-6">
-					<div>
-						<h2 class="text-xl font-bold text-gray-800">Event Playlist</h2>
-						<p class="text-sm text-gray-600">
-							{sortedPlaylist.length} track{sortedPlaylist.length !== 1 ? 's' : ''} 
-							{canVote ? '• Vote to prioritize tracks' : '• Join to participate in voting'}
-						</p>
-					</div>
-					{#if isParticipant}
-					<button 
-						onclick={() => showAddTrackModal = true}
-						class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors flex items-center space-x-2"
-					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-						</svg>
-						<span>Add Track</span>
-					</button>
-					{/if}
+		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
+			<div class="flex justify-between items-center mb-6">
+				<div>
+					<h2 class="text-xl font-bold text-gray-800">
+						Event Playlist
+					</h2>
+					<p class="text-sm text-gray-600">
+						{sortedPlaylistTracks().length} track{sortedPlaylistTracks()
+							.length !== 1
+							? "s"
+							: ""}
+						{canVoteForTracks()
+							? "• Vote to prioritize tracks"
+							: "• Voting available for participants"}
+					</p>
 				</div>
-				
-				{#if sortedPlaylist.length === 0}
-				<div class="text-center py-12">
-					<div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-						<svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"></path>
-						</svg>
-					</div>
-					<h3 class="text-lg font-semibold text-gray-700 mb-2">No tracks yet</h3>
-					<p class="text-gray-500 mb-4">Be the first to add music to this event!</p>
-					{#if isParticipant}
-					<button 
-						onclick={() => showAddTrackModal = true}
-						class="bg-secondary text-white px-6 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
-					>
-						Add the first track
-					</button>
-					{/if}
-				</div>
-				{:else}
-				<div class="space-y-2">
-					{#each sortedPlaylist as track, index}
-					<div class="flex items-center space-x-4 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors {event?.currentTrack?.id === track.id ? 'border-secondary bg-secondary/5' : ''}">
-						<div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {event?.currentTrack?.id === track.id ? 'bg-secondary text-white' : 'bg-gray-200 text-gray-600'}">
-							{#if event?.currentTrack?.id === track.id}
-								<!-- Now playing indicator -->
-								<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-									<path d="M8 5v14l11-7z"/>
-								</svg>
-							{:else}
-								{index + 1}
-							{/if}
+				<div class="flex space-x-2">
+					{#if isMusicPlayerInitialized}
+						<div class="flex items-center text-sm text-secondary">
+							<svg
+								class="w-4 h-4 mr-1"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+								></path>
+							</svg>
+							Music Player Active
 						</div>
-						
-						{#if track.thumbnailUrl}
-						<img src={track.thumbnailUrl} alt={track.title} class="w-12 h-12 rounded object-cover" />
-						{:else}
-						<div class="w-12 h-12 bg-gradient-to-br from-gray-200 to-gray-300 rounded flex items-center justify-center">
-							<svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"></path>
+					{/if}
+					{#if isAdmin || isCreator}
+						<button
+							onclick={() => (showMusicSearchModal = true)}
+							class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors flex items-center space-x-2"
+						>
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M12 4v16m8-8H4"
+								></path>
+							</svg>
+							<span>Search & Add Music</span>
+						</button>
+						<button
+							onclick={() => (showPlaylistModal = true)}
+							class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors flex items-center space-x-2"
+						>
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
+								></path>
+							</svg>
+							<span>Add Playlist</span>
+						</button>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Search for tracks within event -->
+			{#if event?.playlist && event.playlist.length > 0}
+				<div class="mb-6">
+					<div class="relative max-w-md">
+						<div
+							class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+						>
+							<svg
+								class="h-5 w-5 text-gray-400"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+								></path>
 							</svg>
 						</div>
-						{/if}
-						
-						<div class="flex-1 min-w-0">
-							<h4 class="font-medium text-gray-800 truncate">{track.title}</h4>
-							<p class="text-sm text-gray-600 truncate">{track.artist}</p>
-							{#if track.album}
-							<p class="text-xs text-gray-500 truncate">{track.album}</p>
-							{/if}
-							{#if track.addedBy}
-							<p class="text-xs text-gray-400 mt-1">Added by {track.addedBy}</p>
-							{/if}
-						</div>
-						
-						<div class="flex items-center space-x-4">
-							{#if track.duration}
-							<span class="text-sm text-gray-500">{formatDuration(track.duration)}</span>
-							{/if}
-							
-							<!-- Vote count -->
-							<div class="flex items-center space-x-2">
-								<span class="text-sm font-medium text-gray-700">{track.votes || 0}</span>
-								<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
-								</svg>
-							</div>
-							
-							{#if canVote}
-							<button 
-								onclick={() => handleVoteForTrack(track.id)}
-								disabled={votingCooldown.has(track.id)}
-								class="bg-secondary/10 text-secondary px-3 py-1 rounded-full text-sm hover:bg-secondary/20 disabled:opacity-50 transition-colors flex items-center space-x-1"
-								title="Vote for this track"
-							>
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path>
-								</svg>
-								<span>Vote</span>
-							</button>
-							{/if}
-						</div>
+						<input
+							type="text"
+							bind:value={searchQuery}
+							placeholder="Search tracks in this event..."
+							class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+						/>
 					</div>
+					{#if searchQuery.trim() && filteredTracks().length !== event.playlist.length}
+						<p class="text-sm text-gray-600 mt-2">
+							Showing {filteredTracks().length} of {event.playlist
+								.length} tracks
+						</p>
+					{/if}
+				</div>
+			{/if}
+
+			{#if sortedPlaylistTracks().length === 0}
+				<div class="text-center py-8">
+					<p class="text-gray-500 mb-4">
+						No tracks in this playlist yet
+					</p>
+					{#if canEdit}
+						<button
+							onclick={() => (showMusicSearchModal = true)}
+							class="bg-secondary text-white px-6 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
+						>
+							Search & Add Music
+						</button>
+					{/if}
+				</div>
+			{:else}
+				<div class="space-y-2">
+					{#each filteredTracks() as track, index}
+						<div
+							class="flex items-center space-x-4 p-3 border rounded-lg transition-colors {canEdit
+								? 'cursor-move'
+								: ''} {playerState.currentTrackIndex ===
+								index && !searchQuery.trim()
+								? 'border-secondary bg-secondary/5'
+								: 'border-gray-200 hover:bg-gray-50'}"
+							draggable={canEdit && !searchQuery.trim()}
+							role={canEdit ? "listitem" : "none"}
+							ondragstart={(e) =>
+								!searchQuery.trim() &&
+								handleDragStart(e, index)}
+							ondragover={handleDragOver}
+							ondrop={(e) =>
+								!searchQuery.trim() && handleDrop(e, index)}
+						>
+							<div
+								class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {playerState.currentTrackIndex ===
+									index && !searchQuery.trim()
+									? 'bg-secondary text-white'
+									: 'bg-gray-200 text-gray-600'}"
+							>
+								{#if playerState.currentTrackIndex === index && playerState.isPlaying && !searchQuery.trim()}
+									<!-- Now playing indicator -->
+									<svg
+										class="w-4 h-4"
+										fill="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path d="M8 5v14l11-7z" />
+									</svg>
+								{:else}
+									{searchQuery.trim()
+										? (event?.playlist?.indexOf(track) ??
+												index) + 1
+										: index + 1}
+								{/if}
+							</div>
+
+							{#if track.thumbnailUrl}
+								<img
+									src={track.thumbnailUrl}
+									alt={track.title}
+									class="w-12 h-12 rounded object-cover"
+								/>
+							{:else}
+								<div
+									class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center"
+								>
+									<svg
+										class="w-6 h-6 text-gray-400"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
+										></path>
+									</svg>
+								</div>
+							{/if}
+
+							<div class="flex-1">
+								<h4 class="font-medium text-gray-800">
+									{track.title}
+								</h4>
+								<p class="text-sm text-gray-600">
+									{track.artist}
+								</p>
+								{#if track.album}
+									<p class="text-xs text-gray-500">
+										{track.album}
+									</p>
+								{/if}
+								<p class="text-xs text-gray-400">
+									Added by {event.participants.find(
+										(p) => p.id === track.addedBy,
+									)?.displayName || "Unknown"} • {formatDate(
+										track.createdAt ||
+											new Date().toISOString(),
+									)}
+								</p>
+							</div>
+
+							<div class="flex items-center space-x-3">
+								{#if track.duration}
+									<span class="text-sm text-gray-500"
+										>{formatDuration(track.duration)}</span
+									>
+								{/if}
+
+								<!-- Music Player Controls -->
+								{#if isMusicPlayerInitialized}
+									<div class="flex items-center space-x-2">
+										<!-- Play Button -->
+										<button
+											onclick={() => {
+												const actualIndex =
+													searchQuery.trim()
+														? (event?.playlist?.indexOf(
+																track,
+															) ?? index)
+														: index;
+												// If this track is currently playing, toggle play/pause
+												if (
+													playerState.currentTrackIndex ===
+														actualIndex &&
+													playerState.currentTrack
+												) {
+													if (playerState.isPlaying) {
+														musicPlayerStore.pause();
+													} else {
+														musicPlayerStore.play();
+													}
+												} else {
+													// Play this track
+													playTrack(actualIndex);
+												}
+											}}
+											disabled={!playerState.canControl}
+											class="p-1.5 rounded-full {playerState.currentTrackIndex ===
+											(searchQuery.trim()
+												? (event?.playlist?.indexOf(
+														track,
+													) ?? index)
+												: index)
+												? 'bg-secondary text-white'
+												: 'bg-gray-100 text-gray-600'} hover:bg-secondary hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+											title={playerState.currentTrackIndex ===
+											(searchQuery.trim()
+												? (event?.playlist?.indexOf(
+														track,
+													) ?? index)
+												: index)
+												? playerState.isPlaying
+													? "Pause (30s preview)"
+													: "Resume (30s preview)"
+												: "Play 30s preview"}
+											aria-label={`${playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying ? "Pause" : "Play"} ${track.title}`}
+										>
+											{#if playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying}
+												<!-- Pause icon -->
+												<svg
+													class="w-3 h-3"
+													fill="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"
+													/>
+												</svg>
+											{:else}
+												<!-- Play icon -->
+												<svg
+													class="w-3 h-3"
+													fill="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path d="M8 5v14l11-7z" />
+												</svg>
+											{/if}
+										</button>
+
+										<!-- Preview indicator -->
+										<span
+											class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full"
+										>
+											30s preview
+										</span>
+									</div>
+								{/if}
+								{#if canEdit}
+									<button
+										onclick={() => removeTrack(track.id)}
+										aria-label="Remove track"
+										class="text-red-500 hover:text-red-700 transition-colors"
+										title="Remove track"
+									>
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+											></path>
+										</svg>
+									</button>
+								{/if}
+							</div>
+						</div>
 					{/each}
 				</div>
-				{/if}
-			</div>
+			{/if}
+		</div>
 
 		<!-- Participants Sidebar -->
 		<div class="lg:col-span-1 space-y-6">
 			<div class="bg-white rounded-lg shadow-md p-6">
 				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-xl font-bold text-gray-800">Participants</h2>
-					<span class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-sm font-medium">
+					<h2 class="text-xl font-bold text-gray-800">
+						Participants
+					</h2>
+					<span
+						class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-sm font-medium"
+					>
 						{event.participants.length}
 					</span>
 				</div>
-				
-				<div class="space-y-3">
-					{#each event.participants as participant}
-					<div class="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
-						{#if participant.avatarUrl}
-							<img src={participant.avatarUrl} alt={participant.displayName} class="w-10 h-10 rounded-full object-cover" />
-						{:else}
-							<div 
-								class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-								style="background: linear-gradient(135deg, {getAvatarColor(participant.displayName || participant.username || 'User')}, {getAvatarColorSecondary(participant.displayName || participant.username || 'User')})"
-							>
-								{getAvatarLetter(participant.displayName || participant.username || 'U')}
-							</div>
-						{/if}
 
-						<div class="flex-1 min-w-0">
-							<p class="font-medium text-gray-800 truncate">{participant.displayName || participant.username}</p>
-							<div class="flex items-center space-x-2 text-xs text-gray-500">
-								{#if participant.id === event?.hostId || participant.userId === event?.hostId}
-									<span class="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full font-medium">Host</span>
-								{:else}
-									<span>Participant</span>
-								{/if}
-								{#if participant.joinedAt}
-									<span>• Joined {new Date(participant.joinedAt).toLocaleDateString()}</span>
-								{/if}
-							</div>
-						</div>
-
-						{#if participant.id !== user?.id && participant.userId !== user?.id}
-						<button
-							onclick={() => goto(`/users/${participant.id || participant.userId}`)}
-							class="text-gray-400 hover:text-gray-600 p-1"
-							title="View profile"
-							aria-label="View profile"
+				<div>
+					{#each sortedParticipants() as participant}
+						{@const role = getUserRole(participant.id)}
+						<div
+							class="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-							</svg>
-						</button>
-						{:else}
-						<div class="text-secondary">
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-							</svg>
+							{#if participant.avatarUrl}
+								<img
+									src={participant.avatarUrl}
+									alt={participant.displayName}
+									class="w-10 h-10 rounded-full object-cover"
+								/>
+							{:else}
+								<div
+									class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
+									style="background: linear-gradient(135deg, {getAvatarColor(
+										participant.displayName ||
+											participant.username ||
+											'User',
+									)}, {getAvatarColorSecondary(
+										participant.displayName ||
+											participant.username ||
+											'User',
+									)})"
+								>
+									{getAvatarLetter(
+										participant.displayName ||
+											participant.username ||
+											"U",
+									)}
+								</div>
+							{/if}
+
+							<div class="flex-1 min-w-0">
+								<p class="font-medium text-gray-800 truncate">
+									{participant.displayName ||
+										participant.username}
+								</p>
+								<div
+									class="flex items-center space-x-2 text-xs"
+								>
+									<span
+										class="px-2 py-0.5 rounded-full font-medium {getUserBadgeClass(
+											role,
+										)}"
+									>
+										{role}
+									</span>
+									{#if participant.joinedAt}
+										<span class="text-gray-500"
+											>• Joined {new Date(
+												participant.joinedAt,
+											).toLocaleDateString()}</span
+										>
+									{/if}
+								</div>
+							</div>
+
+							<div class="flex items-center space-x-2">
+								{#if participant.id !== user?.id}
+									<button
+										onclick={() =>
+											goto(`/users/${participant.id}`)}
+										class="text-gray-400 hover:text-gray-600 p-1"
+										title="View profile"
+										aria-label="View profile"
+									>
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M9 5l7 7-7 7"
+											/>
+										</svg>
+									</button>
+
+									{#if isCreator || isAdmin}
+										{#if getUserRole(participant.id) === "Participant"}
+											<button
+												onclick={() => {
+													selectedUserId =
+														participant.id;
+													showPromoteModal = true;
+												}}
+												class="text-purple-500 hover:text-purple-700 p-1"
+												title="Promote to admin"
+												aria-label="Promote to admin"
+											>
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M5 15l7-7 7 7"
+													/>
+												</svg>
+											</button>
+										{:else if canRemoveAdmin(participant.id)}
+											<button
+												onclick={() =>
+													removeAdmin(participant.id)}
+												class="text-red-500 hover:text-red-700 p-1"
+												title="Remove admin"
+												aria-label="Remove admin"
+											>
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+													/>
+												</svg>
+											</button>
+										{/if}
+									{/if}
+								{:else}
+									<div class="text-secondary">
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+											/>
+										</svg>
+									</div>
+								{/if}
+							</div>
 						</div>
-						{/if}
-					</div>
 					{/each}
 				</div>
 
-				{#if !isParticipant && user && event?.visibility === 'public'}
-				<div class="mt-4 pt-4 border-t border-gray-200">
-					<button 
-						onclick={joinEvent}
-						class="w-full bg-secondary text-white py-2 px-4 rounded-lg hover:bg-secondary/80 transition-colors font-medium"
-					>
-						Join Event
-					</button>
-				</div>
-				{/if}
-			</div>
-
-			<!-- Event Stats -->
-			<div class="bg-white rounded-lg shadow-md p-6">
-				<h3 class="text-lg font-semibold text-gray-800 mb-4">Event Stats</h3>
-				<div class="space-y-3">
-					<div class="flex justify-between items-center">
-						<span class="text-gray-600">Total Tracks</span>
-						<span class="font-medium text-gray-800">{sortedPlaylist.length}</span>
-					</div>
-					<div class="flex justify-between items-center">
-						<span class="text-gray-600">Total Votes</span>
-						<span class="font-medium text-gray-800">{sortedPlaylist.reduce((sum: number, track: any) => sum + (track.voteCount || 0), 0)}</span>
-					</div>
-					<div class="flex justify-between items-center">
-						<span class="text-gray-600">Participants</span>
-						<span class="font-medium text-gray-800">{event.participants.length}</span>
-					</div>
-					{#if event.startDate}
-					<div class="flex justify-between items-center">
-						<span class="text-gray-600">Started</span>
-						<span class="font-medium text-gray-800">{formatDate(event.startDate)}</span>
-					</div>
-					{/if}
-				</div>
+				<!-- Removed join event button since users on this page are already participants -->
 			</div>
 		</div>
-	</div>
-</div>
 
-<!-- Add Track Modal -->
-{#if showAddTrackModal}
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-	<div class="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto">
-		<div class="p-6">
-			<div class="flex justify-between items-center mb-6">
-				<h2 class="text-xl font-bold text-gray-800">Add Track to Event</h2>
-				<button 
-					onclick={() => showAddTrackModal = false}
-					class="text-gray-400 hover:text-gray-600 transition-colors"
-					aria-label="Close modal"
+		<!-- Enhanced Music Search Modal -->
+		{#if showMusicSearchModal && eventId}
+			<EnhancedMusicSearchModal
+				{eventId}
+				onTrackAdded={() => {
+					showMusicSearchModal = false;
+					// Reload event data to show the new track
+					loadEvent();
+				}}
+				onClose={() => (showMusicSearchModal = false)}
+			/>
+		{/if}
+
+		<!-- Invite Users Modal -->
+		{#if showInviteModal}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div
+					class="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto"
 				>
-					<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-					</svg>
-				</button>
+					<div class="p-6">
+						<div class="flex justify-between items-center mb-6">
+							<h2 class="text-xl font-bold text-gray-800">
+								Invite Users
+							</h2>
+							<button
+								onclick={() => (showInviteModal = false)}
+								class="text-gray-400 hover:text-gray-600 transition-colors"
+								aria-label="Close modal"
+							>
+								<svg
+									class="w-6 h-6"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									></path>
+								</svg>
+							</button>
+						</div>
+
+						<div class="space-y-6">
+							<!-- Invite Link -->
+							<div>
+								<label
+									for="invite-link"
+									class="block text-sm font-medium text-gray-700 mb-2"
+									>Share Event Link</label
+								>
+								<div class="flex space-x-2">
+									<input
+										id="invite-link"
+										type="text"
+										readonly
+										value={`${$page.url.origin}/events/${eventId}`}
+										class="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+									/>
+									<button
+										onclick={() => {
+											navigator.clipboard.writeText(
+												`${$page.url.origin}/events/${eventId}`,
+											);
+											// Show toast notification
+										}}
+										class="bg-secondary text-white px-4 py-3 rounded-lg hover:bg-secondary/80 transition-colors"
+										title="Copy link"
+										aria-label="Copy invite link"
+									>
+										<svg
+											class="w-5 h-5"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+											></path>
+										</svg>
+									</button>
+								</div>
+								<p class="text-xs text-gray-500 mt-2">
+									Share this link to invite people to your
+									event
+								</p>
+							</div>
+
+							<!-- QR Code -->
+							<div class="text-center">
+								<div
+									class="bg-gray-100 p-4 rounded-lg inline-block"
+								>
+									<div
+										class="w-32 h-32 bg-white border-2 border-dashed border-gray-300 rounded flex items-center justify-center"
+									>
+										<span class="text-gray-500 text-sm"
+											>QR Code</span
+										>
+									</div>
+								</div>
+								<p class="text-xs text-gray-500 mt-2">
+									QR code for easy mobile sharing
+								</p>
+							</div>
+
+							<!-- Social Share Buttons -->
+							<div>
+								<h3
+									class="block text-sm font-medium text-gray-700 mb-3"
+								>
+									Share on Social Media
+								</h3>
+								<div class="grid grid-cols-2 gap-3">
+									<button
+										onclick={() => {
+											const text = `Join me at "${event?.title || event?.name}" music event!`;
+											const url = `${$page.url.origin}/events/${eventId}`;
+											window.open(
+												`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+												"_blank",
+											);
+										}}
+										class="flex items-center justify-center space-x-2 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition-colors"
+										aria-label="Share on Twitter"
+									>
+										<svg
+											class="w-5 h-5"
+											fill="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"
+											/>
+										</svg>
+										<span>Twitter</span>
+									</button>
+
+									<button
+										onclick={() => {
+											const text = `Join me at "${event?.title || event?.name}" music event!`;
+											const url = `${$page.url.origin}/events/${eventId}`;
+											window.open(
+												`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(text)}`,
+												"_blank",
+											);
+										}}
+										class="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+										aria-label="Share on Facebook"
+									>
+										<svg
+											class="w-5 h-5"
+											fill="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
+											/>
+										</svg>
+										<span>Facebook</span>
+									</button>
+								</div>
+							</div>
+						</div>
+
+						<div
+							class="flex justify-end pt-6 border-t border-gray-200 mt-6"
+						>
+							<button
+								onclick={() => (showInviteModal = false)}
+								class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+							>
+								Close
+							</button>
+						</div>
+					</div>
+				</div>
 			</div>
-			
-			<form onsubmit={(e) => { e.preventDefault(); addTrack(e); }} class="space-y-6">
-				<!-- Basic Track Information -->
-				<div class="space-y-4">
-					<h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">Track Information</h3>
-					
-					<div>
-						<label for="track-title" class="block text-sm font-medium text-gray-700 mb-2">Track Title *</label>
-						<input 
-							id="track-title"
-							type="text" 
-							bind:value={newTrack.title}
-							required
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-							placeholder="Enter the track title"
-						/>
-					</div>
-					
-					<div>
-						<label for="track-artist" class="block text-sm font-medium text-gray-700 mb-2">Artist *</label>
-						<input 
-							id="track-artist"
-							type="text" 
-							bind:value={newTrack.artist}
-							required
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-							placeholder="Enter the artist name"
-						/>
-					</div>
-					
-					<div>
-						<label for="track-album" class="block text-sm font-medium text-gray-700 mb-2">Album</label>
-						<input 
-							id="track-album"
-							type="text" 
-							bind:value={newTrack.album}
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-							placeholder="Enter the album name (optional)"
-						/>
-					</div>
-				</div>
+		{/if}
 
-				<!-- Media Information -->
-				<div class="space-y-4">
-					<h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">Media Details</h3>
-					
-					<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-						<div>
-							<label for="track-duration" class="block text-sm font-medium text-gray-700 mb-2">Duration (seconds)</label>
-							<input 
-								id="track-duration"
-								type="number" 
-								bind:value={newTrack.duration}
-								min="0"
-								max="3600"
-								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-								placeholder="180"
-							/>
-							<p class="text-xs text-gray-500 mt-1">Duration in seconds (e.g., 180 for 3 minutes)</p>
-						</div>
-						
-						<div>
-							<label for="track-thumbnail" class="block text-sm font-medium text-gray-700 mb-2">Thumbnail URL</label>
-							<input 
-								id="track-thumbnail"
-								type="url" 
-								bind:value={newTrack.thumbnailUrl}
-								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-								placeholder="https://example.com/image.jpg"
-							/>
-							<p class="text-xs text-gray-500 mt-1">Album cover or track image URL</p>
-						</div>
-					</div>
-					
-					<div>
-						<label for="track-stream" class="block text-sm font-medium text-gray-700 mb-2">Stream URL</label>
-						<input 
-							id="track-stream"
-							type="url" 
-							bind:value={newTrack.streamUrl}
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-							placeholder="https://example.com/track.mp3"
-						/>
-						<p class="text-xs text-gray-500 mt-1">Direct link to the audio file (optional)</p>
-					</div>
-				</div>
-
-				<!-- Note about music integration -->
-				<div class="bg-blue-50 p-4 rounded-lg">
-					<div class="flex items-start space-x-3">
-						<svg class="w-5 h-5 text-blue-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-						</svg>
-						<div>
-							<h4 class="font-medium text-blue-800">Music Integration</h4>
-							<p class="text-sm text-blue-700 mt-1">
-								In the future, you'll be able to search and add tracks directly from Spotify, Deezer, and other music services. 
-								For now, you can manually add track information.
-							</p>
-						</div>
-					</div>
-				</div>
-				
-				<div class="flex space-x-4 pt-6 border-t border-gray-200">
-					<button 
-						type="button"
-						onclick={() => showAddTrackModal = false}
-						class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-					>
-						Cancel
-					</button>
-					<button 
-						type="submit"
-						class="flex-1 bg-secondary text-white px-6 py-3 rounded-lg hover:bg-secondary/80 transition-colors font-medium"
-					>
-						Add Track
-					</button>
-				</div>
-			</form>
-		</div>
-	</div>
-</div>
-{/if}
-
-<!-- Invite Users Modal -->
-{#if showInviteModal}
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-	<div class="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-		<div class="p-6">
-			<div class="flex justify-between items-center mb-6">
-				<h2 class="text-xl font-bold text-gray-800">Invite Users</h2>
-				<button 
-					onclick={() => showInviteModal = false}
-					class="text-gray-400 hover:text-gray-600 transition-colors"
-					aria-label="Close modal"
+		<!-- Add Playlist Modal -->
+		{#if showPlaylistModal}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div
+					class="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto"
 				>
-					<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-					</svg>
-				</button>
-			</div>
-			
-			<div class="space-y-6">
-				<!-- Invite Link -->
-				<div>
-					<label for="invite-link" class="block text-sm font-medium text-gray-700 mb-2">Share Event Link</label>
-					<div class="flex space-x-2">
-						<input 
-							id="invite-link"
-							type="text" 
-							readonly
-							value={`${$page.url.origin}/events/${eventId}`}
-							class="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-						/>
-						<button 
-							onclick={() => {
-								navigator.clipboard.writeText(`${$page.url.origin}/events/${eventId}`);
-								// Show toast notification
-							}}
-							class="bg-secondary text-white px-4 py-3 rounded-lg hover:bg-secondary/80 transition-colors"
-							title="Copy link"
-							aria-label="Copy invite link"
-						>
-							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-							</svg>
-						</button>
-					</div>
-					<p class="text-xs text-gray-500 mt-2">Share this link to invite people to your event</p>
-				</div>
+					<div class="p-6">
+						<div class="flex justify-between items-center mb-6">
+							<h2 class="text-xl font-bold text-gray-800">
+								Add Playlist to Event
+							</h2>
+							<button
+								onclick={() => (showPlaylistModal = false)}
+								class="text-gray-400 hover:text-gray-600 transition-colors"
+								aria-label="Close modal"
+							>
+								<svg
+									class="w-6 h-6"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									></path>
+								</svg>
+							</button>
+						</div>
 
-				<!-- QR Code -->
-				<div class="text-center">
-					<div class="bg-gray-100 p-4 rounded-lg inline-block">
-						<div class="w-32 h-32 bg-white border-2 border-dashed border-gray-300 rounded flex items-center justify-center">
-							<span class="text-gray-500 text-sm">QR Code</span>
+						{#if userPlaylists.length === 0}
+							<div class="text-center py-8">
+								{#if loading}
+									<div
+										class="animate-spin w-8 h-8 border-4 border-secondary border-t-transparent rounded-full mx-auto mb-4"
+									></div>
+									<p class="text-gray-500">
+										Loading playlists...
+									</p>
+								{:else}
+									<p class="text-gray-500 mb-4">
+										No playlists available.
+									</p>
+									<a
+										href="/playlists"
+										class="text-secondary hover:text-secondary/80"
+										>Create your first playlist</a
+									>
+								{/if}
+							</div>
+						{:else}
+							<div class="space-y-3 max-h-96 overflow-y-auto">
+								{#each userPlaylists as playlist}
+									<div
+										class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+									>
+										<div
+											class="flex items-center justify-between"
+										>
+											<div class="flex-1">
+												<div
+													class="flex items-center space-x-2 mb-1"
+												>
+													<h3
+														class="font-medium text-gray-800"
+													>
+														{playlist.name}
+													</h3>
+													<span
+														class="px-2 py-0.5 text-xs rounded-full {playlist.visibility ===
+														'public'
+															? 'bg-green-100 text-green-800'
+															: 'bg-blue-100 text-blue-800'}"
+													>
+														{playlist.visibility ===
+														"public"
+															? "Public"
+															: "Private"}
+													</span>
+													{#if playlist.creator?.displayName && playlist.creatorId !== user?.id}
+														<span
+															class="text-xs text-gray-500"
+															>by {playlist
+																.creator
+																.displayName}</span
+														>
+													{/if}
+												</div>
+												<p
+													class="text-sm text-gray-600"
+												>
+													{playlist.trackCount || 0} tracks
+												</p>
+												{#if playlist.description}
+													<p
+														class="text-xs text-gray-500 mt-1"
+													>
+														{playlist.description}
+													</p>
+												{/if}
+											</div>
+											<button
+												onclick={() =>
+													addPlaylistToEvent(
+														playlist.id,
+													)}
+												disabled={loading}
+												class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors"
+											>
+												{loading ? "Adding..." : "Add"}
+											</button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						<div
+							class="flex justify-end pt-6 border-t border-gray-200 mt-6"
+						>
+							<button
+								onclick={() => (showPlaylistModal = false)}
+								class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+							>
+								Cancel
+							</button>
 						</div>
 					</div>
-					<p class="text-xs text-gray-500 mt-2">QR code for easy mobile sharing</p>
 				</div>
+			</div>
+		{/if}
 
-				<!-- Social Share Buttons -->
-				<div>
-					<h3 class="block text-sm font-medium text-gray-700 mb-3">Share on Social Media</h3>
-					<div class="grid grid-cols-2 gap-3">
-						<button 
-							onclick={() => {
-								const text = `Join me at "${event?.title || event?.name}" music event!`;
-								const url = `${$page.url.origin}/events/${eventId}`;
-								window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
-							}}
-							class="flex items-center justify-center space-x-2 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition-colors"
-							aria-label="Share on Twitter"
-						>
-							<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-								<path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/>
-							</svg>
-							<span>Twitter</span>
-						</button>
-						
-						<button 
-							onclick={() => {
-								const text = `Join me at "${event?.title || event?.name}" music event!`;
-								const url = `${$page.url.origin}/events/${eventId}`;
-								window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(text)}`, '_blank');
-							}}
-							class="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-							aria-label="Share on Facebook"
-						>
-							<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-								<path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-							</svg>
-							<span>Facebook</span>
-						</button>
+		<!-- Edit Event Modal -->
+		{#if showEditModal}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div
+					class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+				>
+					<div class="p-6">
+						<div class="flex justify-between items-center mb-6">
+							<h2 class="text-2xl font-bold text-gray-800">
+								Edit Event
+							</h2>
+							<button
+								onclick={() => (showEditModal = false)}
+								class="text-gray-400 hover:text-gray-600 transition-colors"
+								aria-label="Close modal"
+							>
+								<svg
+									class="w-6 h-6"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									></path>
+								</svg>
+							</button>
+						</div>
+
+						<form onsubmit={handleEditEvent} class="space-y-6">
+							<div class="space-y-4">
+								<h3
+									class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2"
+								>
+									Basic Information
+								</h3>
+
+								<div>
+									<label
+										for="edit-event-name"
+										class="block text-sm font-medium text-gray-700 mb-2"
+										>Event Name *</label
+									>
+									<input
+										id="edit-event-name"
+										type="text"
+										bind:value={editEventData.name}
+										required
+										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+									/>
+								</div>
+
+								<div>
+									<label
+										for="edit-event-description"
+										class="block text-sm font-medium text-gray-700 mb-2"
+										>Description</label
+									>
+									<textarea
+										id="edit-event-description"
+										bind:value={editEventData.description}
+										rows="4"
+										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+									></textarea>
+								</div>
+							</div>
+
+							<div class="space-y-4">
+								<h3
+									class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2"
+								>
+									Event Settings
+								</h3>
+
+								<div>
+									<label
+										for="edit-event-visibility"
+										class="block text-sm font-medium text-gray-700 mb-2"
+										>Visibility</label
+									>
+									<select
+										id="edit-event-visibility"
+										bind:value={editEventData.visibility}
+										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+									>
+										<option value="public">Public</option>
+										<option value="private">Private</option>
+									</select>
+								</div>
+
+								<div>
+									<label
+										for="edit-event-license"
+										class="block text-sm font-medium text-gray-700 mb-2"
+										>Voting License</label
+									>
+									<select
+										id="edit-event-license"
+										bind:value={editEventData.licenseType}
+										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+									>
+										<option value="open">Open</option>
+										<option value="invited"
+											>Invited Only</option
+										>
+										<option value="location_based"
+											>Location Based</option
+										>
+									</select>
+								</div>
+
+								{#if editEventData.licenseType === "location_based"}
+									<div>
+										<label
+											for="edit-location-name"
+											class="block text-sm font-medium text-gray-700 mb-2"
+											>Location Name</label
+										>
+										<input
+											id="edit-location-name"
+											type="text"
+											bind:value={
+												editEventData.locationName
+											}
+											class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+										/>
+									</div>
+								{/if}
+							</div>
+
+							<div
+								class="flex space-x-4 pt-6 border-t border-gray-200"
+							>
+								<button
+									type="button"
+									onclick={() => (showEditModal = false)}
+									class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+								>
+									Cancel
+								</button>
+								<button
+									type="submit"
+									disabled={loading}
+									class="flex-1 bg-secondary text-white px-6 py-3 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors font-medium"
+								>
+									{loading ? "Updating..." : "Update Event"}
+								</button>
+							</div>
+						</form>
 					</div>
 				</div>
 			</div>
-			
-			<div class="flex justify-end pt-6 border-t border-gray-200 mt-6">
-				<button 
-					onclick={() => showInviteModal = false}
-					class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-				>
-					Close
-				</button>
+		{/if}
+
+		<!-- Delete Confirmation Modal -->
+		{#if showDeleteConfirm}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div class="bg-white rounded-lg max-w-md w-full">
+					<div class="p-6">
+						<div class="flex items-center space-x-3 mb-4">
+							<div
+								class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"
+							>
+								<svg
+									class="w-5 h-5 text-red-600"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"
+									/>
+								</svg>
+							</div>
+							<h3 class="text-lg font-semibold text-gray-800">
+								Delete Event
+							</h3>
+						</div>
+
+						<p class="text-gray-600 mb-6">
+							Are you sure you want to delete "{event?.name}"?
+							This action cannot be undone and all event data will
+							be permanently lost.
+						</p>
+
+						<div class="flex space-x-4">
+							<button
+								onclick={() => (showDeleteConfirm = false)}
+								class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+							>
+								Cancel
+							</button>
+							<button
+								onclick={handleDeleteEvent}
+								class="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+							>
+								Delete Event
+							</button>
+						</div>
+					</div>
+				</div>
 			</div>
-		</div>
+		{/if}
+
+		<!-- Promote User Modal -->
+		{#if showPromoteModal}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div class="bg-white rounded-lg max-w-md w-full">
+					<div class="p-6">
+						<div class="flex items-center space-x-3 mb-4">
+							<div
+								class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center"
+							>
+								<svg
+									class="w-5 h-5 text-purple-600"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M5 15l7-7 7 7"
+									/>
+								</svg>
+							</div>
+							<h3 class="text-lg font-semibold text-gray-800">
+								Promote to Admin
+							</h3>
+						</div>
+
+						{#if selectedUserId && event?.participants}
+							{@const selectedUser = event.participants.find(
+								(p) => p.id === selectedUserId,
+							)}
+							{#if selectedUser}
+								<p class="text-gray-600 mb-6">
+									Are you sure you want to promote <strong
+										>{selectedUser.displayName ||
+											selectedUser.username}</strong
+									> to admin? They will be able to control music
+									playback and manage the event.
+								</p>
+							{/if}
+						{/if}
+
+						<div class="flex space-x-4">
+							<button
+								onclick={() => {
+									showPromoteModal = false;
+									selectedUserId = "";
+								}}
+								class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+							>
+								Cancel
+							</button>
+							<button
+								onclick={handlePromoteUserToAdmin}
+								class="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+							>
+								Promote
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Add Admin Modal -->
+		{#if showAddAdminModal}
+			<div
+				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+			>
+				<div class="bg-white rounded-lg max-w-md w-full">
+					<div class="p-6">
+						<div class="flex justify-between items-center mb-6">
+							<h2 class="text-xl font-bold text-gray-800">
+								Add Admin
+							</h2>
+							<button
+								onclick={() => (showAddAdminModal = false)}
+								class="text-gray-400 hover:text-gray-600 transition-colors"
+								aria-label="Close modal"
+							>
+								<svg
+									class="w-6 h-6"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									></path>
+								</svg>
+							</button>
+						</div>
+
+						<form
+							onsubmit={handleAddAdminByEmail}
+							class="space-y-4"
+						>
+							<div>
+								<label
+									for="admin-email"
+									class="block text-sm font-medium text-gray-700 mb-2"
+								>
+									Email or Username
+								</label>
+								<input
+									id="admin-email"
+									type="text"
+									bind:value={addAdminEmail}
+									placeholder="Enter email address or username"
+									required
+									class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+								/>
+							</div>
+
+							{#if error}
+								<div class="text-red-600 text-sm">{error}</div>
+							{/if}
+
+							<div class="flex space-x-4 pt-4">
+								<button
+									type="button"
+									onclick={() => {
+										showAddAdminModal = false;
+										addAdminEmail = "";
+										error = "";
+									}}
+									class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+								>
+									Cancel
+								</button>
+								<button
+									type="submit"
+									disabled={loading}
+									class="flex-1 bg-secondary text-white px-6 py-3 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors font-medium"
+								>
+									{loading ? "Adding..." : "Add Admin"}
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
-</div>
-{/if}
-</div>
 {/if}

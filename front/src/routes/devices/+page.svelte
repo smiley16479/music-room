@@ -222,10 +222,9 @@
 		try {
 			// TypeScript workaround: assert service has the correct methods
 			const service = devicesService as any;
-			const device = await service.createDevice({
+			const device = await service.registerDevice({
 				name: newDevice.name.trim(),
 				type: newDevice.type,
-				canBeControlled: newDevice.canBeControlled
 			});
 			
 			devices = [...devices, device];

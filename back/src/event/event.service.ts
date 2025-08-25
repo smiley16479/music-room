@@ -88,6 +88,8 @@ export class EventService {
     // Add creator as first participant
     await this.addParticipant(savedEvent.id, creatorId);
 
+    this.eventGateway.notifyEventCreated(savedEvent, creatorId);
+
     return this.findById(savedEvent.id, creatorId);
   }
 
@@ -130,7 +132,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'currentTrack', 'votes', 'votes.user', 'votes.track'],
+      relations: ['creator', 'participants', 'admins', 'currentTrack', 'votes', 'votes.user', 'votes.track'],
     });
 
     if (!event) {
@@ -166,6 +168,8 @@ export class EventService {
     if (event.creatorId !== userId) {
       throw new ForbiddenException('Only the creator can delete this event');
     }
+
+    this.eventGateway.notifyEventDeleted(id);
 
     await this.eventRepository.remove(event);
   }
@@ -244,13 +248,20 @@ export class EventService {
 
     if (!event)
       throw new NotFoundException('Event not found');
+    
     // Only creator or existing admin can promote
     if (event.creatorId !== actorId && !(event.admins?.some(a => a.id === actorId))) {
       throw new ForbiddenException('Only creator or admin can promote another user');
     }
-    // Check if user is a participant
-    if (!event.participants?.some(p => p.id === userId)) {
-      throw new BadRequestException('User must be a participant to be promoted');
+    
+    // Creator is automatically an admin and cannot be promoted
+    if (event.creatorId === userId) {
+      throw new BadRequestException('Event creator is already an admin by default');
+    }
+    
+    const isParticipant = event.participants?.some(p => p.id === userId);
+    if (!isParticipant) {
+      await this.addParticipant(eventId, userId);
     }
     // Check if already admin
     if (event.admins?.some(a => a.id === userId)) {
@@ -263,7 +274,7 @@ export class EventService {
       .of(eventId)
       .add(userId);
     // Optionally notify participants
-    // this.eventGateway.notifyAdminPromoted(eventId, userId);
+    this.eventGateway.notifyAdminAdded(eventId, userId);
   }
 
   /** Remove a user from the admins of an event */
@@ -297,8 +308,7 @@ export class EventService {
       .relation(Event, 'admins')
       .of(eventId)
       .remove(userId);
-    // Optionally notify participants
-    // this.eventGateway.notifyAdminRemoved(eventId, userId);
+    this.eventGateway.notifyAdminRemoved(eventId, userId);
   }
 
 

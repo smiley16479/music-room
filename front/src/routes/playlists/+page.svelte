@@ -45,24 +45,19 @@
 		}
 	});
 
-	// Update playlists when data changes
 	$effect(() => {
 		if (data.playlists) {
 			playlists = data.playlists;
 		}
 	});
 
-	// Socket connection management
 	onMount(async () => {
-		// Setup socket connection for real-time updates
 		await setupSocketConnection();
 		
-		// Load playlists when component mounts
 		loadPlaylists();
 	});
 
 	onDestroy(() => {
-		// Cleanup socket connection
 		cleanupSocketConnection();
 	});
 
@@ -72,20 +67,17 @@
 				await socketService.connect();
 			}
 
-			// Subscribe to global playlist events (not playlist-specific)
 			setupPlaylistSocketListeners();
 			
-			// Join a general playlists room for global updates
 			socketService.emit('join-playlists-room', {});
 			
 			isSocketConnected = true;
-			socketRetryAttempts = 0; // Reset retry count on successful connection
+			socketRetryAttempts = 0;
 			console.log('Socket connected for playlists page - listening for global playlist events');
 		} catch (err) {
 			console.error('Failed to set up socket connection:', err);
 			isSocketConnected = false;
 			
-			// Retry connection if we haven't exceeded max attempts
 			if (socketRetryAttempts < maxSocketRetries) {
 				socketRetryAttempts++;
 				console.log(`Retrying socket connection (${socketRetryAttempts}/${maxSocketRetries}) in 3 seconds...`);
@@ -100,31 +92,18 @@
 	}
 
 	function setupPlaylistSocketListeners() {
-		// Listen for playlist creation, updates, deletions
 		socketService.on('playlist-created', handlePlaylistCreated);
 		socketService.on('playlist-updated', handlePlaylistUpdated);
 		socketService.on('playlist-deleted', handlePlaylistDeleted);
-		socketService.on('playlist-track-added', handlePlaylistTrackAdded);
-		socketService.on('playlist-track-removed', handlePlaylistTrackRemoved);
-		socketService.on('playlist-tracks-reordered', handlePlaylistTracksReordered);
-		socketService.on('playlist-collaborator-added', handlePlaylistCollaboratorAdded);
-		socketService.on('playlist-collaborator-removed', handlePlaylistCollaboratorRemoved);
 	}
 
 	function cleanupSocketConnection() {
 		if (isSocketConnected) {
-			// Leave the general playlists room
 			socketService.emit('leave-playlists-room', {});
 			
-			// Remove listeners
 			socketService.off('playlist-created', handlePlaylistCreated);
 			socketService.off('playlist-updated', handlePlaylistUpdated);
 			socketService.off('playlist-deleted', handlePlaylistDeleted);
-			socketService.off('playlist-track-added', handlePlaylistTrackAdded);
-			socketService.off('playlist-track-removed', handlePlaylistTrackRemoved);
-			socketService.off('playlist-tracks-reordered', handlePlaylistTracksReordered);
-			socketService.off('playlist-collaborator-added', handlePlaylistCollaboratorAdded);
-			socketService.off('playlist-collaborator-removed', handlePlaylistCollaboratorRemoved);
 			isSocketConnected = false;
 			console.log('Cleaned up socket connection for playlists page');
 		}
@@ -144,61 +123,6 @@
 	function handlePlaylistDeleted(data: { playlistId: string }) {
 		console.log('Playlist deleted:', data.playlistId);
 		playlists = playlists.filter(p => p.id !== data.playlistId);
-	}
-
-	function handlePlaylistCollaboratorAdded(data: { playlistId: string, collaborator: any, playlist?: Playlist }) {
-		console.log('Collaborator added to playlist:', data);
-		// If I was invited to a playlist, add it to my list
-		if (user && data.collaborator.userId === user.id) {
-			// If the full playlist is included, add it
-			if (data.playlist) {
-				const existingIndex = playlists.findIndex(p => p.id === data.playlistId);
-				if (existingIndex === -1) {
-					playlists = [...playlists, data.playlist];
-				}
-			} else {
-				// Otherwise, reload playlists to get the new one
-				loadPlaylists();
-			}
-		} else {
-			// Update the existing playlist's collaborator list
-			playlists = playlists.map(p => 
-				p.id === data.playlistId 
-					? { ...p, collaborators: [...p.collaborators, data.collaborator] }
-					: p
-			);
-		}
-	}
-
-	function handlePlaylistCollaboratorRemoved(data: { playlistId: string, userId: string }) {
-		console.log('Collaborator removed from playlist:', data);
-		// If I was removed from a playlist, remove it from my list (if it was private)
-		if (user && data.userId === user.id) {
-			const playlist = playlists.find(p => p.id === data.playlistId);
-			if (playlist && playlist.visibility === 'private') {
-				playlists = playlists.filter(p => p.id !== data.playlistId);
-			}
-		} else {
-			// Update the existing playlist's collaborator list
-			playlists = playlists.map(p => 
-				p.id === data.playlistId 
-					? { ...p, collaborators: p.collaborators.filter(c => c.userId !== data.userId) }
-					: p
-			);
-		}
-	}
-
-	function handlePlaylistTrackAdded(data: { playlistId: string, trackCount: number }) {
-		playlists = playlists.map(p => p.id === data.playlistId ? { ...p, trackCount: data.trackCount } : p);
-	}
-
-	function handlePlaylistTrackRemoved(data: { playlistId: string, trackCount: number }) {
-		playlists = playlists.map(p => p.id === data.playlistId ? { ...p, trackCount: data.trackCount } : p);
-	}
-
-	function handlePlaylistTracksReordered(data: { playlistId: string }) {
-		// Track count doesn't change, just trigger a re-render if needed
-		playlists = [...playlists];
 	}
 
 	// Filter and sort playlists
@@ -670,7 +594,7 @@
 <!-- Create Playlist Modal -->
 {#if showCreateModal}
 	<div
-		class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+		class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
 	>
 		<div class="bg-white rounded-lg max-w-md w-full">
 			<div class="p-6">

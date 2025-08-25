@@ -10,7 +10,6 @@
 	import { 
 		getEvents, 
 		createEvent as createEventAPI, 
-		joinEvent as joinEventAPI, 
 		type Event,
 		type CreateEventData 
 	} from '$lib/services/events';
@@ -24,10 +23,13 @@
 	let error = $state('');
 	let user = $derived($authStore);
 	let showCreateModal = $state(false);
-	let activeTab: 'all' | 'mine' | 'live' = $state('all');
+	let activeTab: 'all' | 'mine' = $state('all');
 	let searchQuery = $state('');
-	let sortBy = $state<'date' | 'name' | 'creator' | 'participants' | 'status'>('date');
-	let sortOrder = $state<'asc' | 'desc'>('desc');
+	let sortBy = $state<'date' | 'name' | 'creator' | 'participants' | 'status' | 'license'>('date');
+	let sortOrder = $state<'asc' | 'desc'>('asc');
+	let isSocketConnected = $state(false);
+	const maxSocketRetries = 5;
+	let socketRetryAttempts = 0;
 
 	// Create event form
 	let newEvent = $state<CreateEventData>({
@@ -37,8 +39,12 @@
 		licenseType: 'open',
 		eventDate: '',
 		eventEndDate: '',
-		locationName: '',
-		maxVotesPerUser: 1
+		locationName: ''
+	});
+	
+	let formErrors = $state({
+		eventDate: '',
+		eventEndDate: ''
 	});
 
 	// Update tab based on URL parameter on initial load only
@@ -61,7 +67,22 @@
 
 	// Filter and sort events
 	$effect(() => {
-		let filtered = [...events];
+	let filtered = [...events];
+	// Update event status based on date
+	const now = new Date();
+	filtered.forEach((event: Event) => {
+		if (event.eventDate && event.eventEndDate) {
+			const start = new Date(event.eventDate);
+			const end = new Date(event.eventEndDate);
+			if (now >= start && now < end) {
+				event.status = 'live';
+			} else if (now < start) {
+				event.status = 'upcoming';
+			} else if (now >= end) {
+				event.status = 'ended';
+			}
+		}
+	});
 
 		// Filter by search query
 		if (searchQuery.trim()) {
@@ -80,12 +101,26 @@
 				event.creatorId === user.id || 
 				event.participants.some(p => p.id === user.id)
 			);
-		} else if (activeTab === 'live') {
-			filtered = filtered.filter(event => event.status === 'live');
+		} else if (activeTab === 'all') {
+			// Only show public events in 'all' tab
+			filtered = filtered.filter(event => event.visibility === 'public');
 		}
 
-		// Sort events
+		// Sort events - Live events first, then by nearest date
 		filtered.sort((a, b) => {
+			// If we're sorting by date (default), prioritize live events first
+			if (sortBy === 'date') {
+				// Live events always come first
+				if (a.status === 'live' && b.status !== 'live') return -1;
+				if (b.status === 'live' && a.status !== 'live') return 1;
+				
+				// If both are live or both are not live, sort by date
+				const dateA = new Date(a.eventDate || a.createdAt).getTime();
+				const dateB = new Date(b.eventDate || b.createdAt).getTime();
+				return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+			}
+			
+			// For other sort types, use the existing logic
 			let comparison = 0;
 			
 			switch (sortBy) {
@@ -102,9 +137,9 @@
 					const statusOrder = { 'live': 0, 'upcoming': 1, 'ended': 2 };
 					comparison = statusOrder[a.status] - statusOrder[b.status];
 					break;
-				case 'date':
-				default:
-					comparison = new Date(a.eventDate || a.createdAt).getTime() - new Date(b.eventDate || b.createdAt).getTime();
+				case 'license':
+					const licenseOrder = { 'open': 0, 'invited': 1, 'location_based': 2 };
+					comparison = licenseOrder[a.licenseType] - licenseOrder[b.licenseType];
 					break;
 			}
 			
@@ -115,36 +150,80 @@
 	});
 
 	onMount(async () => {
+		await setupSocketConnection();
 		await loadEvents();
-		
-		// Connect to socket for real-time updates
-		if (user) {
-			try {
-				await eventSocketService.connect();
-				
-				// Listen for global event updates
-				eventSocketService.on('event-updated', (data) => {
-					const index = events.findIndex(e => e.id === data.eventId);
-					if (index !== -1) {
-						events[index] = data.event;
-						events = [...events];
-					}
-				});
-				
-				eventSocketService.on('event-deleted', (data) => {
-					events = events.filter(e => e.id !== data.eventId);
-				});
-			} catch (err) {
-				console.error('Failed to connect to events socket:', err);
-			}
-		}
 	});
 
 	onDestroy(() => {
-		if (eventSocketService.isConnected()) {
-			eventSocketService.disconnect();
-		}
+		cleanupSocketConnection();
 	});
+
+	async function setupSocketConnection() {
+		try {
+			if (!eventSocketService.isConnected()) {
+				await eventSocketService.connect();
+			}
+
+			setupEventSocketListeners();
+
+			eventSocketService.emit('join-events-room', {});
+
+			isSocketConnected = true;
+			socketRetryAttempts = 0;
+			console.log('Socket connected for events page - listening for global event updates');
+		} catch (err) {
+			console.error('Failed to set up socket connection:', err);
+			isSocketConnected = false;
+			
+			if (socketRetryAttempts < maxSocketRetries) {
+				socketRetryAttempts++;
+				console.log(`Retrying socket connection (${socketRetryAttempts}/${maxSocketRetries}) in 3 seconds...`);
+				setTimeout(() => {
+					setupSocketConnection();
+				}, 3000);
+			} else {
+				console.error('Max socket retry attempts reached. Operating in offline mode.');
+				error = 'Real-time updates unavailable. Please refresh the page to retry.';
+			}
+		}
+	}
+
+	function setupEventSocketListeners() {
+		// Listen for event creation, updates, deletions
+		eventSocketService.on('event-created', handleEventCreated);
+		eventSocketService.on('event-updated', handleEventUpdated);
+		eventSocketService.on('event-deleted', handleEventDeleted);
+	}
+
+	function cleanupSocketConnection() {
+		if (isSocketConnected) {
+			// Leave the general events room
+			eventSocketService.emit('leave-events-room', {});
+
+			// Remove listeners
+			eventSocketService.off('event-created', handleEventCreated);
+			eventSocketService.off('event-updated', handleEventUpdated);
+			eventSocketService.off('event-deleted', handleEventDeleted);
+			isSocketConnected = false;
+			console.log('Cleaned up socket connection for events page');
+		}
+	}
+
+	// Socket event handlers for real-time updates
+	function handleEventCreated(data: { event: Event }) {
+		console.log('Event created:', data.event);
+		events = [...events, data.event];
+	}
+
+	function handleEventUpdated(data: { event: Event }) {
+		console.log('Event updated:', data.event);
+		events = events.map(e => e.id === data.event.id ? data.event : e);
+	}
+
+	function handleEventDeleted(data: { eventId: string }) {
+		console.log('Event deleted:', data.eventId);
+		events = events.filter(e => e.id !== data.eventId);
+	}
 
 	async function loadEvents() {
 		loading = true;
@@ -166,11 +245,35 @@
 			return;
 		}
 
+		// Validate dates
+		formErrors = { eventDate: '', eventEndDate: '' };
+		let hasErrors = false;
+
+		if (newEvent.eventDate) {
+			const startDate = new Date(newEvent.eventDate);
+			const now = new Date();
+			
+			if (startDate <= now) {
+				formErrors.eventDate = 'Event start date must be in the future';
+				hasErrors = true;
+			}
+			
+			if (newEvent.eventEndDate) {
+				const endDate = new Date(newEvent.eventEndDate);
+				if (endDate <= startDate) {
+					formErrors.eventEndDate = 'Event end date must be after start date';
+					hasErrors = true;
+				}
+			}
+		}
+
+		if (hasErrors) return;
+
 		loading = true;
 		error = '';
 		
 		try {
-			await createEventAPI(newEvent);
+			const newEventResponse = await createEventAPI(newEvent);
 			showCreateModal = false;
 			// Reset form
 			newEvent = {
@@ -180,28 +283,16 @@
 				licenseType: 'open',
 				eventDate: '',
 				eventEndDate: '',
-				locationName: '',
-				maxVotesPerUser: 1
+				locationName: ''
 			};
-			await loadEvents();
+			formErrors = { eventDate: '', eventEndDate: '' };
+			
+			// Add the new event to the list immediately
+			events = [newEventResponse, ...events];
 		} catch (err: any) {
 			error = err instanceof Error ? err.message : 'Failed to create event';
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function joinEvent(eventId: string) {
-		if (!user) {
-			goto('/auth/login');
-			return;
-		}
-
-		try {
-			await joinEventAPI(eventId);
-			await loadEvents();
-		} catch (err: any) {
-			error = err instanceof Error ? err.message : 'Failed to join event';
 		}
 	}
 
@@ -215,12 +306,50 @@
 		});
 	}
 
+	function formatEventDate(dateString: string) {
+		const date = new Date(dateString);
+		const now = new Date();
+		const currentYear = now.getFullYear();
+		const eventYear = date.getFullYear();
+		
+		const options: Intl.DateTimeFormatOptions = {
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		};
+		
+		// Add year only if it's different from current year
+		if (eventYear !== currentYear) {
+			options.year = 'numeric';
+		}
+		
+		return date.toLocaleDateString('en-US', options);
+	}
+
+	function getEventDuration(startDate: string, endDate?: string) {
+		if (!endDate) return '';
+		
+		const start = new Date(startDate);
+		const end = new Date(endDate);
+		const diffMs = end.getTime() - start.getTime();
+		const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+		
+		if (diffHours < 24) {
+			return `${diffHours}h`;
+		} else {
+			const days = Math.floor(diffHours / 24);
+			const hours = diffHours % 24;
+			return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+		}
+	}
+
 	function getStatusBadge(status: string) {
 		switch (status) {
 			case 'live':
-				return 'bg-red-100 text-red-800';
+				return 'bg-red-100 text-red-800 animate-pulse';
 			case 'upcoming':
-				return 'bg-blue-100 text-blue-800';
+				return 'bg-green-100 text-green-800';
 			case 'ended':
 				return 'bg-gray-100 text-gray-800';
 			default:
@@ -231,9 +360,9 @@
 	function getStatusText(status: string) {
 		switch (status) {
 			case 'live':
-				return 'Live';
+				return '🔴 Live';
 			case 'upcoming':
-				return 'Upcoming';
+				return '📅 Upcoming';
 			case 'ended':
 				return 'Ended';
 			default:
@@ -254,7 +383,7 @@
 		}
 	}
 
-	function handleTabChange(newTab: 'all' | 'mine' | 'live') {
+	function handleTabChange(newTab: 'all' | 'mine') {
 		if (activeTab !== newTab) {
 			activeTab = newTab;
 			
@@ -280,6 +409,10 @@
 	function getSortIcon(column: typeof sortBy) {
 		if (sortBy !== column) return '↕';
 		return sortOrder === 'asc' ? '↑' : '↓';
+	}
+
+	function clearDateError(field: 'eventDate' | 'eventEndDate') {
+		formErrors[field] = '';
 	}
 </script>
 
@@ -309,14 +442,6 @@
 			onclick={() => handleTabChange('all')}
 		>
 			All Events
-		</button>
-		<button
-			class="px-4 py-2 rounded-lg font-medium transition-colors {activeTab === 'live'
-				? 'bg-red-500 text-white'
-				: 'bg-gray-200 text-gray-700 hover:bg-gray-300'}"
-			onclick={() => handleTabChange('live')}
-		>
-			🔴 Live Events
 		</button>
 		{#if user}
 			<button
@@ -393,6 +518,12 @@
 				>
 					Status {getSortIcon('status')}
 				</button>
+				<button
+					onclick={() => handleSort('license')}
+					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'license' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+				>
+					License {getSortIcon('license')}
+				</button>
 			</div>
 		</div>
 	</div>
@@ -412,8 +543,6 @@
 		<h3 class="text-xl font-semibold text-gray-700 mb-2">
 			{#if searchQuery.trim()}
 				No events found matching "{searchQuery.trim()}"
-			{:else if activeTab === 'live'}
-				No live events at the moment
 			{:else}
 				No events found
 			{/if}
@@ -421,8 +550,6 @@
 		<p class="text-gray-500 mb-4">
 			{#if activeTab === 'mine'}
 				You haven't created any events yet, and you haven't joined any.
-			{:else if activeTab === 'live'}
-				Check back later for live events, or create your own!
 			{:else}
 				Be the first to create an event!
 			{/if}
@@ -440,10 +567,13 @@
 	<!-- Events List -->
 	<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
 		{#each filteredEvents as event, index}
-		<div class="border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors">
+		<div class="border-b border-gray-200 last:border-b-0 transition-colors relative {event.status === 'live' ? 'bg-red-50 border-red-200 shadow-md' : 'hover:bg-gray-50'}">
+			{#if event.status === 'live'}
+				<div class="absolute left-0 top-0 bottom-0 w-1 bg-red-500 animate-pulse"></div>
+			{/if}
 			<a 
 				href="/events/{event.id}"
-				class="block p-6 hover:no-underline"
+				class="block p-6 hover:no-underline {event.status === 'live' ? 'hover:bg-red-100' : ''}"
 			>
 				<div class="flex items-start space-x-4">
 					<!-- Event Icon -->
@@ -451,8 +581,9 @@
 						<div class="w-16 h-16 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center relative">
 							{#if event.status === 'live'}
 								<div class="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse"></div>
+								<div class="absolute inset-0 bg-red-500/20 rounded-lg animate-pulse"></div>
 							{/if}
-							<svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<svg class="w-8 h-8 text-white relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
 							</svg>
 						</div>
@@ -469,9 +600,11 @@
 								<span class="px-2 py-1 text-xs rounded-full {getStatusBadge(event.status)}">
 									{getStatusText(event.status)}
 								</span>
-								<span class="px-2 py-1 text-xs rounded-full {event.visibility === 'public' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-									{event.visibility === 'public' ? 'Public' : 'Private'}
-								</span>
+								{#if activeTab === 'mine' && event.visibility === 'private'}
+									<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+										Private
+									</span>
+								{/if}
 								<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
 									{getLicenseTypeText(event.licenseType)}
 								</span>
@@ -518,23 +651,11 @@
 								<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
 								</svg>
-								<span>{formatDate(event.eventDate)}</span>
+								<span>{formatEventDate(event.eventDate)}</span>
+								{#if event.eventEndDate}
+									<span class="ml-1 text-xs text-gray-400">({getEventDuration(event.eventDate, event.eventEndDate)})</span>
+								{/if}
 							</div>
-							{/if}
-						</div>
-
-						<div class="flex space-x-3 mt-4">
-							<div class="flex-1 bg-secondary text-white text-center py-2 px-4 rounded-lg font-medium hover:bg-secondary/80 transition-colors">
-								{event.status === 'live' ? 'Join Live Event' : 'View Event'}
-							</div>
-							
-							{#if user && !event.stats?.isUserParticipating && event.creatorId !== user.id}
-							<button 
-								onclick={(e) => { e.preventDefault(); e.stopPropagation(); joinEvent(event.id); }}
-								class="flex-1 border border-secondary text-secondary text-center py-2 px-4 rounded-lg font-medium hover:bg-secondary/10 transition-colors"
-							>
-								Join
-							</button>
 							{/if}
 						</div>
 					</div>
@@ -556,7 +677,7 @@
 
 <!-- Create Event Modal -->
 {#if showCreateModal}
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
 	<div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
 		<div class="p-6">
 			<div class="flex justify-between items-center mb-6">
@@ -599,17 +720,6 @@
 							placeholder="Describe your event, the music style, and what participants can expect"
 						></textarea>
 					</div>
-					
-					<div>
-						<label for="event-location" class="block text-sm font-medium text-gray-700 mb-2">Location</label>
-						<input 
-							id="event-location"
-							type="text" 
-							bind:value={newEvent.locationName}
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-							placeholder="Where is your event taking place? (optional)"
-						/>
-					</div>
 				</div>
 
 				<!-- Date & Time -->
@@ -623,8 +733,12 @@
 								id="event-start"
 								type="datetime-local" 
 								bind:value={newEvent.eventDate}
-								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+								oninput={() => clearDateError('eventDate')}
+								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent {formErrors.eventDate ? 'border-red-500' : ''}"
 							/>
+							{#if formErrors.eventDate}
+								<p class="text-red-500 text-xs mt-1">{formErrors.eventDate}</p>
+							{/if}
 						</div>
 						
 						<div>
@@ -633,8 +747,12 @@
 								id="event-end"
 								type="datetime-local" 
 								bind:value={newEvent.eventEndDate}
-								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+								oninput={() => clearDateError('eventEndDate')}
+								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent {formErrors.eventEndDate ? 'border-red-500' : ''}"
 							/>
+							{#if formErrors.eventEndDate}
+								<p class="text-red-500 text-xs mt-1">{formErrors.eventEndDate}</p>
+							{/if}
 						</div>
 					</div>
 				</div>
@@ -668,25 +786,23 @@
 						</select>
 						<p class="text-xs text-gray-500 mt-1">Choose who can participate in voting for tracks</p>
 					</div>
-
-					<div>
-						<label for="max-votes" class="block text-sm font-medium text-gray-700 mb-2">Max Votes Per User</label>
-						<input 
-							id="max-votes"
-							type="number" 
-							bind:value={newEvent.maxVotesPerUser}
-							min="1"
-							max="10"
-							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-						/>
-						<p class="text-xs text-gray-500 mt-1">How many tracks can each user vote for?</p>
-					</div>
 				</div>
 
 				<!-- Location-based Settings (conditional) -->
 				{#if newEvent.licenseType === 'location_based'}
 				<div class="space-y-4">
 					<h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">Location-based Settings</h3>
+					
+					<div>
+						<label for="event-location" class="block text-sm font-medium text-gray-700 mb-2">Location Name</label>
+						<input 
+							id="event-location"
+							type="text" 
+							bind:value={newEvent.locationName}
+							class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+							placeholder="Where is your event taking place?"
+						/>
+					</div>
 					
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div>

@@ -87,7 +87,8 @@ export class PlaylistService {
 
     const savedPlaylist = await this.playlistRepository.save(playlist);
 
-    // Note: Creator is already the owner, no need to add them as collaborator
+    // Notify about playlist creation
+    this.playlistGateway.notifyPlaylistCreated(savedPlaylist, creatorId);
 
     return this.findById(savedPlaylist.id, creatorId);
   }
@@ -265,8 +266,8 @@ export class PlaylistService {
     await this.checkEditPermissions(playlist, userId);
 
     // Validate required fields
-    if (!addTrackDto.trackId) {
-      throw new BadRequestException('Track ID is required');
+    if (!addTrackDto.deezerId) {
+      throw new BadRequestException('Deezer ID is required');
     }
 
     if (!userId) {
@@ -341,8 +342,13 @@ export class PlaylistService {
       relations: ['track', 'addedBy'],
     }) as PlaylistTrackWithDetails;
 
+    // Get updated track count
+    const updatedPlaylist = await this.playlistRepository.findOne({
+      where: { id: playlistId }
+    });
+
     // Notify collaborators
-    this.playlistGateway.notifyTrackAdded(playlistId, trackWithDetails, userId);
+    this.playlistGateway.notifyTrackAdded(playlistId, trackWithDetails, userId, updatedPlaylist?.trackCount || 0);
 
     return trackWithDetails;
   }
@@ -377,8 +383,13 @@ export class PlaylistService {
     // Update playlist stats
     await this.updatePlaylistStats(playlistId);
 
+    // Get updated track count
+    const updatedPlaylist = await this.playlistRepository.findOne({
+      where: { id: playlistId }
+    });
+
     // Notify collaborators
-    this.playlistGateway.notifyTrackRemoved(playlistId, trackId, userId);
+    this.playlistGateway.notifyTrackRemoved(playlistId, trackId, userId, updatedPlaylist?.trackCount || 0);
   }
 
   async reorderTracks(

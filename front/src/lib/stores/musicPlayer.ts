@@ -47,18 +47,22 @@ function createMusicPlayerStore() {
     
     // Track Control
     setCurrentTrack: (track: CurrentTrack, playlist: PlaylistTrack[] = [], index: number = 0) => {
+      console.log('MusicPlayerStore: Setting current track:', track);
       update(state => ({
         ...state,
         currentTrack: track,
         playlist,
         currentTrackIndex: index,
-        duration: track.duration
+        duration: track.duration || 30 // Default to 30 seconds for previews
       }));
     },
 
     setPlaylist: (playlist: PlaylistTrack[], currentIndex: number = 0) => {
       update(state => {
         const newTrack = playlist[currentIndex];
+        console.log('MusicPlayerStore: Setting playlist with', playlist.length, 'tracks, currentIndex:', currentIndex);
+        console.log('MusicPlayerStore: New track at index:', newTrack);
+        
         return {
           ...state,
           playlist,
@@ -68,10 +72,11 @@ function createMusicPlayerStore() {
             title: newTrack.track.title,
             artist: newTrack.track.artist,
             album: newTrack.track.album,
-            duration: newTrack.track.duration,
+            duration: newTrack.track.duration || 30, // Default to 30 seconds for previews
             albumCoverUrl: newTrack.track.albumCoverUrl,
             previewUrl: newTrack.track.previewUrl
-          } : null
+          } : null,
+          duration: newTrack?.track.duration || 30
         };
       });
     },
@@ -102,11 +107,12 @@ function createMusicPlayerStore() {
               title: nextTrack.track.title,
               artist: nextTrack.track.artist,
               album: nextTrack.track.album,
-              duration: nextTrack.track.duration,
+              duration: nextTrack.track.duration || 30, // Default to 30 seconds for previews
               albumCoverUrl: nextTrack.track.albumCoverUrl,
               previewUrl: nextTrack.track.previewUrl
             },
             currentTime: 0,
+            duration: nextTrack.track.duration || 30,
             // Keep playing state - the audio component will handle auto-play
             isPlaying: state.isPlaying
           };
@@ -128,11 +134,12 @@ function createMusicPlayerStore() {
               title: prevTrack.track.title,
               artist: prevTrack.track.artist,
               album: prevTrack.track.album,
-              duration: prevTrack.track.duration,
+              duration: prevTrack.track.duration || 30, // Default to 30 seconds for previews
               albumCoverUrl: prevTrack.track.albumCoverUrl,
               previewUrl: prevTrack.track.previewUrl
             },
             currentTime: 0,
+            duration: prevTrack.track.duration || 30,
             // Keep playing state - the audio component will handle auto-play
             isPlaying: state.isPlaying
           };

@@ -176,6 +176,39 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
+  @SubscribeMessage('join-playlists-room')
+  async handleJoinPlaylistsRoom(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      await client.join(SOCKET_ROOMS.PLAYLISTS);
+      client.emit('joined-playlists-room', { room: SOCKET_ROOMS.PLAYLISTS });
+      this.logger.log(`User ${client.userId} joined global playlists room`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to join playlists room', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('leave-playlists-room')
+  async handleLeavePlaylistsRoom(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    try {
+      await client.leave(SOCKET_ROOMS.PLAYLISTS);
+      client.emit('left-playlists-room', { room: SOCKET_ROOMS.PLAYLISTS });
+      this.logger.log(`User ${client.userId} left global playlists room`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to leave playlists room', details: error.message });
+    }
+  }
+
   @SubscribeMessage('get-participants')
   async handleGetParticipants(
     @ConnectedSocket() client: AuthenticatedSocket,
@@ -403,7 +436,32 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   // Server-side notification methods (called by PlaylistService)
+  notifyPlaylistCreated(playlist: Playlist, userId: string) {
+    // Notify all users in the general playlists room for public playlists
+    if (playlist.visibility === 'public') {
+      this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-created', {
+        playlist: {
+          id: playlist.id,
+          name: playlist.name,
+          description: playlist.description,
+          visibility: playlist.visibility,
+          licenseType: playlist.licenseType,
+          isCollaborative: playlist.isCollaborative,
+          coverImageUrl: playlist.coverImageUrl,
+          createdAt: playlist.createdAt,
+          updatedAt: playlist.updatedAt,
+          creatorId: playlist.creatorId,
+          trackCount: playlist.trackCount,
+          collaborators: [],
+        },
+        createdBy: userId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
   notifyPlaylistUpdated(playlistId: string, playlist: Playlist, userId: string) {
+    // Notify playlist-specific room
     const room = SOCKET_ROOMS.PLAYLIST(playlistId);
     this.server.to(room).emit('playlist-updated', {
       playlistId,
@@ -420,9 +478,29 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       updatedBy: userId,
       timestamp: new Date().toISOString(),
     });
+
+    // Also notify global playlists room for public playlists
+    if (playlist.visibility === 'public') {
+      this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-updated', {
+        playlist: {
+          id: playlist.id,
+          name: playlist.name,
+          description: playlist.description,
+          visibility: playlist.visibility,
+          licenseType: playlist.licenseType,
+          isCollaborative: playlist.isCollaborative,
+          coverImageUrl: playlist.coverImageUrl,
+          updatedAt: playlist.updatedAt,
+          creatorId: playlist.creatorId,
+          trackCount: playlist.trackCount,
+        },
+        updatedBy: userId,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
-  notifyTrackAdded(playlistId: string, track: PlaylistTrackWithDetails, userId: string) {
+  notifyTrackAdded(playlistId: string, track: PlaylistTrackWithDetails, userId: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.PLAYLIST(playlistId);
     this.server.to(room).emit('track-added', {
       playlistId,
@@ -448,9 +526,18 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       addedBy: userId,
       timestamp: new Date().toISOString(),
     });
+
+    // Also notify global playlists room with track count update
+    if (updatedTrackCount !== undefined) {
+      this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-track-added', {
+        playlistId,
+        trackCount: updatedTrackCount,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
-  notifyTrackRemoved(playlistId: string, trackId: string, userId: string) {
+  notifyTrackRemoved(playlistId: string, trackId: string, userId: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.PLAYLIST(playlistId);
     this.server.to(room).emit('track-removed', {
       playlistId,
@@ -458,6 +545,15 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       removedBy: userId,
       timestamp: new Date().toISOString(),
     });
+
+    // Also notify global playlists room with track count update
+    if (updatedTrackCount !== undefined) {
+      this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-track-removed', {
+        playlistId,
+        trackCount: updatedTrackCount,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   notifyTracksReordered(playlistId: string, trackIds: string[], userId: string) {
@@ -466,6 +562,12 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       playlistId,
       trackIds,
       reorderedBy: userId,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Also notify global playlists room
+    this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-tracks-reordered', {
+      playlistId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -482,6 +584,17 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       addedBy,
       timestamp: new Date().toISOString(),
     });
+
+    // Also notify global playlists room
+    this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-collaborator-added', {
+      playlistId,
+      collaborator: {
+        userId: collaborator.id,
+        displayName: collaborator.displayName,
+        avatarUrl: collaborator.avatarUrl,
+      },
+      timestamp: new Date().toISOString(),
+    });
   }
 
   notifyCollaboratorRemoved(playlistId: string, collaborator: User, removedBy: string) {
@@ -496,9 +609,23 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       removedBy,
       timestamp: new Date().toISOString(),
     });
+
+    // Also notify global playlists room
+    this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-collaborator-removed', {
+      playlistId,
+      userId: collaborator.id,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   notifyPlaylistDeleted(playlistId: string, deletedBy: string) {
+    // Notify all users in the general playlists room
+    this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-deleted', {
+      playlistId,
+      deletedBy,
+      timestamp: new Date().toISOString(),
+    });
+
     const room = SOCKET_ROOMS.PLAYLIST(playlistId);
     this.server.to(room).emit('playlist-deleted', {
       playlistId,
