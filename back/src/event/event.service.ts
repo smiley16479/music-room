@@ -21,8 +21,11 @@ import { CreateVoteDto } from './dto/vote.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { LocationDto } from '../common/dto/location.dto';
 
+import { PlaylistService } from 'src/playlist/playlist.service';
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
+import { Playlist } from 'src/playlist/entities/playlist.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
 export interface EventWithStats extends Event {
   stats: {
@@ -45,6 +48,8 @@ export class EventService {
   constructor(
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(Playlist)
+    private readonly playlistRepository: Repository<Playlist>,
     @InjectRepository(Vote)
     private readonly voteRepository: Repository<Vote>,
     @InjectRepository(Track)
@@ -53,6 +58,7 @@ export class EventService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    private readonly playlistService: PlaylistService,
     private readonly emailService: EmailService,
     private readonly eventGateway: EventGateway,
   ) {}
@@ -61,7 +67,7 @@ export class EventService {
   async create(createEventDto: CreateEventDto, creatorId: string): Promise<Event> {
 
     console.log('Creating event with DTO:', createEventDto);
-    
+
     const creator = await this.userRepository.findOne({ where: { id: creatorId } });
     if (!creator) {
       throw new NotFoundException('Creator not found');
@@ -82,13 +88,32 @@ export class EventService {
       creatorId,
       status: EventStatus.UPCOMING,
     });
-
+ 
+    // Add track from selected playlist to event playlist
+    if (createEventDto.selectedPlaylistId) {
+        const { 
+          selectedPlaylistId: originalPlaylistId,
+          playlistName: newName
+        } = createEventDto
+        const playlistCopied = await this.playlistService.duplicatePlaylist(originalPlaylistId, creator.id, `[Event] ${newName}`);
+        playlistCopied.event = event;
+        event.playlist = playlistCopied;
+    } else if (createEventDto.playlistName) {
+        const playlist = new Playlist()
+        playlist.name = `[Event] ${createEventDto.playlistName.trim()}`
+        playlist.event = event;
+        playlist.creator = creator;
+        event.playlist = playlist;
+        await this.playlistRepository.save(playlist);
+    }
     const savedEvent = await this.eventRepository.save(event);
 
     // Add creator as first participant
-    await this.addParticipant(savedEvent.id, creatorId);
-
-    return this.findById(savedEvent.id, creatorId);
+    await this.addParticipant(event.id, creatorId);
+    
+    const toReturn = await this.findById(savedEvent.id, creatorId);
+    console.log('Event entity returned:', toReturn);
+    return toReturn;
   }
 
   async findAll(paginationDto: PaginationDto, userId?: string) {
@@ -98,6 +123,7 @@ export class EventService {
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
       .leftJoinAndSelect('event.currentTrack', 'currentTrack')
+      .leftJoinAndSelect('event.playlist', 'playlist')
       .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
       .orWhere('event.creatorId = :userId', { userId })
       .orderBy('event.createdAt', 'DESC')
@@ -130,7 +156,10 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'currentTrack', 'votes', 'votes.user', 'votes.track'],
+      relations: ['creator', 'participants', 'currentTrack', 
+        'playlist', 'playlist.playlistTracks', 
+        'votes', 'votes.user', 'votes.track'
+      ],
     });
 
     if (!event) {
@@ -557,6 +586,7 @@ export class EventService {
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
       .leftJoinAndSelect('event.admins', 'admin')
+      .leftJoinAndSelect('event.playlist', 'playlist')
       .where('event.creatorId = :userId', { userId })
       .orWhere('participant.id = :userId', { userId })
       .getMany();

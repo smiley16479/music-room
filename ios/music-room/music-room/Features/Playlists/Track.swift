@@ -4,7 +4,7 @@ import AVFoundation
 
 // MARK: - View Model
 @Observable
-class PlaylistViewModel: ObservableObject {
+class PlaylistViewModel {
     var playlist: Playlist
     var tracks: [Track] = []
     var currentTrackId: String?
@@ -72,6 +72,7 @@ class PlaylistViewModel: ObservableObject {
     func voteTrack(id: String, isLike: Bool) {
         guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
         
+        print("Avant vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
         // Only allow voting on upcoming tracks
         if !(tracks[index].hasPlayed ?? false) && !(tracks[index].isCurrentlyPlaying ?? false) {
             if isLike {
@@ -82,6 +83,7 @@ class PlaylistViewModel: ObservableObject {
             sortUpcomingTracks()
         }
 
+        print("Après vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
       // Non envoyé par http:
       // EventsSocketService.shared.emit("vote-track", [
       //   "eventId": myEventId,
@@ -97,7 +99,7 @@ class PlaylistViewModel: ObservableObject {
         newTrack.dislikes = 0
         newTrack.hasPlayed = false
         newTrack.isCurrentlyPlaying = false
-        tracks.append(newTrack)
+        // tracks.append(newTrack)
         sortUpcomingTracks()
 
       let payload: [String: Any] = [
@@ -113,8 +115,10 @@ class PlaylistViewModel: ObservableObject {
 
       Task {
           do {
-              _ = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
+              let playListTrack = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
               await MainActor.run {
+                  tracks.append(playListTrack.track)
+                  sortUpcomingTracks()
 //                  isSaving = false
 //                  dismiss()
               }
@@ -146,14 +150,20 @@ class PlaylistViewModel: ObservableObject {
     private func sortUpcomingTracks() {
         // Find the index of the current track
         guard let currentIndex = tracks.firstIndex(where: { ($0.isCurrentlyPlaying ?? false) }) else { return }
-        
+
         // Sort only upcoming tracks by vote score
         let playedTracks = tracks[0...currentIndex]
         var upcomingTracks = Array(tracks[(currentIndex + 1)...])
+
+print("playedTracks:", playedTracks.map { $0.title })
+print("upcomingTracks before sort:", upcomingTracks.map { $0.title })
+
         upcomingTracks.sort { $0.voteScore > $1.voteScore }
         
         // Reconstruct the playlist
         tracks = Array(playedTracks) + upcomingTracks
+
+        print("tracks after sorting: \(tracks.map { $0.voteScore })")
     }
     
     var currentTrack: Track? {
@@ -164,7 +174,7 @@ class PlaylistViewModel: ObservableObject {
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
     @StateObject private var deezerService = DeezerService()
-    @ObservedObject var playlistViewModel: PlaylistViewModel
+    @State var playlistViewModel: PlaylistViewModel
     @State private var searchText = ""
     @State private var showingProposalConfirmation = false
     @State private var selectedTrack: DeezerTrack?
@@ -300,7 +310,7 @@ struct DeezerTrackRow: View {
 // MARK: - Playlist Details View
 struct PlaylistDetailsView: View {
     let playlist: Playlist
-    @StateObject private var viewModel: PlaylistViewModel
+    @State var viewModel: PlaylistViewModel
     @EnvironmentObject var authManager: AuthenticationManager
     @State private var displayMode: DisplayMode = .list
     @State private var showingDeezerSearch = false
@@ -312,7 +322,7 @@ struct PlaylistDetailsView: View {
         let vm = PlaylistViewModel(playlist: playlist)
         let playlistTracks: [Track] = (playlist.tracks ?? []).map { $0.track }
         vm.tracks.append(contentsOf: playlistTracks)
-        _viewModel = StateObject(wrappedValue: vm)
+        _viewModel = State(wrappedValue: vm)
     }
 
     // Configuration variables
@@ -415,7 +425,9 @@ struct PlaylistDetailsView: View {
                         track: track,
                         onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
                         onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
-                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+                        canVote: !(track.hasPlayed ?? false)
+                              && !(track.isCurrentlyPlaying ?? false)
+                              && (playlist.name.hasPrefix("[Event]"))
                     )
                     .listRowInsets(EdgeInsets())
                 }
@@ -432,7 +444,9 @@ struct PlaylistDetailsView: View {
                         track: track,
                         onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
                         onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
-                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+                        canVote: !(track.hasPlayed ?? false)
+                              && !(track.isCurrentlyPlaying ?? false)
+                              && (playlist.name.hasPrefix("[Event]"))
                     )
                     .listRowInsets(EdgeInsets())
                 }
@@ -463,7 +477,7 @@ struct PlaylistDetailsView: View {
 
 // MARK: Audio Player View
 struct AudioPlayerView: View {
-    @ObservedObject var viewModel: PlaylistViewModel
+    @State var viewModel: PlaylistViewModel
     @State private var audioPlayer: AVPlayer? = nil
     @State private var isPlaying: Bool = false
     @State private var currentTrackIndex: Int = 0
@@ -578,7 +592,7 @@ struct AudioPlayerView: View {
 
    private func previousTrack() {
        let tracks = viewModel.tracks
-       guard !tracks.isEmpty else { return }
+       guard !tracks.isEmpty, currentTrackIndex != 0 else { return }
        // Unmark hasPlayed for current track if going back
        if tracks.indices.contains(currentTrackIndex) {
            viewModel.tracks[currentTrackIndex].hasPlayed = false
@@ -604,7 +618,7 @@ struct AudioPlayerView: View {
 
 // MARK: - Proposed Tracks View
 struct ProposedTracksView: View {
-    @ObservedObject var viewModel: PlaylistViewModel
+    @State var viewModel: PlaylistViewModel
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
@@ -721,6 +735,7 @@ struct TrackRowView: View {
                             Image(systemName: "hand.thumbsup")
                                 .foregroundColor(.green)
                         }
+                        .buttonStyle(BorderlessButtonStyle())
                         Text("\((track.likes ?? 0))")
                             .font(.caption2)
                             .foregroundColor(.green)
@@ -731,6 +746,7 @@ struct TrackRowView: View {
                             Image(systemName: "hand.thumbsdown")
                                 .foregroundColor(.red)
                         }
+                        .buttonStyle(BorderlessButtonStyle())
                         Text("\((track.dislikes ?? 0))")
                             .font(.caption2)
                             .foregroundColor(.red)

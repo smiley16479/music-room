@@ -131,7 +131,6 @@ describe('PlaylistService', () => {
       const createPlaylistDto = {
         name: 'New Playlist',
         description: 'Test playlist',
-        isCollaborative: true,
       };
 
       const userRepository = module.get(getRepositoryToken(User));

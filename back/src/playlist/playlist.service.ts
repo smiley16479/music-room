@@ -87,7 +87,8 @@ export class PlaylistService {
 
     const savedPlaylist = await this.playlistRepository.save(playlist);
 
-    // Note: Creator is already the owner, no need to add them as collaborator
+    // Add creator as first collaborator
+    await this.addCollaborator(savedPlaylist.id, creatorId, creatorId);
 
     return this.findById(savedPlaylist.id, creatorId);
   }
@@ -265,9 +266,10 @@ export class PlaylistService {
     await this.checkEditPermissions(playlist, userId);
 
     // Validate required fields
-    if (!addTrackDto.trackId) {
-      throw new BadRequestException('Track ID is required');
-    }
+    // Bizarre le field trackId n'existe pas dans AddTrackToPlaylistDto
+    // if (!addTrackDto.trackId) {
+    //   throw new BadRequestException('Track ID is required');
+    // }
 
     if (!userId) {
       throw new BadRequestException('User ID is required');
@@ -598,7 +600,6 @@ export class PlaylistService {
       description: originalPlaylist.description,
       visibility: originalPlaylist.visibility,
       licenseType: originalPlaylist.licenseType,
-      isCollaborative: originalPlaylist.isCollaborative,
     }, userId);
 
     // Copy all tracks
