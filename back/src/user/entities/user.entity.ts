@@ -13,6 +13,7 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { Device } from 'src/device/entities/device.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
 export enum VisibilityLevel {
   PUBLIC = 'public',
@@ -113,26 +114,29 @@ export class User {
   updatedAt: Date;
 
   // Relations
-  @OneToMany(() => Event, (event) => event.creator)
+  @OneToMany(() => Event, (event) => event.creator) // ok
   createdEvents: Event[];
 
-  @OneToMany(() => Playlist, (playlist) => playlist.creator)
+  @OneToMany(() => Playlist, (playlist) => playlist.creator) // ok
   createdPlaylists: Playlist[];
+
+  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.addedBy) // ok
+  playlistTrack: PlaylistTrack[];
 
   @OneToMany(() => Device, (device) => device.owner)
   devices: Device[];
 
-  @OneToMany(() => Vote, (vote) => vote.user)
+  @OneToMany(() => Vote, (vote) => vote.user) // ok
   votes: Vote[];
 
-  @OneToMany(() => Invitation, (invitation) => invitation.inviter)
+  @OneToMany(() => Invitation, (invitation) => invitation.inviter)  // ok
   sentInvitations: Invitation[];
 
-  @OneToMany(() => Invitation, (invitation) => invitation.invitee)
+  @OneToMany(() => Invitation, (invitation) => invitation.invitee) // ok
   receivedInvitations: Invitation[];
 
   // Many-to-many for friends
-  @ManyToMany(() => User, (user) => user.friends)
+  @ManyToMany(() => User, (user) => user.friends) // ok
   @JoinTable({
     name: 'user_friends',
     joinColumn: { name: 'user_id', referencedColumnName: 'id' },
@@ -141,13 +145,16 @@ export class User {
   friends: User[];
 
   // Many-to-many for participated events
-  @ManyToMany(() => Event, (event) => event.participants)
+  @ManyToMany(() => Event, (event) => event.participants) // ok
   participatedEvents: Event[];
 
-  @ManyToMany(() => Event, (event) => event.admins)
+  @ManyToMany(() => Event, (event) => event.admins) // ok
   adminOfEvents: Event[];
 
   // Many-to-many for collaborated playlists
-  @ManyToMany(() => Playlist, (playlist) => playlist.collaborators)
+  @ManyToMany(() => Playlist, (playlist) => playlist.collaborators) // ok
   collaboratedPlaylists: Playlist[];
+
+  @OneToMany(() => Device, (device) => device.delegatedTo) // ok
+  delegatedDevices: Device[];
 }

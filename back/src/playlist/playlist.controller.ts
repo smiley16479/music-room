@@ -42,6 +42,7 @@ export class PlaylistController {
   })
   @ApiBody({ type: CreatePlaylistDto })
   async create(@Body() createPlaylistDto: CreatePlaylistDto, @CurrentUser() user: User) {
+    this.logger.debug('✅ create() entered', createPlaylistDto);
     const playlist = await this.playlistService.create(createPlaylistDto, user.id);
     return {
       success: true,

@@ -89,6 +89,8 @@ export class PlaylistService {
 
     // Notify about playlist creation
     this.playlistGateway.notifyPlaylistCreated(savedPlaylist, creatorId);
+    // Add creator as first collaborator
+    await this.addCollaborator(savedPlaylist.id, creatorId, creatorId);
 
     return this.findById(savedPlaylist.id, creatorId);
   }
@@ -609,7 +611,6 @@ export class PlaylistService {
       description: originalPlaylist.description,
       visibility: originalPlaylist.visibility,
       licenseType: originalPlaylist.licenseType,
-      isCollaborative: originalPlaylist.isCollaborative,
     }, userId);
 
     // Copy all tracks

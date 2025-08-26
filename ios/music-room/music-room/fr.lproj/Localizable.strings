@@ -44,6 +44,7 @@
 "create_playlist" = "Créer une playlist";
 "playlist_name" = "Nom de la playlist";
 "collaborative" = "Collaborative";
+"event" = "Playlist d'event";
 "add_tracks" = "Ajouter des pistes";
 "search_music" = "Rechercher de la musique";
 

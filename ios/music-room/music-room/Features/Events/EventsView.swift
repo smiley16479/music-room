@@ -111,7 +111,9 @@ struct EventsView: View {
             }
         }
         .sheet(isPresented: $showingCreateEvent) {
-            CreateEventView()
+            CreateEventView() { newEvent in
+                events.append(newEvent)
+            }
         }
         .sheet(item: $editingEvent) { event in
             EventEditView(event: event, onEventUpdated: { updatedEvent in
@@ -316,6 +318,7 @@ struct EventListItem: View {
 // MARK: - Create Event View (Form)
 struct CreateEventView: View {
     @Environment(\.dismiss) private var dismiss
+    var onEventCreated: ((Event) -> Void)? = nil
     @State private var name: String = ""
     @State private var description: String = ""
     @State private var location: String = ""
@@ -323,11 +326,11 @@ struct CreateEventView: View {
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var errorMessage: String?
-    @State private var newPlaylistName: String = ""
+    @State private var playlistName: String = ""
     @State private var selectedPlaylist: Playlist? = nil
     @State private var showPlaylistPicker = false
     @State private var createNewPlaylist = false
-    
+
     var body: some View {
         NavigationView {
             Form {
@@ -347,7 +350,7 @@ struct CreateEventView: View {
                 Section(header: Text("Event Playlist")) {
                     Toggle("Créer une nouvelle playlist", isOn: $createNewPlaylist)
                     if createNewPlaylist {
-                        TextField("Nom de la playlist", text: $newPlaylistName)
+                        TextField("Nom de la playlist", text: $playlistName)
                         // ... autres champs playlist ...
                     } else {
                         Button(action: { showPlaylistPicker = true }) {
@@ -371,7 +374,11 @@ struct CreateEventView: View {
                     Button("Save") {
                         saveEvent()
                     }
-                    .disabled(isSaving || name.isEmpty)
+                    .disabled(isSaving
+                          || name.isEmpty
+                          || (createNewPlaylist && playlistName.isEmpty)
+                          || (!createNewPlaylist && selectedPlaylist == nil)
+                    )
                 }
             }
             .sheet(isPresented: $showPlaylistPicker) {
@@ -379,7 +386,7 @@ struct CreateEventView: View {
             }
         }
     }
-    
+
     private func saveEvent() {
         isSaving = true
         errorMessage = nil
@@ -388,12 +395,16 @@ struct CreateEventView: View {
             "description": description,
             "locationName": location,
             "eventDate": ISO8601DateFormatter().string(from: date),
-            "visibility": isPublic ? "public" : "private"
+            "visibility": isPublic ? "public" : "private",
+            "selectedPlaylistId": selectedPlaylist?.id ?? "",
+            "playlistName": createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
         ]
         Task {
             do {
-                _ = try await APIService.shared.createEvent(eventData)
+                print("🆕 Creating event with data: \(eventData)")
+                let createdEvent = try await APIService.shared.createEvent(eventData)
                 await MainActor.run {
+                    onEventCreated?(createdEvent)
                     isSaving = false
                     dismiss()
                 }
@@ -405,7 +416,7 @@ struct CreateEventView: View {
             }
         }
     }
-    
+
     // Composant interne
     struct PlaylistPickerView: View {
         @Binding var selectedPlaylist: Playlist?
@@ -488,6 +499,8 @@ struct CreateEventView: View {
 // MARK: - Event Edit View
 struct EventEditView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var tabManager: MainTabManager
+    @EnvironmentObject var authManager: AuthenticationManager
     @State var event: Event
     var onEventUpdated: (Event) -> Void
     var onEventDeleted: (Event) -> Void
@@ -505,6 +518,10 @@ struct EventEditView: View {
     @State private var allUsers: [User] = []
     @State private var admins: [User] = []
     @State private var isLoadingUsers = false
+    var isAdmin: Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+        return event.admins?.contains(where: { $0.id == currentUser.id }) == true || event.creatorId == currentUser.id
+    }
 
     @State private var activeSheet: ActiveSheet? = nil
     @State private var selectedAdminCandidate: User? = nil
@@ -522,6 +539,11 @@ struct EventEditView: View {
     var body: some View {
         NavigationView {
             Form {
+                if let error = errorMessage {
+                    Section {
+                        Text(error).foregroundColor(.red)
+                    }
+                }
                 Section(header: Text("Event Info")) {
                     TextField("Name", text: $name)
                     TextField("Description", text: $description)
@@ -530,66 +552,79 @@ struct EventEditView: View {
                     TextField("Location", text: $location)
                     DatePicker("Date", selection: $date, displayedComponents: [.date, .hourAndMinute])
                 }
-                Section(header: Text("Visibility")) {
-                    Toggle(isOn: $isPublic) {
-                        Text("Public Event")
-                    }
-                }
-                Section(header: Text("Invited Users")) {
-                    if isLoadingUsers {
-                        ProgressView()
-                    } else {
-                        ForEach(invitedUsers) { user in
-                            HStack {
-                                Text(user.displayName)
-                                Spacer()
-                                Button(role: .destructive) {
-                                    removeUser(user)
-                                } label: {
-                                    Image(systemName: "minus.circle")
-                                }
-                            }
-                        }
-                        Button("Invite User") {
-                            activeSheet = .inviteUser
+
+                if let playlist = event.playlist {
+                    Button(action: {
+                        tabManager.selectedTab = 2 // Onglet Playlists (index à adapter)
+                        tabManager.selectedPlaylist = playlist
+                        dismiss()
+                    }) {
+                        HStack {
+                            Text(playlist.name)
+                            Spacer()
+                            Image(systemName: "chevron.right")
                         }
                     }
                 }
-                Section(header: Text("Admins")) {
-                    if admins.isEmpty {
-                        Text("No admins yet (except creator)")
-                            .foregroundColor(.textSecondary)
-                    } else {
-                        ForEach(admins) { user in
-                            HStack {
-                                Text(user.displayName)
-                                Spacer()
-                                if user.id != event.creatorId {
+
+                if isAdmin {
+                    Section(header: Text("Visibility")) {
+                        Toggle(isOn: $isPublic) {
+                            Text("Public Event")
+                        }
+                    }
+                    Section(header: Text("Invited Users")) {
+                        if isLoadingUsers {
+                            ProgressView()
+                        } else {
+                            ForEach(invitedUsers) { user in
+                                HStack {
+                                    Text(user.displayName)
+                                    Spacer()
                                     Button(role: .destructive) {
-                                        removeAdmin(user)
+                                        removeUser(user)
                                     } label: {
                                         Image(systemName: "minus.circle")
                                     }
                                 }
                             }
+                            Button("Invite User") {
+                                activeSheet = .inviteUser
+                            }
                         }
                     }
-                    Button("Add Admin") {
-                        activeSheet = .adminPicker
+                    Section(header: Text("Admins")) {
+                        if admins.isEmpty {
+                            Text("No admins yet (except creator)")
+                                .foregroundColor(.textSecondary)
+                        } else {
+                            ForEach(admins) { user in
+                                HStack {
+                                    Text(user.displayName)
+                                    Spacer()
+                                    if user.id != event.creatorId {
+                                        Button(role: .destructive) {
+                                            removeAdmin(user)
+                                        } label: {
+                                            Image(systemName: "minus.circle")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Button("Add Admin") {
+                            activeSheet = .adminPicker
+                        }
                     }
-                }
-                if let error = errorMessage {
+
                     Section {
-                        Text(error).foregroundColor(.red)
-                    }
-                }
-                Section {
-                    Button("Delete Event", role: .destructive) {
-                        deleteEvent()
+                        Button("Delete Event", role: .destructive) {
+                            deleteEvent()
+                        }
                     }
                 }
             }
-            .navigationTitle("Edit Event")
+            .navigationTitle("\(isAdmin ? "Edit " : "") Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

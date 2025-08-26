@@ -15,23 +15,15 @@ import { Invitation } from 'src/invitation/entities/invitation.entity';
 
 import { UserModule } from '../user/user.module';
 import { EmailModule } from '../email/email.module';
+import { PlaylistModule } from 'src/playlist/playlist.module';
+import { Playlist } from 'src/playlist/entities/playlist.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, Vote, Track, User, Invitation]),
-    ConfigModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
-        },
-      }),
-      inject: [ConfigService],
-    }),
+    TypeOrmModule.forFeature([Event, Vote, Track, User, Invitation, Playlist]),
     UserModule,
     EmailModule,
+    PlaylistModule
   ],
   controllers: [EventController],
   providers: [EventService, EventGateway],

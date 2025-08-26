@@ -471,7 +471,6 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         description: playlist.description,
         visibility: playlist.visibility,
         licenseType: playlist.licenseType,
-        isCollaborative: playlist.isCollaborative,
         coverImageUrl: playlist.coverImageUrl,
         updatedAt: playlist.updatedAt,
       },

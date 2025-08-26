@@ -32,8 +32,4 @@ export class CreatePlaylistDto {
   @IsOptional()
   @IsUrl()
   coverImageUrl?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isCollaborative?: boolean;
 }

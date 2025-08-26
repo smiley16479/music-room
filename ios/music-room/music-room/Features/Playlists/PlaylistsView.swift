@@ -1,12 +1,14 @@
 import SwiftUI
 
 struct PlaylistsView: View {
+    @EnvironmentObject var tabManager: MainTabManager
     @State private var playlists: [Playlist] = []
     @State private var isLoading = false
     @State private var searchText = ""
     @State private var showingCreatePlaylist = false
     @State private var selectedFilter: PlaylistFilter = .all
-    
+    @State private var selectedPlaylist: Playlist? = nil // pour la navigation automatique
+
     var filteredPlaylists: [Playlist] {
         var filtered = playlists
         
@@ -23,8 +25,10 @@ struct PlaylistsView: View {
         case .myPlaylists:
             // Filter playlists created by current user
             break
-        case .collaborative:
-            filtered = filtered.filter { $0.isCollaborative }
+//        case .collaborative:
+//            filtered = filtered.filter { $0.isCollaborative }
+        case .event:
+            filtered = filtered.filter { $0.name.hasPrefix("[Event]") }
         case .public:
             filtered = filtered.filter { $0.visibility == .public }
         }
@@ -33,7 +37,7 @@ struct PlaylistsView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 0) {
                 // Search and Filter
                 VStack(spacing: 12) {
@@ -87,15 +91,44 @@ struct PlaylistsView: View {
                     }
                 }
             }
+            // Navigation automatique vers PlaylistDetailsView
+            .navigationDestination(isPresented: Binding(
+                get: { selectedPlaylist != nil },
+                set: { if !$0 { selectedPlaylist = nil } }
+            )) {
+                if let playlist = selectedPlaylist {
+                    PlaylistDetailsView(playlist: playlist)
+                }
+            }
         }
         .sheet(isPresented: $showingCreatePlaylist) {
-            CreatePlaylistView()
+            CreatePlaylistView() { newPlaylist in
+                playlists.append(newPlaylist)
+            }
         }
         .task {
             await loadPlaylists()
         }
         .refreshable {
             await loadPlaylists()
+        }
+        // .sheet(item: $selectedPlaylist) { playlist in
+        //     PlaylistDetailsView(playlist: playlist)
+        // }
+        .onAppear {
+            if let playlist = tabManager.selectedPlaylist {
+                selectedPlaylist = playlist
+                tabManager.selectedPlaylist = nil
+            }
+            // if let playlist = tabManager.selectedPlaylist {
+            //     // Navigation automatique vers la playlist sélectionnée
+            //     // Par exemple :
+            //     DispatchQueue.main.async {
+            //         // Ouvre la vue de détails
+            //         // (à adapter selon ta logique, ex: navigation ou sheet)
+            //     }
+            //     tabManager.selectedPlaylist = nil // Reset après navigation
+            // }
         }
     }
     
@@ -114,7 +147,7 @@ struct PlaylistsView: View {
 
 // MARK: - Playlist Filter
 enum PlaylistFilter: CaseIterable {
-    case all, myPlaylists, collaborative, `public`
+    case all, myPlaylists, event, `public`
     
     var localizedString: String {
         switch self {
@@ -122,8 +155,8 @@ enum PlaylistFilter: CaseIterable {
             return "All"
         case .myPlaylists:
             return "My Playlists"
-        case .collaborative:
-            return "collaborative".localized
+        case .event:
+            return "event".localized
         case .public:
             return "public".localized
         }
@@ -195,7 +228,7 @@ struct PlaylistGridItem: View {
             .overlay(
                 // Collaborative indicator
                 Group {
-                    if playlist.isCollaborative {
+                    if /* playlist.isCollaborative */ true {
                         HStack {
                             Spacer()
                             VStack {
@@ -255,9 +288,9 @@ struct PlaylistGridItem: View {
 // MARK: - Create Playlist View (Form)
 struct CreatePlaylistView: View {
     @Environment(\.dismiss) private var dismiss
+    var onPlaylistCreated: ((Playlist) -> Void)? = nil
     @State private var name: String = ""
     @State private var description: String = ""
-    @State private var isCollaborative: Bool = false
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -270,9 +303,6 @@ struct CreatePlaylistView: View {
                     TextField("Description", text: $description)
                 }
                 Section(header: Text("Options")) {
-                    Toggle(isOn: $isCollaborative) {
-                        Text("Collaborative")
-                    }
                     Toggle(isOn: $isPublic) {
                         Text("Public Playlist")
                     }
@@ -305,13 +335,14 @@ struct CreatePlaylistView: View {
         let playlistData: [String: Any] = [
             "name": name,
             "description": description,
-            "isCollaborative": isCollaborative,
-            "visibility": isPublic ? "public" : "private"
+            "visibility": isPublic ? "public" : "private",
+//            "licenseType": 
         ]
         Task {
             do {
-                _ = try await APIService.shared.createPlaylist(playlistData)
+                let createdPlaylist = try await APIService.shared.createPlaylist(playlistData)
                 await MainActor.run {
+                    onPlaylistCreated?(createdPlaylist)
                     isSaving = false
                     dismiss()
                 }

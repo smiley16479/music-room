@@ -87,14 +87,14 @@ export class Device {
   updatedAt: Date;
 
   // Relations
-  @ManyToOne(() => User, (user) => user.devices, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, (user) => user.devices, { onDelete: 'CASCADE' }) // ok 
   @JoinColumn({ name: 'owner_id' })
   owner: User;
 
   @Column({ name: 'owner_id' })
   ownerId: string;
 
-  @ManyToOne(() => User, { nullable: true })
+  @ManyToOne(() => User, (user) => user.delegatedDevices, { nullable: true }) // ok
   @JoinColumn({ name: 'delegated_to_id' })
   delegatedTo: User;
 }
