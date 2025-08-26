@@ -205,7 +205,7 @@
 </script>
 
 <!-- Enhanced Search Modal -->
-<div class="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4">
+<div class="fixed inset-0 bg-black/50 z-51 flex items-start justify-center z-50 p-4">
 	<div class="bg-white rounded-lg max-w-5xl w-full max-h-[90vh] overflow-hidden mt-[5vh]">
 		<!-- Header -->
 		<div class="p-6 border-b border-gray-200">

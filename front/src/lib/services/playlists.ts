@@ -9,7 +9,6 @@ export interface Playlist {
   creatorId: string;
   creator?: { id: string; displayName: string };
   visibility: 'public' | 'private';
-  isCollaborative: boolean;
   licenseType: 'open' | 'invited';
   trackCount: number;
   totalDuration: number;
@@ -67,7 +66,6 @@ export interface CreatePlaylistData {
   name: string;
   description?: string;
   visibility: 'public' | 'private';
-  isCollaborative: boolean;
   licenseType: 'open' | 'invited';
 }
 

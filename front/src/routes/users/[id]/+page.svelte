@@ -9,6 +9,7 @@
 	import { friendsService } from '$lib/services/friends';
 	import { generateGenericAvatar } from '$lib/utils/avatar';
 	import type { PublicUserProfile } from '$lib/services/user';
+	import BackNavBtn from '$lib/components/BackNavBtn.svelte';
 
 	let { data } = $props();
 	let userProfile: PublicUserProfile = $state(data.userProfile);
@@ -86,18 +87,7 @@
 </script>
 
 <div class="container mx-auto px-4 py-8">
-	<!-- Back Navigation -->
-	<div class="mb-6">
-		<button
-			onclick={() => window.history.back()}
-			class="inline-flex items-center text-secondary hover:text-secondary/80 transition-colors"
-		>
-			<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-			</svg>
-			Back
-		</button>
-	</div>
+	<BackNavBtn />
 
 	<!-- Profile Header -->
 	<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-8 mb-8">

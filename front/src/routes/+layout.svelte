@@ -2,10 +2,12 @@
 	import { onMount } from 'svelte';
 	import Header from './Header.svelte';
 	import MusicPlayer from '$lib/components/MusicPlayer.svelte';
+	import { musicPlayerStore } from '$lib/stores/musicPlayer';
 	import { authStore } from '$lib/stores/auth';
 	import '../app.css';
 	
 	let { children } = $props();
+  	let playerState = $derived($musicPlayerStore);
 
 	onMount(() => {
 		// Initialize the auth store at the app level
@@ -20,10 +22,8 @@
 		{@render children()}
 	</main>
 
-	<!-- Music Player - Fixed at bottom -->
-	<MusicPlayer />
 
-	<footer class="bg-white bg-opacity-80 border-t border-secondary/20 py-8 mt-16">
+	<footer class="bg-white bg-opacity-80 border-t border-secondary/20 py-8 mt-16 {playerState.currentTrack || playerState.playlist.length > 0 ? 'mb-30' : ''}">
 		<div class="container mx-auto px-4 text-center">
 			<div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-6">
 				<div>
@@ -54,6 +54,8 @@
 			</div>
 		</div>
 	</footer>
+	<MusicPlayer />
+
 </div>
 
 <style>

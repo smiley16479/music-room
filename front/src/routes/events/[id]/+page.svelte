@@ -31,6 +31,7 @@
 	import { musicPlayerService } from "$lib/services/musicPlayer";
 	import { musicPlayerStore } from "$lib/stores/musicPlayer";
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
+	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
 
 	interface PageData {
 		event?: Event;
@@ -49,9 +50,7 @@
 	let showDeleteConfirm = $state(false);
 	let showPromoteModal = $state(false);
 	let showAddAdminModal = $state(false);
-	let inviteEmails = $state("");
 	let addAdminEmail = $state("");
-	let votingCooldown = new Set<string>();
 	let userPlaylists: Playlist[] = $state([]);
 	let selectedUserId = $state("");
 	let isSocketConnected = $state(false);
@@ -93,6 +92,11 @@
 		licenseType: "open" as "open" | "invited" | "location_based",
 		visibility: "public" as "public" | "private",
 		locationName: "",
+		latitude: undefined as number | undefined,
+		longitude: undefined as number | undefined,
+		locationRadius: undefined as number | undefined,
+		votingStartTime: undefined as string | undefined,
+		votingEndTime: undefined as string | undefined,
 	});
 
 	let eventId = $derived($page.params.id);
@@ -478,10 +482,6 @@
 	}
 	function handleParticipantRemoved(data: any) {
 		if (event) {
-			const participantsBefore = $state.snapshot(event.participants);
-			const initialCount = event.participants.length;
-
-			// Debug: show which participants would be kept
 			const remainingParticipants = event.participants.filter(
 				(p) => p.id !== data.userId && p.userId !== data.userId,
 			);
@@ -535,6 +535,11 @@
 				licenseType: event.licenseType,
 				visibility: event.visibility,
 				locationName: event.locationName || "",
+				latitude: event.latitude || undefined,
+				longitude: event.longitude || undefined,
+				locationRadius: event.locationRadius || undefined,
+				votingStartTime: event.votingStartTime || undefined,
+				votingEndTime: event.votingEndTime || undefined,
 			};
 		}
 	}
@@ -1185,6 +1190,48 @@
 	</div>
 {:else if event}
 	<div class="container mx-auto px-4 py-8">
+		<div class="flex items-center justify-between w-full">
+			<BackNavBtn />
+			<button
+				onclick={() => (showEditModal = true)}
+				class="clickable"
+				aria-label="Edit Event"
+			>
+				<svg
+					viewBox="-2.4 -2.4 28.80 28.80"
+					class="w-8 mb-2 hover:rotate-180 transition-transform duration-100 ease-in-out origin-center"
+					fill="none"
+					xmlns="http://www.w3.org/2000/svg"
+					><g id="SVGRepo_bgCarrier" stroke-width="0"
+						><rect
+							x="-2.4"
+							y="-2.4"
+							width="28.80"
+							height="28.80"
+							rx="14.4"
+							fill="#ffffff"
+						></rect></g
+					><g
+						id="SVGRepo_tracerCarrier"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					></g><g id="SVGRepo_iconCarrier">
+						<circle
+							cx="12"
+							cy="12"
+							r="3"
+							stroke="#f6a437"
+							stroke-width="1.5"
+						></circle>
+						<path
+							d="M13.7654 2.15224C13.3978 2 12.9319 2 12 2C11.0681 2 10.6022 2 10.2346 2.15224C9.74457 2.35523 9.35522 2.74458 9.15223 3.23463C9.05957 3.45834 9.0233 3.7185 9.00911 4.09799C8.98826 4.65568 8.70226 5.17189 8.21894 5.45093C7.73564 5.72996 7.14559 5.71954 6.65219 5.45876C6.31645 5.2813 6.07301 5.18262 5.83294 5.15102C5.30704 5.08178 4.77518 5.22429 4.35436 5.5472C4.03874 5.78938 3.80577 6.1929 3.33983 6.99993C2.87389 7.80697 2.64092 8.21048 2.58899 8.60491C2.51976 9.1308 2.66227 9.66266 2.98518 10.0835C3.13256 10.2756 3.3397 10.437 3.66119 10.639C4.1338 10.936 4.43789 11.4419 4.43786 12C4.43783 12.5581 4.13375 13.0639 3.66118 13.3608C3.33965 13.5629 3.13248 13.7244 2.98508 13.9165C2.66217 14.3373 2.51966 14.8691 2.5889 15.395C2.64082 15.7894 2.87379 16.193 3.33973 17C3.80568 17.807 4.03865 18.2106 4.35426 18.4527C4.77508 18.7756 5.30694 18.9181 5.83284 18.8489C6.07289 18.8173 6.31632 18.7186 6.65204 18.5412C7.14547 18.2804 7.73556 18.27 8.2189 18.549C8.70224 18.8281 8.98826 19.3443 9.00911 19.9021C9.02331 20.2815 9.05957 20.5417 9.15223 20.7654C9.35522 21.2554 9.74457 21.6448 10.2346 21.8478C10.6022 22 11.0681 22 12 22C12.9319 22 13.3978 22 13.7654 21.8478C14.2554 21.6448 14.6448 21.2554 14.8477 20.7654C14.9404 20.5417 14.9767 20.2815 14.9909 19.902C15.0117 19.3443 15.2977 18.8281 15.781 18.549C16.2643 18.2699 16.8544 18.2804 17.3479 18.5412C17.6836 18.7186 17.927 18.8172 18.167 18.8488C18.6929 18.9181 19.2248 18.7756 19.6456 18.4527C19.9612 18.2105 20.1942 17.807 20.6601 16.9999C21.1261 16.1929 21.3591 15.7894 21.411 15.395C21.4802 14.8691 21.3377 14.3372 21.0148 13.9164C20.8674 13.7243 20.6602 13.5628 20.3387 13.3608C19.8662 13.0639 19.5621 12.558 19.5621 11.9999C19.5621 11.4418 19.8662 10.9361 20.3387 10.6392C20.6603 10.4371 20.8675 10.2757 21.0149 10.0835C21.3378 9.66273 21.4803 9.13087 21.4111 8.60497C21.3592 8.21055 21.1262 7.80703 20.6602 7C20.1943 6.19297 19.9613 5.78945 19.6457 5.54727C19.2249 5.22436 18.693 5.08185 18.1671 5.15109C17.9271 5.18269 17.6837 5.28136 17.3479 5.4588C16.8545 5.71959 16.2644 5.73002 15.7811 5.45096C15.2977 5.17191 15.0117 4.65566 14.9909 4.09794C14.9767 3.71848 14.9404 3.45833 14.8477 3.23463C14.6448 2.74458 14.2554 2.35523 13.7654 2.15224Z"
+							stroke="#f6a437"
+							stroke-width="1.5"
+						></path>
+					</g></svg
+				>
+			</button>
+		</div>
 		<!-- Event Header -->
 		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
 			<div class="flex items-start space-x-6">
@@ -1292,115 +1339,6 @@
 							>
 						</div>
 					</div>
-
-					{#if user}
-						<div class="flex space-x-3">
-							{#if !isCreator}
-								<button
-									onclick={leaveEvent}
-									class="border border-red-500 text-red-500 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors"
-								>
-									Leave Event
-								</button>
-							{/if}
-
-							<!-- Admin/Owner Controls -->
-							{#if isAdmin}
-								<div class="flex space-x-2">
-									<!-- Music Control -->
-									{#if eventStatus() === "live"}
-										{#if isPlaying}
-											<button
-												onclick={pauseMusic}
-												class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors flex items-center space-x-2"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
-													/>
-												</svg>
-												<span>Pause</span>
-											</button>
-										{:else}
-											<button
-												onclick={resumeMusic}
-												class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors flex items-center space-x-2"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h6m6-9a9 9 0 11-18 0 9 9 0 0118 0z"
-													/>
-												</svg>
-												<span>Play</span>
-											</button>
-										{/if}
-
-										<button
-											onclick={playNextTrack}
-											class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
-										>
-											<svg
-												class="w-4 h-4"
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-											>
-												<path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													d="M9 5l7 7-7 7"
-												/>
-											</svg>
-											<span>Next</span>
-										</button>
-									{/if}
-
-									<!-- Edit Event -->
-									{#if isAdmin || isCreator}
-										<button
-											onclick={() =>
-												(showEditModal = true)}
-											class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors"
-										>
-											Edit
-										</button>
-
-										<button
-											onclick={() =>
-												(showAddAdminModal = true)}
-											class="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors"
-										>
-											Add Admin
-										</button>
-										<button
-											onclick={() =>
-												(showDeleteConfirm = true)}
-											class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
-										>
-											Delete Event
-										</button>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					{/if}
 				</div>
 			</div>
 		</div>
@@ -1766,10 +1704,14 @@
 				<div>
 					{#each sortedParticipants() as participant}
 						{@const role = getUserRole(participant.id)}
-						<div
-							class="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+						<button
+							onclick={() => goto(`/users/${participant.id}`)}
+							class="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors w-full text-left {participant.id ===
+							user?.id
+								? 'bg-gray-100'
+								: ''}"
 						>
-							{#if participant.avatarUrl}
+							{#if participant.avatarUrl && !participant.avatarUrl.startsWith("data:image/svg+xml")}
 								<img
 									src={participant.avatarUrl}
 									alt={participant.displayName}
@@ -1778,20 +1720,12 @@
 							{:else}
 								<div
 									class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-									style="background: linear-gradient(135deg, {getAvatarColor(
-										participant.displayName ||
-											participant.username ||
-											'User',
-									)}, {getAvatarColorSecondary(
-										participant.displayName ||
-											participant.username ||
-											'User',
-									)})"
+									style="background-color: {getAvatarColor(
+										participant.displayName || 'Unknown',
+									)}"
 								>
 									{getAvatarLetter(
-										participant.displayName ||
-											participant.username ||
-											"U",
+										participant.displayName || "Unknown",
 									)}
 								</div>
 							{/if}
@@ -1802,122 +1736,14 @@
 										participant.username}
 								</p>
 								<div
-									class="flex items-center space-x-2 text-xs"
+									class="flex items-center space-x-2 text-xs text-gray-500"
 								>
-									<span
-										class="px-2 py-0.5 rounded-full font-medium {getUserBadgeClass(
-											role,
-										)}"
-									>
-										{role}
-									</span>
-									{#if participant.joinedAt}
-										<span class="text-gray-500"
-											>• Joined {new Date(
-												participant.joinedAt,
-											).toLocaleDateString()}</span
-										>
-									{/if}
+									{role}
 								</div>
 							</div>
-
-							<div class="flex items-center space-x-2">
-								{#if participant.id !== user?.id}
-									<button
-										onclick={() =>
-											goto(`/users/${participant.id}`)}
-										class="text-gray-400 hover:text-gray-600 p-1"
-										title="View profile"
-										aria-label="View profile"
-									>
-										<svg
-											class="w-4 h-4"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M9 5l7 7-7 7"
-											/>
-										</svg>
-									</button>
-
-									{#if isCreator || isAdmin}
-										{#if getUserRole(participant.id) === "Participant"}
-											<button
-												onclick={() => {
-													selectedUserId =
-														participant.id;
-													showPromoteModal = true;
-												}}
-												class="text-purple-500 hover:text-purple-700 p-1"
-												title="Promote to admin"
-												aria-label="Promote to admin"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M5 15l7-7 7 7"
-													/>
-												</svg>
-											</button>
-										{:else if canRemoveAdmin(participant.id)}
-											<button
-												onclick={() =>
-													removeAdmin(participant.id)}
-												class="text-red-500 hover:text-red-700 p-1"
-												title="Remove admin"
-												aria-label="Remove admin"
-											>
-												<svg
-													class="w-4 h-4"
-													fill="none"
-													stroke="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-													/>
-												</svg>
-											</button>
-										{/if}
-									{/if}
-								{:else}
-									<div class="text-secondary">
-										<svg
-											class="w-4 h-4"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-											/>
-										</svg>
-									</div>
-								{/if}
-							</div>
-						</div>
+						</button>
 					{/each}
 				</div>
-
-				<!-- Removed join event button since users on this page are already participants -->
 			</div>
 		</div>
 
@@ -1937,7 +1763,7 @@
 		<!-- Invite Users Modal -->
 		{#if showInviteModal}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div
 					class="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto"
@@ -2111,7 +1937,7 @@
 		<!-- Add Playlist Modal -->
 		{#if showPlaylistModal}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div
 					class="bg-white rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto"
@@ -2247,7 +2073,7 @@
 		<!-- Edit Event Modal -->
 		{#if showEditModal}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div
 					class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
@@ -2376,9 +2202,148 @@
 											class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 										/>
 									</div>
+									<div class="space-y-4">
+										<h3
+											class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2"
+										>
+											Location-based Settings
+										</h3>
+
+										<div>
+											<label
+												for="event-location"
+												class="block text-sm font-medium text-gray-700 mb-2"
+												>Location Name</label
+											>
+											<input
+												id="event-location"
+												type="text"
+												bind:value={
+													editEventData.locationName
+												}
+												class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+												placeholder="Where is your event taking place?"
+											/>
+										</div>
+
+										<div
+											class="grid grid-cols-1 md:grid-cols-2 gap-4"
+										>
+											<div>
+												<label
+													for="latitude"
+													class="block text-sm font-medium text-gray-700 mb-2"
+													>Latitude</label
+												>
+												<input
+													id="latitude"
+													type="number"
+													bind:value={
+														editEventData.latitude
+													}
+													step="0.0001"
+													min="-90"
+													max="90"
+													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+													placeholder="e.g., 40.7128"
+												/>
+											</div>
+
+											<div>
+												<label
+													for="longitude"
+													class="block text-sm font-medium text-gray-700 mb-2"
+													>Longitude</label
+												>
+												<input
+													id="longitude"
+													type="number"
+													bind:value={
+														editEventData.longitude
+													}
+													step="0.0001"
+													min="-180"
+													max="180"
+													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+													placeholder="e.g., -74.0060"
+												/>
+											</div>
+										</div>
+
+										<div>
+											<label
+												for="location-radius"
+												class="block text-sm font-medium text-gray-700 mb-2"
+												>Location Radius (meters)</label
+											>
+											<input
+												id="location-radius"
+												type="number"
+												bind:value={
+													editEventData.locationRadius
+												}
+												min="10"
+												max="10000"
+												class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+												placeholder="e.g., 100"
+											/>
+											<p
+												class="text-xs text-gray-500 mt-1"
+											>
+												Users must be within this radius
+												to vote
+											</p>
+										</div>
+
+										<div
+											class="grid grid-cols-1 md:grid-cols-2 gap-4"
+										>
+											<div>
+												<label
+													for="voting-start"
+													class="block text-sm font-medium text-gray-700 mb-2"
+													>Voting Start Time</label
+												>
+												<input
+													id="voting-start"
+													type="time"
+													bind:value={
+														editEventData.votingStartTime
+													}
+													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+												/>
+											</div>
+
+											<div>
+												<label
+													for="voting-end"
+													class="block text-sm font-medium text-gray-700 mb-2"
+													>Voting End Time</label
+												>
+												<input
+													id="voting-end"
+													type="time"
+													bind:value={
+														editEventData.votingEndTime
+													}
+													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+												/>
+											</div>
+										</div>
+									</div>
+								{/if}
+								{#if isCreator}
+									<button
+										onclick={() => (
+											(showEditModal = false),
+											(showDeleteConfirm = true)
+										)}
+										class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
+									>
+										Delete Event
+									</button>
 								{/if}
 							</div>
-
 							<div
 								class="flex space-x-4 pt-6 border-t border-gray-200"
 							>
@@ -2406,7 +2371,7 @@
 		<!-- Delete Confirmation Modal -->
 		{#if showDeleteConfirm}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div class="bg-white rounded-lg max-w-md w-full">
 					<div class="p-6">
@@ -2461,7 +2426,7 @@
 		<!-- Promote User Modal -->
 		{#if showPromoteModal}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div class="bg-white rounded-lg max-w-md w-full">
 					<div class="p-6">
@@ -2528,7 +2493,7 @@
 		<!-- Add Admin Modal -->
 		{#if showAddAdminModal}
 			<div
-				class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 			>
 				<div class="bg-white rounded-lg max-w-md w-full">
 					<div class="p-6">

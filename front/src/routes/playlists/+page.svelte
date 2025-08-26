@@ -5,7 +5,6 @@
 	import { playlistsService, type Playlist } from "$lib/services/playlists";
 	import { socketService } from "$lib/services/socket";
 	import { goto, replaceState } from "$app/navigation";
-	import type { User } from "$lib/services/auth";
 
 	// Svelte 5 runes - using correct syntax for state and reactivity
 	let { data } = $props();
@@ -29,9 +28,15 @@
 	let newPlaylist = $state({
 		name: "",
 		description: "",
-		visibility: "public" as const,
-		isCollaborative: true,
-		licenseType: "open" as const,
+		visibility: "public" as "public" | "private",
+		licenseType: "open" as "open" | "invited",
+	});
+
+	// Automatically set licenseType to 'invited' when visibility is 'private'
+	$effect(() => {
+		if (newPlaylist.visibility === 'private') {
+			newPlaylist.licenseType = 'invited';
+		}
 	});
 
 	// Update tab based on URL parameter on initial load only
@@ -236,7 +241,6 @@
 				name: "",
 				description: "",
 				visibility: "public",
-				isCollaborative: true,
 				licenseType: "open",
 			};
 			await loadPlaylists();
@@ -247,21 +251,6 @@
 					: "Failed to create playlist";
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function deletePlaylist(playlistId: string, playlistName: string) {
-		if (!user) return;
-		
-		if (!confirm(`Are you sure you want to delete "${playlistName}"? This action cannot be undone.`)) {
-			return;
-		}
-
-		try {
-			await playlistsService.deletePlaylist(playlistId);
-			// The socket event will handle removing it from the list
-		} catch (err) {
-			error = err instanceof Error ? err.message : "Failed to delete playlist";
 		}
 	}
 
@@ -315,7 +304,7 @@
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8">
-	<div class="flex justify-between items-center mb-8">
+	<div class="flex flex-col md:flex-row text-center md:text-start justify-between items-center mb-8">
 		<div>
 			<h1 class="font-family-main text-4xl font-bold text-gray-800 mb-2">
 				Music Playlists
@@ -328,7 +317,7 @@
 		{#if user}
 			<button
 				onclick={() => (showCreateModal = true)}
-				class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors"
+				class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors mt-4 md:mt-0"
 			>
 				Create Playlist
 			</button>
@@ -361,7 +350,7 @@
 	<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
 		<div class="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
 			<!-- Search -->
-			<div class="flex-1 max-w-md">
+			<div class="flex-1 w-full sm:max-w-md">
 				<label for="search" class="sr-only">Search playlists</label>
 				<div class="relative">
 					<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -381,45 +370,14 @@
 
 			<!-- Real-time status indicator -->
 			<div class="flex items-center space-x-4">
-				{#if isSocketConnected}
-					<div class="flex items-center text-sm text-green-600">
-						<div class="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-						Live Updates Active
-					</div>
-				{:else}
-					<div class="flex items-center text-sm text-red-500">
-						<div class="w-2 h-2 bg-red-400 rounded-full mr-2"></div>
-						Offline Mode
-					</div>
-				{/if}
-
-				<!-- Socket connection debug info (only in development) -->
-				{#if typeof window !== 'undefined' && window.location.hostname === 'localhost'}
-					<div class="text-xs text-gray-400">
-						Debug: Socket {isSocketConnected ? 'Connected' : 'Disconnected'}
-					</div>
-				{/if}
-
 				<!-- Sort Controls -->
 				<div class="flex items-center space-x-2">
-					<span class="text-sm text-gray-600 font-medium">Sort by:</span>
+					<span class="text-sm text-gray-600 font-medium hidden sm:block">Sort by:</span>
 					<button
 						onclick={() => handleSort("date")}
 						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'date' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
 					>
 						Date {getSortIcon("date")}
-					</button>
-					<button
-						onclick={() => handleSort("name")}
-						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'name' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-					>
-						Name {getSortIcon("name")}
-					</button>
-					<button
-						onclick={() => handleSort("owner")}
-						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'owner' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-					>
-						Owner {getSortIcon("owner")}
 					</button>
 					<button
 						onclick={() => handleSort("tracks")}
@@ -484,9 +442,9 @@
 				<div class="border-b border-gray-200 last:border-b-0 hover:bg-gray-50 transition-colors">
 					<a 
 						href="/playlists/{playlist.id}"
-						class="block p-6 hover:no-underline"
+						class="block p-4 hover:no-underline"
 					>
-						<div class="flex items-start space-x-4">
+						<div class="flex items-start sm:space-x-4 space-x-2">
 							<!-- Playlist Cover -->
 							<div class="flex-shrink-0">
 								{#if playlist.coverImageUrl}
@@ -499,7 +457,7 @@
 									</div>
 								{/if}
 							</div>
-
+ 
 							<!-- Playlist Info -->
 							<div class="flex-1 min-w-0">
 								<div class="flex items-start justify-between mb-2">
@@ -508,58 +466,43 @@
 										<p class="text-sm text-gray-600">by {playlist.creator?.displayName || 'Unknown'}</p>
 									</div>
 									<div class="flex items-center space-x-2 ml-4">
-										<span class="px-2 py-1 text-xs rounded-full {playlist.visibility === 'public' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}">
-											{playlist.visibility === 'public' ? 'Public' : 'Private'}
-										</span>
-										{#if playlist.isCollaborative}
-											<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
-												Collaborative
+										{#if user && playlist.collaborators.some(collab => collab.id === user!.id)}
+											<span class="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-800">
+												Collaborator
 											</span>
 										{/if}
-										{#if user && (playlist.creatorId === user.id)}
-											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">
-												Owner
+										{#if playlist.visibility === 'private'}
+											<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">
+												Private
 											</span>
-											<!-- Delete button for owners -->
-											<button
-												onclick={(e) => {
-													e.preventDefault();
-													e.stopPropagation();
-													deletePlaylist(playlist.id, playlist.name);
-												}}
-												class="p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-												title="Delete playlist"
-												aria-label={`Delete ${playlist.name}`}
-											>
-												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-												</svg>
-											</button>
-										{:else if user && playlist.collaborators.some(collab => collab.userId === user!.id)}
-											<span class="px-2 py-1 text-xs rounded-full bg-indigo-100 text-indigo-800">
-												Collaborator
+										{/if}
+										{#if playlist.visibility !== 'private' && playlist.licenseType === 'invited'}
+											<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+												Closed
 											</span>
 										{/if}
 									</div>
 								</div>
 
 								{#if playlist.description}
-									<p class="text-sm text-gray-600 mb-2 line-clamp-2">{playlist.description}</p>
+									<p class="text-sm text-gray-600 mb-2 line-clamp-2 hidden sm:block hyphens-auto break-all truncate">{playlist.description}</p>
 								{/if}
 
-								<div class="flex items-center space-x-6 text-sm text-gray-500">
+								<div class="flex items-center space-x-6 text-sm text-gray-500 hidden sm:flex">
 									<div class="flex items-center">
 										<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"></path>
 										</svg>
 										<span>{playlist.trackCount || 0} tracks</span>
 									</div>
-									<div class="flex items-center">
-										<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
-										</svg>
-										<span>{playlist.collaborators.length + 1} collaborators</span>
-									</div>
+									{#if playlist.licenseType === "invited"}
+										<div class="flex items-center">
+											<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+											</svg>
+											<span>{playlist.collaborators.length + 1} collaborators</span>
+										</div>
+									{/if}
 									<div class="flex items-center">
 										<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
@@ -570,7 +513,7 @@
 							</div>
 
 							<!-- Arrow indicator -->
-							<div class="flex-shrink-0">
+							<div class="flex-shrink-0 hidden sm:flex items-center">
 								<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
 								</svg>
@@ -594,7 +537,7 @@
 <!-- Create Playlist Modal -->
 {#if showCreateModal}
 	<div
-		class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+		class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
 	>
 		<div class="bg-white rounded-lg max-w-md w-full">
 			<div class="p-6">
@@ -690,19 +633,6 @@
 							>
 						</div>
 
-						<div class="flex items-center">
-							<input
-								type="checkbox"
-								id="isCollaborative"
-								bind:checked={newPlaylist.isCollaborative}
-								class="mr-2"
-							/>
-							<label
-								for="isCollaborative"
-								class="text-sm text-gray-700"
-								>Allow collaboration</label
-							>
-						</div>
 					</div>
 
 					<div>
@@ -716,7 +646,7 @@
 							bind:value={newPlaylist.licenseType}
 							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
 						>
-							<option value="open">Open (anyone can edit)</option>
+							<option value="open" disabled={newPlaylist.visibility === 'private'}>Open (anyone can edit)</option>
 							<option value="invited">Invited users only</option>
 						</select>
 					</div>

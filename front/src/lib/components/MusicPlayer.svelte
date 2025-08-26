@@ -15,27 +15,12 @@
   let playerState = $derived($musicPlayerStore);
   let user = $derived($authStore);
   
-  // Debug effect to track store changes (only for major state changes)
-  $effect(() => {
-    if (playerState.currentTrack) {
-      console.log('MusicPlayer: Ready with track:', playerState.currentTrack.title, '| Can Control:', playerState.canControl);
-    } else if (playerState.playlist.length > 0) {
-      console.log('MusicPlayer: Ready with playlist of', playerState.playlist.length, 'tracks');
-    }
-  });
-  
   let currentAudioSrc = '';
   let loadTimeout: NodeJS.Timeout | null = null;
   
   // Update audio source when track changes using Svelte 5 effect
   $effect(() => {
     if (audioElement && playerState.currentTrack?.previewUrl && currentAudioSrc !== playerState.currentTrack.previewUrl) {
-      console.log('MusicPlayer: Updating audio source:', {
-        newSrc: playerState.currentTrack.previewUrl,
-        currentSrc: currentAudioSrc,
-        track: playerState.currentTrack.title,
-        shouldAutoPlay: playerState.isPlaying
-      });
       
       // Clear any existing timeout
       if (loadTimeout) {
@@ -52,7 +37,6 @@
         // Small delay to ensure audio is loaded
         setTimeout(() => {
           audioElement?.play().catch(error => {
-            console.warn('Auto-play failed (this is expected on first user interaction):', error);
             musicPlayerStore.pause();
           });
         }, 100);
@@ -61,7 +45,6 @@
       // Set a timeout to clear loading state if audio doesn't load
       loadTimeout = setTimeout(() => {
         if (playerState.isLoading) {
-          console.warn('Audio load timeout, clearing loading state');
           musicPlayerStore.setLoading(false);
         }
         loadTimeout = null;
@@ -69,7 +52,6 @@
       
       // Clear timeout when audio loads successfully
       const handleLoadSuccess = () => {
-        console.log('Audio loaded successfully');
         if (loadTimeout) {
           clearTimeout(loadTimeout);
           loadTimeout = null;
@@ -84,7 +66,6 @@
   // Handle the case where currentTrack is set but has no previewUrl using Svelte 5 effect
   $effect(() => {
     if (playerState.currentTrack && !playerState.currentTrack.previewUrl) {
-      console.warn('Current track has no preview URL:', playerState.currentTrack);
       musicPlayerStore.setLoading(false);
     }
   });
@@ -94,7 +75,6 @@
     if (audioElement && audioElement.src) {
       if (playerState.isPlaying && audioElement.paused) {
         audioElement.play().catch(error => {
-          console.warn('Play failed:', error);
           musicPlayerStore.pause();
         });
       } else if (!playerState.isPlaying && !audioElement.paused) {
@@ -110,7 +90,6 @@
   }
   
   function handleLoadedMetadata() {
-    console.log('Audio: loadedmetadata event');
     if (audioElement && playerState.currentTrack) {
       musicPlayerStore.setCurrentTime(0);
       musicPlayerStore.setLoading(false);
@@ -124,7 +103,6 @@
   }
   
   function handleEnded() {
-    console.log('Audio: ended event');
     // Check if there's a next track and auto-advance
     if (playerState.currentTrackIndex < playerState.playlist.length - 1) {
       musicPlayerStore.nextTrack();
@@ -141,12 +119,10 @@
   }
   
   function handleCanPlay() {
-    console.log('Audio: canplay event');
     musicPlayerStore.setLoading(false);
   }
   
   function handleLoadStart() {
-    console.log('Audio: loadstart event');
     musicPlayerStore.setLoading(true);
   }
   
@@ -415,9 +391,6 @@
 <!-- Music Player UI -->
 {#if playerState.currentTrack || playerState.playlist.length > 0}
 <div class="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-secondary shadow-2xl z-50" style="min-height: 80px;">
-  <div class="bg-secondary/10 text-center py-1 text-xs text-secondary font-medium">
-    🎵 Music Player Active
-  </div>
   <div class="container mx-auto px-4 py-3">
     <!-- Progress Bar -->
     <div class="w-full mb-3">
@@ -465,27 +438,6 @@
           <p class="text-xs text-gray-500 truncate">
             {playerState.currentTrack?.artist || `${playerState.playlist.length} tracks available`}
           </p>
-          {#if playerState.currentTrack}
-            {#if playerState.currentTrack.previewUrl}
-              {#if audioElement?.error}
-                <p class="text-xs text-red-600">
-                  Preview Unavailable (Licensing)
-                </p>
-              {:else}
-                <p class="text-xs text-blue-600">
-                  30s Preview Available
-                </p>
-              {/if}
-            {:else}
-              <p class="text-xs text-orange-600">
-                No Preview Available
-              </p>
-            {/if}
-          {:else}
-            <p class="text-xs text-gray-600">
-              Click play on any track to start
-            </p>
-          {/if}
         </div>
       </div>
 

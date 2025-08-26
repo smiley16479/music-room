@@ -153,7 +153,7 @@
 	}
 </script>
 
-<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+<div class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4">
 	<div class="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
 		<div class="p-6 border-b border-gray-200">
 			<div class="flex justify-between items-center">
