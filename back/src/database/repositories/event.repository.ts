@@ -100,7 +100,7 @@ export class EventRepository {
     return {
       participantCount: event?.participants?.length || 0,
       voteCount: event?.votes?.length || 0,
-      trackCount: event?.playlist?.length || 0,
+      trackCount: event?.playlist?.trackCount || 0,
     };
   }
 }

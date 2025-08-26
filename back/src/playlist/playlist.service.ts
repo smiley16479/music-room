@@ -88,9 +88,7 @@ export class PlaylistService {
     const savedPlaylist = await this.playlistRepository.save(playlist);
 
     // Add creator as first collaborator if collaborative
-    if (savedPlaylist.isCollaborative) {
-      await this.addCollaborator(savedPlaylist.id, creatorId, creatorId);
-    }
+    await this.addCollaborator(savedPlaylist.id, creatorId, creatorId);
 
     return this.findById(savedPlaylist.id, creatorId);
   }
@@ -493,7 +491,6 @@ export class PlaylistService {
       description: originalPlaylist.description,
       visibility: originalPlaylist.visibility,
       licenseType: originalPlaylist.licenseType,
-      isCollaborative: originalPlaylist.isCollaborative,
     }, userId);
 
     // Copy all tracks

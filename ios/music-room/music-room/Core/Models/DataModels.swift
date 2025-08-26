@@ -231,7 +231,7 @@ struct Event: Codable, Identifiable {
     let creator: User?
     let participants: [User]?
     let admins: [User]?
-    let playlist: [Playlist]?
+    let playlist: Playlist?
     
     // MARK: - Mock Event Data:
       static let mockEvent: [Event] = [
@@ -288,7 +288,6 @@ struct Playlist: Codable, Identifiable {
     let visibility: VisibilityLevel
     let licenseType: LicenseType
     let coverImageUrl: String?
-    let isCollaborative: Bool
     let totalDuration: Int?
     let trackCount: Int
     let createdAt: String
@@ -318,7 +317,6 @@ struct Playlist: Codable, Identifiable {
         visibility: VisibilityLevel = .public,
         licenseType: LicenseType = .open,
         coverImageUrl: String? = nil,
-        isCollaborative: Bool = false,
         totalDuration: Int? = nil,
         trackCount: Int = 0,
         createdAt: String = "",
@@ -334,7 +332,6 @@ struct Playlist: Codable, Identifiable {
         self.visibility = visibility
         self.licenseType = licenseType
         self.coverImageUrl = coverImageUrl
-        self.isCollaborative = isCollaborative
         self.totalDuration = totalDuration
         self.trackCount = trackCount
         self.createdAt = createdAt

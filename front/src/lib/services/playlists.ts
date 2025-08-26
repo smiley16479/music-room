@@ -8,7 +8,6 @@ export interface Playlist {
   ownerId: string;
   ownerName: string;
   isPublic: boolean;
-  isCollaborative: boolean;
   licenseType: 'free' | 'invited_only';
   tracks: PlaylistTrack[];
   collaborators: Collaborator[];
@@ -43,7 +42,6 @@ export interface CreatePlaylistData {
   title: string;
   description?: string;
   isPublic: boolean;
-  isCollaborative: boolean;
   licenseType: 'free' | 'invited_only';
 }
 

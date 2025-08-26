@@ -9,10 +9,12 @@ import {
   JoinTable,
   JoinColumn,
   OneToMany,
+  OneToOne,
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
-import { Track } from 'src/music/entities/track.entity';
+import { Event } from 'src/event/entities/event.entity';
 import { PlaylistTrack } from './playlist-track.entity';
+import { Invitation } from 'src/invitation/entities/invitation.entity';
 
 export enum PlaylistVisibility {
   PUBLIC = 'public',
@@ -53,9 +55,6 @@ export class Playlist {
   @Column({ name: 'cover_image_url', nullable: true })
   coverImageUrl: string;
 
-  @Column({ name: 'is_collaborative', default: true })
-  isCollaborative: boolean;
-
   @Column({ name: 'total_duration', type: 'int', default: 0, comment: 'Duration in seconds' })
   totalDuration: number;
 
@@ -69,14 +68,14 @@ export class Playlist {
   updatedAt: Date;
 
   // Relations
-  @ManyToOne(() => User, (user) => user.createdPlaylists, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, (user) => user.createdPlaylists, { onDelete: 'CASCADE' }) // ok
   @JoinColumn({ name: 'creator_id' })
   creator: User;
 
   @Column({ name: 'creator_id' })
   creatorId: string;
 
-  @ManyToMany(() => User, (user) => user.collaboratedPlaylists)
+  @ManyToMany(() => User, (user) => user.collaboratedPlaylists) // ok
   @JoinTable({
     name: 'playlist_collaborators',
     joinColumn: { name: 'playlist_id', referencedColumnName: 'id' },
@@ -84,6 +83,16 @@ export class Playlist {
   })
   collaborators: User[];
 
-  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.playlist)
+  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.playlist) // ok
   playlistTracks: PlaylistTrack[];
+
+  @OneToOne(() => Event, (event)=> event.playlist, { nullable: true, onDelete: 'CASCADE' }) // ok
+  event: Event;
+
+  @Column({ name: 'event_id', nullable: true })
+  eventId: string;
+
+  @OneToMany(() => Invitation, (invitation) => invitation.playlist) // ok
+  invitations: Invitation[];
 }
+

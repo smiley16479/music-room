@@ -7,6 +7,8 @@ import {
   OneToMany,
 } from 'typeorm';
 import { Vote } from 'src/event/entities/vote.entity';
+import { Event } from 'src/event/entities/event.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
 @Entity('tracks')
 export class Track {
@@ -62,6 +64,13 @@ export class Track {
   updatedAt: Date;
 
   // Relations
-  @OneToMany(() => Vote, (vote) => vote.track)
+  @OneToMany(() => Vote, (vote) => vote.track) // ok
   votes: Vote[];
+
+  /** la track courante de l'event */
+  @OneToMany(() => Event, (event) => event.currentTrack) // ok
+  currentInEvents: Event[]; 
+
+  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.track, { cascade: true }) // ok
+  playlistTrack: PlaylistTrack[];
 }

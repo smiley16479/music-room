@@ -9,11 +9,13 @@ import {
   ManyToMany,
   JoinTable,
   JoinColumn,
+  OneToOne,
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
+import { Playlist } from 'src/playlist/entities/playlist.entity';
 
 export enum EventVisibility {
   PUBLIC = 'public',
@@ -42,6 +44,9 @@ export class Event {
 
   @Column({ type: 'text', nullable: true })
   description: string;
+
+  @Column()
+  playlistName: string;
 
   @Column({
     type: 'enum',
@@ -141,11 +146,19 @@ export class Event {
   })
   admins: User[];
 
-  @ManyToMany(() => Track)
-  @JoinTable({
-    name: 'event_playlist', // Simplement la liste des pistes de l'événement
-    joinColumn: { name: 'event_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'track_id', referencedColumnName: 'id' },
-  })
-  playlist: Track[];
+  // @ManyToMany(() => Track)
+  // @JoinTable({
+  //   name: 'event_playlist', // Simplement la liste des pistes de l'événement
+  //   joinColumn: { name: 'event_id', referencedColumnName: 'id' },
+  //   inverseJoinColumn: { name: 'track_id', referencedColumnName: 'id' },
+  // })
+  // playlist: Track[];
+
+  // Changé pour PlaylistTrack 
+  // @OneToMany(() => EventPlaylist, item => item.event, { cascade: true })
+  // playlistItems: EventPlaylist[];
+
+  @OneToOne(() => Playlist, (playlist) => playlist.event) // ok
+  @JoinColumn()
+  playlist: Playlist;
 }

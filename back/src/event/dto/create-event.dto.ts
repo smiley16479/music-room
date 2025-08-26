@@ -72,6 +72,14 @@ export class CreateEventDto {
   eventEndDate?: string;
 
   @IsOptional()
+  @IsString()
+  selectedPlaylistId?: string;
+
+  @IsOptional()
+  @IsString()
+  playlistName?: string;
+
+  @IsOptional()
   @IsNumber()
   @IsPositive()
   @Min(1)

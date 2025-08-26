@@ -76,7 +76,7 @@ export class Invitation {
   event?: Event;
 
   @Column({ name: 'event_id', nullable: true })
-  eventId: string;
+  eventId?: string;
 
   @ManyToOne(() => Playlist, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'playlist_id' })
