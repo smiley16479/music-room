@@ -776,7 +776,7 @@
 							<div>
 								<span class="font-medium">Collaborators:</span>
 								<span class="ml-1"
-									>{playlist.collaborators.length + 1}</span
+									>{playlist.collaborators.length}</span
 								>
 							</div>
 						{/if}

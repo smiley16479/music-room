@@ -13,21 +13,9 @@
 
 	const currentUser = $derived($authStore);
 
-	// Add the Creator to the collaborators list for display purposes
 	const collaboratorsWithOwner = $derived.by(() => {
-		if (!playlist || !playlist.creator) return [];
-		const creator = playlist.creator;
-		const collaborators = playlist.collaborators || [];
-		// Convert creator to collaborator format and ensure no duplicates
-		const creatorAsCollaborator: Collaborator = {
-			id: creator.id,
-			userId: creator.id,
-			displayName: creator.displayName,
-			avatarUrl: undefined,
-			email: undefined
-		};
-		const all = [creatorAsCollaborator, ...collaborators.filter((c: Collaborator) => c.userId !== creator.id)];
-		return all;
+		if (!playlist || !playlist.collaborators) return [];
+		return playlist.collaborators;
 	});
 
 	const collaboratorCount = $derived.by(() => {

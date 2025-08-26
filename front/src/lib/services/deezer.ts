@@ -20,10 +20,10 @@ export interface RawDeezerTrack {
   type: string;
 }
 
-// Our backend Track entity format (what we actually receive)
+// Backend Track entity format (what we actually receive from our backend)
 export interface DeezerTrack {
-  id: string;
-  deezerId: string;
+  id: string;                      // Track UUID from our database
+  deezerId: string;               // Deezer track ID
   title: string;
   artist: string;
   album: string;
@@ -34,7 +34,7 @@ export interface DeezerTrack {
   albumCoverMediumUrl: string;
   albumCoverBigUrl: string;
   deezerUrl: string;
-  genres?: string;
+  genres?: string[];
   releaseDate?: string;
   available: boolean;
   createdAt: string;

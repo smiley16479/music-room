@@ -11,16 +11,28 @@
   let isDragging = $state(false);
   let showVolumeControl = $state(false);
   
-  // Subscribe to stores using Svelte 5 runes
+  // Subscribe to stores using Svelte 5 runes - break down into specific reactive values to avoid cycles
   let playerState = $derived($musicPlayerStore);
   let user = $derived($authStore);
+  
+  // Create specific derived values to avoid reactivity cycles
+  let currentTrack = $derived(playerState.currentTrack);
+  let isPlaying = $derived(playerState.isPlaying);
+  let volume = $derived(playerState.volume);
+  let isMuted = $derived(playerState.isMuted);
+  let isLoading = $derived(playerState.isLoading);
+  let canControl = $derived(playerState.canControl);
+  let currentTime = $derived(playerState.currentTime);
+  let duration = $derived(playerState.duration);
+  let playlist = $derived(playerState.playlist);
+  let currentTrackIndex = $derived(playerState.currentTrackIndex);
   
   let currentAudioSrc = '';
   let loadTimeout: NodeJS.Timeout | null = null;
   
   // Update audio source when track changes using Svelte 5 effect
   $effect(() => {
-    if (audioElement && playerState.currentTrack?.previewUrl && currentAudioSrc !== playerState.currentTrack.previewUrl) {
+    if (audioElement && currentTrack?.previewUrl && currentAudioSrc !== currentTrack.previewUrl) {
       
       // Clear any existing timeout
       if (loadTimeout) {
@@ -28,12 +40,12 @@
         loadTimeout = null;
       }
       
-      currentAudioSrc = playerState.currentTrack.previewUrl;
+      currentAudioSrc = currentTrack.previewUrl;
       audioElement.src = currentAudioSrc;
       audioElement.load(); // Force reload of the audio
       
       // Auto-play if the player is in playing state
-      if (playerState.isPlaying) {
+      if (isPlaying) {
         // Small delay to ensure audio is loaded
         setTimeout(() => {
           audioElement?.play().catch(error => {
@@ -44,9 +56,8 @@
       
       // Set a timeout to clear loading state if audio doesn't load
       loadTimeout = setTimeout(() => {
-        if (playerState.isLoading) {
-          musicPlayerStore.setLoading(false);
-        }
+        // Use a more specific check to avoid reading playerState during effect
+        musicPlayerStore.setLoading(false);
         loadTimeout = null;
       }, 5000); // 5 second timeout
       
@@ -65,7 +76,7 @@
 
   // Handle the case where currentTrack is set but has no previewUrl using Svelte 5 effect
   $effect(() => {
-    if (playerState.currentTrack && !playerState.currentTrack.previewUrl) {
+    if (currentTrack && !currentTrack.previewUrl) {
       musicPlayerStore.setLoading(false);
     }
   });
@@ -73,11 +84,11 @@
   // Sync audio element play/pause state with store
   $effect(() => {
     if (audioElement && audioElement.src) {
-      if (playerState.isPlaying && audioElement.paused) {
+      if (isPlaying && audioElement.paused) {
         audioElement.play().catch(error => {
           musicPlayerStore.pause();
         });
-      } else if (!playerState.isPlaying && !audioElement.paused) {
+      } else if (!isPlaying && !audioElement.paused) {
         audioElement.pause();
       }
     }
@@ -90,7 +101,7 @@
   }
   
   function handleLoadedMetadata() {
-    if (audioElement && playerState.currentTrack) {
+    if (audioElement && currentTrack) {
       musicPlayerStore.setCurrentTime(0);
       musicPlayerStore.setLoading(false);
     }
@@ -104,11 +115,11 @@
   
   function handleEnded() {
     // Check if there's a next track and auto-advance
-    if (playerState.currentTrackIndex < playerState.playlist.length - 1) {
+    if (currentTrackIndex < playlist.length - 1) {
       musicPlayerStore.nextTrack();
       // Auto-play the next track after a brief delay
       setTimeout(() => {
-        if (audioElement && playerState.isPlaying) {
+        if (audioElement && isPlaying) {
           audioElement.play().catch(console.error);
         }
       }, 100);
@@ -143,7 +154,7 @@
   }
 
   async function handlePlayPause() {
-    if (!playerState.canControl) return;
+    if (!canControl) return;
     
     try {
       if (playerState.deviceId) {
@@ -227,7 +238,7 @@
   }
 
   async function handleNext() {
-    if (!playerState.canControl) return;
+    if (!canControl) return;
     
     try {
       if (playerState.deviceId) {
@@ -240,7 +251,7 @@
   }
   
   async function handlePrevious() {
-    if (!playerState.canControl) return;
+    if (!canControl) return;
     
     try {
       if (playerState.deviceId) {
@@ -253,7 +264,7 @@
   }
   
   async function handleVolumeChange(event: Event) {
-    if (!playerState.canControl) return;
+    if (!canControl) return;
     
     const target = event.target as HTMLInputElement;
     const volume = parseInt(target.value);
@@ -271,7 +282,7 @@
   }
   
   function handleSeek(event: Event) {
-    if (!playerState.canControl || !audioElement) return;
+    if (!canControl || !audioElement) return;
     
     const target = event.target as HTMLInputElement;
     const time = parseFloat(target.value);
@@ -297,7 +308,7 @@
   }
   
   function toggleMute() {
-    if (!playerState.canControl) return;
+    if (!canControl) return;
     
     musicPlayerStore.toggleMute();
     if (audioElement) {
@@ -345,7 +356,7 @@
   // Reactive updates using Svelte 5 effect
   $effect(() => {
     if (audioElement) {
-      audioElement.volume = (playerState.isMuted ? 0 : playerState.volume) / 100;
+      audioElement.volume = (isMuted ? 0 : volume) / 100;
     }
   });
   
@@ -389,7 +400,7 @@
 ></audio>
 
 <!-- Music Player UI -->
-{#if playerState.currentTrack || playerState.playlist.length > 0}
+{#if currentTrack || playlist.length > 0}
 <div class="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-secondary shadow-2xl z-50" style="min-height: 80px;">
   <div class="container mx-auto px-4 py-3">
     <!-- Progress Bar -->
@@ -398,18 +409,18 @@
         bind:this={progressSlider}
         type="range"
         min="0"
-        max={playerState.duration || 100}
-        value={playerState.currentTime}
+        max={duration || 100}
+        value={currentTime}
         oninput={handleSeek}
         onmousedown={handleProgressMouseDown}
         onmouseup={handleProgressMouseUp}
-        disabled={!playerState.canControl}
+        disabled={!canControl}
         class="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
-        class:disabled={!playerState.canControl}
+        class:disabled={!canControl}
       />
       <div class="flex justify-between text-xs text-gray-500 mt-1">
-        <span>{formatTime(playerState.currentTime)}</span>
-        <span>{formatTime(playerState.duration)}</span>
+        <span>{formatTime(currentTime)}</span>
+        <span>{formatTime(duration)}</span>
       </div>
     </div>
 
@@ -417,9 +428,9 @@
     <div class="flex items-center justify-between">
       <!-- Track Info -->
       <div class="flex items-center space-x-3 flex-1 min-w-0">
-        {#if playerState.currentTrack?.albumCoverUrl}
+        {#if currentTrack?.albumCoverUrl}
           <img 
-            src={playerState.currentTrack.albumCoverUrl} 
+            src={currentTrack.albumCoverUrl} 
             alt="Album cover"
             class="w-12 h-12 rounded-lg object-cover flex-shrink-0"
           />
@@ -433,10 +444,10 @@
         
         <div class="min-w-0 flex-1">
           <h4 class="text-sm font-medium text-gray-900 truncate">
-            {playerState.currentTrack?.title || 'Ready to play'}
+            {currentTrack?.title || 'Ready to play'}
           </h4>
           <p class="text-xs text-gray-500 truncate">
-            {playerState.currentTrack?.artist || `${playerState.playlist.length} tracks available`}
+            {currentTrack?.artist || `${playlist.length} tracks available`}
           </p>
         </div>
       </div>
@@ -445,7 +456,7 @@
       <div class="flex items-center space-x-3 mx-6">
         <button
           onclick={handlePrevious}
-          disabled={!playerState.canControl || playerState.currentTrackIndex <= 0}
+          disabled={!canControl || currentTrackIndex <= 0}
           class="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Previous track"
           aria-label="Previous track"
@@ -457,21 +468,21 @@
 
         <button
           onclick={handlePlayPause}
-          disabled={!playerState.canControl || playerState.isLoading || (!playerState.currentTrack && playerState.playlist.length === 0) || (!!audioElement?.error && !!playerState.currentTrack?.previewUrl)}
+          disabled={!canControl || isLoading || (!currentTrack && playlist.length === 0) || (!!audioElement?.error && !!currentTrack?.previewUrl)}
           class="p-3 bg-secondary text-white rounded-full hover:bg-secondary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title={
-            !playerState.currentTrack ? 'Select a track to play' :
-            audioElement?.error && playerState.currentTrack?.previewUrl ? 'Preview unavailable due to licensing restrictions' :
-            !playerState.currentTrack?.previewUrl ? 'No preview available for this track' :
-            playerState.isPlaying ? 'Pause preview' : 'Play preview'
+            !currentTrack ? 'Select a track to play' :
+            audioElement?.error && currentTrack?.previewUrl ? 'Preview unavailable due to licensing restrictions' :
+            !currentTrack?.previewUrl ? 'No preview available for this track' :
+            isPlaying ? 'Pause preview' : 'Play preview'
           }
         >
-          {#if playerState.isLoading}
+          {#if isLoading}
             <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-          {:else if playerState.isPlaying}
+          {:else if isPlaying}
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
@@ -484,7 +495,7 @@
 
         <button
           onclick={handleNext}
-          disabled={!playerState.canControl || playerState.currentTrackIndex >= playerState.playlist.length - 1}
+          disabled={!canControl || currentTrackIndex >= playlist.length - 1}
           class="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Next track"
           aria-label="Next track"
@@ -502,11 +513,11 @@
           class="p-2 rounded-full hover:bg-gray-100 transition-colors"
           title="Volume"
         >
-          {#if playerState.isMuted || playerState.volume === 0}
+          {#if isMuted || volume === 0}
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path>
             </svg>
-          {:else if playerState.volume < 30}
+          {:else if volume < 30}
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
             </svg>
@@ -524,18 +535,18 @@
               type="range"
               min="0"
               max="100"
-              value={playerState.volume}
+              value={volume}
               oninput={handleVolumeChange}
-              disabled={!playerState.canControl}
+              disabled={!canControl}
               class="w-20 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
-              class:disabled={!playerState.canControl}
+              class:disabled={!canControl}
             />
-            <span class="text-xs text-gray-500 w-8">{playerState.volume}%</span>
+            <span class="text-xs text-gray-500 w-8">{volume}%</span>
           </div>
         {/if}
         
         <!-- Permission indicator -->
-        {#if !playerState.canControl}
+        {#if !canControl}
           <div class="flex items-center space-x-1 text-xs text-gray-500">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m2-5V9m0 0V7m0 2H10m2 0h2"></path>

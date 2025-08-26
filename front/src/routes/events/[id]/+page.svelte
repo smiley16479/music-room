@@ -151,7 +151,7 @@
 
 	// Sorted playlist with voting restrictions
 	function sortedPlaylistTracks() {
-		if (!event?.playlist) return [];
+		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
 
 		return [...event.playlist].sort((a: Track, b: Track) => {
 			// Currently playing track stays at top
@@ -200,6 +200,8 @@
 		if (data?.event) {
 			event = {
 				...data.event,
+				// Ensure playlist is always an array
+				playlist: Array.isArray(data.event.playlist) ? data.event.playlist : [],
 				// Start with empty participants - they will be populated via socket events
 				participants: [],
 			};
@@ -364,24 +366,35 @@
 
 	function handleEventUpdated(data: { event: Event }) {
 		if (event && data.event.id === event.id) {
-			event = { ...event, ...data.event };
+			const updatedEvent = {
+				...event,
+				...data.event,
+				// Ensure playlist remains an array
+				playlist: Array.isArray(data.event.playlist) 
+					? data.event.playlist 
+					: (Array.isArray(event.playlist) ? event.playlist : [])
+			};
+			event = updatedEvent;
 		}
 	}
 
 	function handleTrackAdded(data: { track: Track }) {
 		if (event) {
+			if (!event.playlist || !Array.isArray(event.playlist)) {
+				event.playlist = [];
+			}
 			event.playlist.push(data.track);
 		}
 	}
 	function handleTrackRemoved(data: { trackId: string }) {
-		if (event) {
+		if (event && event.playlist && Array.isArray(event.playlist)) {
 			event.playlist = event.playlist.filter(
 				(t) => t.id !== data.trackId,
 			);
 		}
 	}
 	function handleTracksReordered(data: { trackOrder: string[] }) {
-		if (event && event.playlist) {
+		if (event && event.playlist && Array.isArray(event.playlist)) {
 			const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
 			event.playlist = data.trackOrder
 				.map((id) => trackMap.get(id))
@@ -423,7 +436,7 @@
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
 			// Update vote counts in playlist
-			if (event.playlist) {
+			if (event.playlist && Array.isArray(event.playlist)) {
 				event.playlist = event.playlist.map((track) => {
 					const result = votingResults.find(
 						(r) => r.track.id === track.id,
@@ -445,7 +458,7 @@
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
 			// Update vote counts in playlist
-			if (event.playlist) {
+			if (event.playlist && Array.isArray(event.playlist)) {
 				event.playlist = event.playlist.map((track) => {
 					const result = votingResults.find(
 						(r) => r.track.id === track.id,
@@ -821,7 +834,6 @@
 		}
 	}
 
-	// Music control functions - These will be replaced by the music player service
 
 	async function pauseMusic() {
 		if (!isAdmin || !eventId) return;
@@ -922,26 +934,6 @@
 		return colors[Math.abs(hash) % colors.length];
 	}
 
-	function getAvatarColorSecondary(name: string): string {
-		const colors = [
-			"#FF5252",
-			"#26A69A",
-			"#2196F3",
-			"#66BB6A",
-			"#FFD54F",
-			"#BA68C8",
-			"#4DB6AC",
-			"#FDD835",
-			"#AB47BC",
-			"#42A5F5",
-		];
-		let hash = 0;
-		for (let i = 0; i < name.length; i++) {
-			hash = name.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		return colors[Math.abs(hash) % colors.length];
-	}
-
 	function getAvatarLetter(name: string): string {
 		return name.charAt(0).toUpperCase();
 	}
@@ -953,35 +945,11 @@
 		return "Participant";
 	}
 
-	function getUserBadgeClass(role: string): string {
-		switch (role) {
-			case "Owner":
-				return "bg-yellow-100 text-yellow-800";
-			case "Admin":
-				return "bg-purple-100 text-purple-800";
-			default:
-				return "bg-gray-100 text-gray-600";
-		}
-	}
-
-	function canRemoveAdmin(userId: string): boolean {
-		return Boolean(
-			(isCreator || isAdmin) &&
-				userId !== user?.id &&
-				getUserRole(userId) === "Admin",
-		);
-	}
-
-	function getTrackStatus(track: Track): "current" | "played" | "upcoming" {
-		if (currentPlayingTrack === track.id) return "current";
-		return "upcoming";
-	}
-
 	const canEdit = $derived(isAdmin);
 
 	// Filter tracks based on search query
 	function filteredTracks() {
-		if (!event?.playlist) return [];
+		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
 		if (!searchQuery.trim()) return sortedPlaylistTracks();
 
 		const query = searchQuery.toLowerCase().trim();
@@ -1025,9 +993,10 @@
 		if (!event || !user || isMusicPlayerInitialized) return;
 
 		try {
-			if (!event.playlist || event.playlist.length === 0) {
+			if (!event.playlist || !Array.isArray(event.playlist) || event.playlist.length === 0) {
 				console.warn(
-					"Cannot initialize music player: event has no tracks",
+					"Cannot initialize music player: event has no tracks or playlist is not an array",
+					{ playlist: event.playlist }
 				);
 				return;
 			}
@@ -1121,12 +1090,14 @@
 			// Check if trackIndex is valid
 			if (
 				!event?.playlist ||
+				!Array.isArray(event.playlist) ||
 				trackIndex >= event.playlist.length ||
 				trackIndex < 0
 			) {
 				console.error("Invalid track index:", {
 					trackIndex,
 					playlistLength: event?.playlist?.length,
+					isArray: Array.isArray(event?.playlist),
 				});
 				error = `Cannot play track: invalid track position (${trackIndex + 1})`;
 				setTimeout(() => (error = ""), 3000);
@@ -1148,15 +1119,12 @@
 		if (!user || !eventId) return;
 
 		try {
-			// Find the track in the event playlist
 			const track = event?.playlist?.find((t) => t.id === trackId);
 			if (!track) {
 				error = "Track not found";
 				return;
 			}
 
-			// Remove track from event (you may need to implement this API call)
-			// For now, we'll just show an error that this feature isn't implemented
 			error = "Track removal from events is not yet implemented";
 			setTimeout(() => (error = ""), 3000);
 		} catch (err) {

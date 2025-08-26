@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { deezerService, type DeezerTrack } from '$lib/services/deezer';
 	import { playlistsService } from '$lib/services/playlists';
+	import { addTrackToEvent } from '$lib/services/events';
 	import { authStore } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 
@@ -147,7 +148,7 @@
 
 		try {
 			const trackData = {
-				deezerId: deezerTrack.id,
+				deezerId: deezerTrack.deezerId,
 				title: deezerTrack.title,
 				artist: deezerTrack.artist,
 				album: deezerTrack.album,
@@ -156,8 +157,14 @@
 				duration: deezerTrack.duration
 			};
 
-			// Add to playlist
-			await playlistsService.addTrackToPlaylist(playlistId, trackData);
+			// Add to event or playlist based on which ID was provided
+			if (eventId) {
+				await addTrackToEvent(eventId, trackData);
+			} else if (playlistId) {
+				await playlistsService.addTrackToPlaylist(playlistId, trackData);
+			} else {
+				throw new Error('No event or playlist ID provided');
+			}
 			
 			onTrackAdded();
 		} catch (error) {

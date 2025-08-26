@@ -21,6 +21,17 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Event, Vote, Track, User, Invitation, Playlist]),
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: {
+          expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     UserModule,
     EmailModule,
     PlaylistModule
@@ -29,4 +40,4 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
   providers: [EventService, EventGateway],
   exports: [EventService],
 })
-export class EventModule {}
+export class EventModule { }
