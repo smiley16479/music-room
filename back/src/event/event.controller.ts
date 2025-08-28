@@ -41,8 +41,6 @@ export class EventController {
   @ApiBody({ type: CreateEventDto })
   async create(@Body() createEventDto: CreateEventDto, @CurrentUser() user: User) {
 
-    console.log('Creating event with DTO:', createEventDto);
-
     const event = await this.eventService.create(createEventDto, user.id);
     return {
       success: true,
@@ -96,8 +94,6 @@ export class EventController {
     const { page, limit, skip } = paginationDto;
     // Récupère les events avec les admins
     const events = await this.eventService.getEventsUserCanInviteWithAdmins(user.id);
-
-    console.log("events", events);
     
     return {
       success: true,

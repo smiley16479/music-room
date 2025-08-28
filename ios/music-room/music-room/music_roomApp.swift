@@ -16,6 +16,7 @@ struct MusicRoomApp: App {
     
     init() {
         AppConfig.printConfiguration()
+        // _ = SocketService.shared // Initialize the socket service
     }
     
     var body: some Scene {
@@ -23,6 +24,7 @@ struct MusicRoomApp: App {
             ContentView()
                 .environmentObject(themeManager)
                 .environmentObject(localizationManager)
+                // .environmentObject(SocketService.shared)
                 .environmentObject(authenticationManager)
                 .preferredColorScheme(themeManager.colorScheme)
         }

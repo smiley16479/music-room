@@ -19,7 +19,8 @@ class EventsSocketService: NamespaceSocketService {
     private init() {
         let url = URL(string: "http://localhost:3000/events")!
         let token = KeychainService.shared.getAccessToken() ?? ""
-        manager = SocketManager(socketURL: url, config: [.log(true), .compress, .extraHeaders(["Authorization": "Bearer \(token)"])])
+        print("🚀 Initializing EventsSocketService with token: \(token)")
+        manager = SocketManager(socketURL: url, config: [.log(true), .compress, .connectParams(["token": token]), .extraHeaders(["Authorization": "Bearer \(token)"])])
         socket = manager.socket(forNamespace: "/events")
     }
 

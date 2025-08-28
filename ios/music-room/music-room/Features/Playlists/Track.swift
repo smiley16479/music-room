@@ -9,11 +9,17 @@ class PlaylistViewModel {
     var tracks: [Track] = []
     var currentTrackId: String?
     var proposedTracks: [Track] = [] // Tracks proposés par les utilisateurs
-//    @State private var errorMessage: String?
+    // @State private var errorMessage: String?
+    // private let socketService = SocketService.shared
+    private let eventsSocketService = EventsSocketService.shared
     
     init(playlist: Playlist) {
         self.playlist = playlist
         loadMockData()
+        eventsSocketService.connect()
+    }
+    
+    deinit {
     }
 
     static var mockPlaylist: Playlist {
@@ -81,15 +87,15 @@ class PlaylistViewModel {
                 tracks[index].dislikes = (tracks[index].dislikes ?? 0) + 1
             }
             sortUpcomingTracks()
+            
+            // Send vote via socket
+            Task {[weak self] in
+                guard let self = self else { return }
+//                await socketService.voteTrack(trackId: id, isLike: isLike, playlistId: playlist.id)
+            }
         }
 
         print("Après vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
-      // Non envoyé par http:
-      // EventsSocketService.shared.emit("vote-track", [
-      //   "eventId": myEventId,
-      //   "trackId": id,
-      //   "type": isLike ? "like" : "dislike"
-      // ])
     }
     
     func addTrackToPlaylist(_ track: Track) async {
@@ -119,6 +125,9 @@ class PlaylistViewModel {
               await MainActor.run {
                   tracks.append(playListTrack.track)
                   sortUpcomingTracks()
+                  
+                  // Send track addition via socket
+//                  socketService.addTrack(trackId: playListTrack.track.id, playlistId: playlist.id)
 //                  isSaving = false
 //                  dismiss()
               }
@@ -169,8 +178,125 @@ print("upcomingTracks before sort:", upcomingTracks.map { $0.title })
     var currentTrack: Track? {
         tracks.first(where: { $0.id == currentTrackId })
     }
+    
+/*     // MARK: - Socket Management
+    private func setupSocketListeners() {
+        Task { @MainActor in
+            socketService.setupTrackListeners(
+                onTrackAdded: { [weak self] data in
+                    self?.handleTrackAdded(data)
+                },
+                onTrackRemoved: { [weak self] data in
+                    self?.handleTrackRemoved(data)
+                },
+                onTrackVoted: { [weak self] data in
+                    self?.handleTrackVoted(data)
+                },
+                onCurrentTrackChanged: { [weak self] data in
+                    self?.handleCurrentTrackChanged(data)
+                }
+            )
+            
+            socketService.setupPlaylistListeners { [weak self] data in
+                self?.handlePlaylistUpdated(data)
+            }
+        }
+    }
+    
+    private func joinPlaylistRoom() {
+        Task { @MainActor in
+            socketService.joinRoom("playlist-\(playlist.id)")
+        }
+    }
+    
+    private func leavePlaylistRoom() {
+            socketService.leaveRoom()
+    }
+    
+    // MARK: - Socket Event Handlers
+    private func handleTrackAdded(_ data: [String: Any]) {
+        guard let trackData = data["track"] as? [String: Any],
+              let trackId = trackData["id"] as? String,
+              let title = trackData["title"] as? String,
+              let artist = trackData["artist"] as? String,
+              let duration = trackData["duration"] as? Int else { return }
+        
+        let newTrack = Track(
+            id: trackId,
+            title: title,
+            artist: artist,
+            duration: duration,
+            previewUrl: trackData["previewUrl"] as? String,
+            albumCoverUrl: trackData["albumCoverUrl"] as? String,
+            likes: 0,
+            dislikes: 0,
+            hasPlayed: false,
+            isCurrentlyPlaying: false
+        )
+        
+        DispatchQueue.main.async {
+            self.tracks.append(newTrack)
+            self.sortUpcomingTracks()
+        }
+    }
+    
+    private func handleTrackRemoved(_ data: [String: Any]) {
+        guard let trackId = data["trackId"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            self.tracks.removeAll { $0.id == trackId }
+        }
+    }
+    
+    private func handleTrackVoted(_ data: [String: Any]) {
+        guard let trackId = data["trackId"] as? String,
+              let voteType = data["voteType"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            if let index = self.tracks.firstIndex(where: { $0.id == trackId }) {
+                if voteType == "like" {
+                    self.tracks[index].likes = (self.tracks[index].likes ?? 0) + 1
+                } else {
+                    self.tracks[index].dislikes = (self.tracks[index].dislikes ?? 0) + 1
+                }
+                self.sortUpcomingTracks()
+            }
+        }
+    }
+    
+    private func handleCurrentTrackChanged(_ data: [String: Any]) {
+        guard let trackId = data["trackId"] as? String else { return }
+        
+        DispatchQueue.main.async {
+            self.currentTrackId = trackId
+            self.updateTrackStates(currentTrackId: trackId)
+        }
+    }
+    
+    private func handlePlaylistUpdated(_ data: [String: Any]) {
+        // Handle playlist metadata updates if needed
+        print("Playlist updated: \(data)")
+    }
+    
+    // MARK: - Track State Management
+    private func updateTrackStates(currentTrackId: String) {
+        guard let currentIndex = tracks.firstIndex(where: { $0.id == currentTrackId }) else { return }
+        
+        for i in tracks.indices {
+            if i < currentIndex {
+                tracks[i].hasPlayed = true
+                tracks[i].isCurrentlyPlaying = false
+            } else if i == currentIndex {
+                tracks[i].hasPlayed = false
+                tracks[i].isCurrentlyPlaying = true
+            } else {
+                tracks[i].hasPlayed = false
+                tracks[i].isCurrentlyPlaying = false
+            }
+        }
+    }
+ */
 }
-
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
     @StateObject private var deezerService = DeezerService()
@@ -430,6 +556,11 @@ struct PlaylistDetailsView: View {
                               && (playlist.name.hasPrefix("[Event]"))
                     )
                     .listRowInsets(EdgeInsets())
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Action pour jouer la musique
+                        viewModel.currentTrackId = track.id
+                    }
                 }
                 .onDelete { indexSet in
                     for index in indexSet {
@@ -449,6 +580,11 @@ struct PlaylistDetailsView: View {
                               && (playlist.name.hasPrefix("[Event]"))
                     )
                     .listRowInsets(EdgeInsets())
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Action pour jouer la musique
+                        viewModel.currentTrackId = track.id
+                    }
                 }
             }
         }
@@ -531,6 +667,11 @@ struct AudioPlayerView: View {
        .onAppear {
            audioPlayer?.volume = volume
        }
+       .onChange(of: viewModel.currentTrackId) { old, newId in
+          if let id = newId, let track = viewModel.tracks.first(where: { $0.id == id }) {
+              togglePlayPause(for: track)
+          }
+      }
    }
 
   //  private func togglePlayPause(for track: Track) {
@@ -554,6 +695,21 @@ struct AudioPlayerView: View {
 
     // Vérifie si le player joue déjà ce morceau
     // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
+
+    // Met à jour l'index courant
+    if let idx = viewModel.tracks.firstIndex(where: { $0.id == track.id }) {
+        currentTrackIndex = idx
+    }
+
+    let tracks = viewModel.tracks
+    if (!tracks.isEmpty && currentTrackIndex == 0) {
+        for i in tracks.indices {
+            viewModel.tracks[i].hasPlayed = false
+            viewModel.tracks[i].isCurrentlyPlaying = false
+        }
+        viewModel.tracks[0].hasPlayed = false
+        viewModel.tracks[0].isCurrentlyPlaying = true
+    }
 
     if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
        currentAsset.url == url {
@@ -613,6 +769,9 @@ struct AudioPlayerView: View {
         for i in tracks.indices {
             viewModel.tracks[i].isCurrentlyPlaying = (tracks[i].id == track.id)
         }
+        
+        // Send current track change via socket
+//        SocketService.shared.updateCurrentTrack(trackId: track.id, playlistId: viewModel.playlist.id)
    }
 }
 
