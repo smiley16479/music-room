@@ -103,7 +103,7 @@
       </div>
     {/if}
     
-    <form class="mt-8 space-y-6" on:submit={handleSubmit}>
+    <form class="mt-8 space-y-6" onsubmit={(e) => { e.preventDefault(); handleSubmit(e); }}>
       <div class="space-y-4 rounded-md">
         <div>
           <label for="display-name" class="sr-only">Username</label>

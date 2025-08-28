@@ -3,20 +3,21 @@ import { playlistsService } from '$lib/services/playlists';
 
 export const load: PageLoad = async ({ url, fetch }) => {
   try {
-    const filter = url.searchParams.get('filter') || 'all';
+    const tab = url.searchParams.get('tab') || 'all';
     
-    // Only fetch public data during SSR to avoid localStorage issues
-    let publicFilter: boolean | undefined = undefined;
-    
-    if (filter === 'public') publicFilter = true;
-    if (filter === 'private') publicFilter = false;
-    // Skip 'mine' filter during SSR since we can't access user data
-    
-    const playlists = await playlistsService.getPlaylists(publicFilter, undefined, fetch);
-    
-    return {
-      playlists
-    };
+    // Only fetch public data during SSR for the "all" tab
+    // For "mine" tab, we'll load the data client-side since we need user authentication
+    if (tab === 'all') {
+      const playlists = await playlistsService.getPlaylists(undefined, undefined, fetch);
+      return {
+        playlists
+      };
+    } else {
+      // Return empty array for "mine" tab - will be loaded client-side
+      return {
+        playlists: []
+      };
+    }
   } catch (error) {
     console.error('Failed to load playlists:', error);
     return {

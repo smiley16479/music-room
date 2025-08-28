@@ -81,8 +81,7 @@ export class CreateEventDto {
 
   @IsOptional()
   @IsNumber()
-  @IsPositive()
-  @Min(1)
+  @Min(0)
   @Max(10)
   maxVotesPerUser?: number;
 }

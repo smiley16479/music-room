@@ -11,6 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { UseGuards, Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 import { Device, DeviceStatus } from 'src/device/entities/device.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -47,6 +48,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   constructor(
     private jwtService: JwtService,
+    private configService: ConfigService,
     @Inject(forwardRef(() => DeviceService))
     private deviceService: DeviceService,
   ) {}
@@ -67,7 +69,9 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       }
 
       // Verify JWT token
-      const payload = this.jwtService.verify(token);
+      const payload = this.jwtService.verify(token, { 
+        secret: this.configService.get<string>('JWT_SECRET') 
+      });
       client.userId = payload.sub;
 
       this.logger.log(`Client connected: ${client.id} (User: ${client.userId})`);

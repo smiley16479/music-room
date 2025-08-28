@@ -11,6 +11,7 @@
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     const refreshToken = params.get('refresh');
+    const userParam = params.get('user');
     const errorMsg = params.get('error');
     
     if (errorMsg) {
@@ -25,8 +26,33 @@
         localStorage.setItem('accessToken', token);
         localStorage.setItem('refreshToken', refreshToken);
         
-        // Refresh the auth store with the new user data
-        await authStore.refreshUser();
+        // If user data is provided in URL, use it immediately
+        if (userParam) {
+          try {
+            const userData = JSON.parse(decodeURIComponent(userParam));
+            localStorage.setItem('user', JSON.stringify(userData));
+            authStore.set(userData);
+          } catch (parseError) {
+            console.warn('Failed to parse user data from URL:', parseError);
+          }
+        }
+        
+        // Try to refresh the auth store with the latest user data from server
+        // but don't override if it fails and we already have user data
+        try {
+          await authStore.refreshUser();
+        } catch (refreshError) {
+          console.warn('Failed to refresh user data from server, keeping existing data:', refreshError);
+          // If refresh fails but we have user data from URL, keep it
+          if (userParam) {
+            try {
+              const userData = JSON.parse(decodeURIComponent(userParam));
+              authStore.set(userData);
+            } catch (parseError) {
+              console.warn('Failed to restore user data from URL after refresh failure:', parseError);
+            }
+          }
+        }
         
         // Redirect to home page
         setTimeout(() => {

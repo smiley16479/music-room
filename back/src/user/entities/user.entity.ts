@@ -29,38 +29,38 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   password: string;
 
-  @Column({ name: 'google_id', nullable: true })
-  googleId: string;
+  @Column({ name: 'google_id', type: 'varchar', nullable: true })
+  googleId: string | null;
 
-  @Column({ name: 'facebook_id', nullable: true })
-  facebookId: string;
+  @Column({ name: 'facebook_id', type: 'varchar', nullable: true })
+  facebookId: string | null;
 
   @Column({ name: 'email_verified', default: false })
   emailVerified: boolean;
 
-  @Column({ name: 'reset_password_token', nullable: true })
+  @Column({ name: 'reset_password_token', type: 'varchar', nullable: true })
   resetPasswordToken: string;
 
   @Column({ name: 'reset_password_expires', type: 'timestamp', nullable: true })
   resetPasswordExpires: Date;
 
   // Profile Information
-  @Column({ name: 'display_name', nullable: true })
+  @Column({ name: 'display_name', type: 'varchar', nullable: true })
   displayName: string;
 
-  @Column({ name: 'avatar_url', nullable: true })
+  @Column({ name: 'avatar_url', type: 'text', nullable: true })
   avatarUrl: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   bio: string;
 
   @Column({ name: 'birth_date', type: 'date', nullable: true })
   birthDate: Date;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   location: string;
 
   // Privacy Settings

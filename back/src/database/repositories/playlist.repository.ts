@@ -54,33 +54,20 @@ export class PlaylistRepository {
     await this.playlistRepository.delete(id);
   }
 
-  async addTrack(
-    playlistId: string,
-    trackId: string,
-    addedById: string,
-    position?: number,
-  ): Promise<PlaylistTrack> {
-    if (position === undefined) {
-      const lastTrack = await this.playlistTrackRepository.findOne({
-        where: { playlistId },
-        order: { position: 'DESC' },
-      });
-      position = (lastTrack?.position || 0) + 1;
+  async addTrack(playlistId: string, trackData: { trackId: string; addedById: string; playlistId: string }): Promise<PlaylistTrack> {
+    // Validate all required fields before creating
+    if (!trackData.playlistId || !trackData.trackId || !trackData.addedById) {
+      throw new Error('Missing required fields for playlist track');
     }
 
     const playlistTrack = this.playlistTrackRepository.create({
-      playlistId,
-      trackId,
-      addedById,
-      position,
+      playlist: { id: playlistId },
+      trackId: trackData.trackId,
+      addedBy: { id: trackData.addedById },
+      addedAt: new Date(),
     });
 
-    const saved = await this.playlistTrackRepository.save(playlistTrack);
-    
-    // Update playlist stats
-    await this.updatePlaylistStats(playlistId);
-    
-    return saved;
+    return await this.playlistTrackRepository.save(playlistTrack);
   }
 
   async removeTrack(playlistId: string, trackId: string): Promise<void> {

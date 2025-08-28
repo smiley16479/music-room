@@ -22,6 +22,7 @@ import { LoginDto } from './dto/login.dto';
 import { RequestPasswordResetDto, ResetPasswordDto } from 'src/user/dto/reset-password.dto';
 import { UserService } from 'src/user/user.service';
 import { EmailService } from 'src/email/email.service';
+import { generateGenericAvatar, getFacebookProfilePictureUrl } from 'src/common/utils/avatar.utils';
 
 export interface JwtPayload {
   sub: string;
@@ -58,10 +59,14 @@ export class AuthService {
       throw new ConflictException('User with this email already exists');
     }
 
+    // Generate generic avatar for email registration
+    const avatarUrl = generateGenericAvatar(userData.displayName || email);
+
     // Create user (password hashing is handled in UserService)
     const user = await this.userService.create({
       email,
       password,
+      avatarUrl,
       ...userData,
     });
 
@@ -258,12 +263,14 @@ private decodeJWT(token: string): any {
           emailVerified: true,
         });
       } else {
-        // Create new user
+        // Create new user with Google profile picture or generic avatar
+        const avatarUrl = googleUser.picture || generateGenericAvatar(googleUser.name || googleUser.email);
+        
         user = await this.userService.create({
           email: googleUser.email,
           googleId: googleUser.id,
           displayName: googleUser.name,
-          avatarUrl: googleUser.picture,
+          avatarUrl,
           emailVerified: true,
         });
       }
@@ -319,12 +326,16 @@ async verifyGoogleIdToken(idToken: string) {
           emailVerified: true,
         });
       } else {
-        // Create new user
+        // Create new user with Facebook profile picture or generic avatar
+        const avatarUrl = facebookUser.picture?.data?.url || 
+                         getFacebookProfilePictureUrl(facebookUser.id) ||
+                         generateGenericAvatar(facebookUser.name || facebookUser.email);
+        
         user = await this.userService.create({
           email: facebookUser.email,
           facebookId: facebookUser.id,
           displayName: facebookUser.name,
-          avatarUrl: facebookUser.picture?.data?.url,
+          avatarUrl,
           emailVerified: true,
         });
       }
@@ -368,7 +379,6 @@ async verifyGoogleIdToken(idToken: string) {
       }
 
       const accessToken = await this.generateAccessToken(user);
-
       return { accessToken };
     } catch (error) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -456,7 +466,18 @@ async verifyGoogleIdToken(idToken: string) {
   }
 
   async validateJwtPayload(payload: JwtPayload): Promise<User | null> {
-    return this.userService.findById(payload.sub);
+    
+    try {
+      const user = await this.userService.findById(payload.sub);
+      return user;
+    } catch (error) {
+      // If user is not found, return null instead of throwing
+      if (error instanceof NotFoundException) {
+        return null;
+      }
+      // Re-throw other types of errors
+      throw error;
+    }
   }
 
   private async generateTokens(user: User): Promise<{ accessToken: string; refreshToken: string }> {
@@ -475,7 +496,11 @@ async verifyGoogleIdToken(idToken: string) {
       type: 'access',
     };
 
-    return this.jwtService.signAsync(payload);
+    this.logger.debug('Generating access token for user:', user.id);
+    const token = await this.jwtService.signAsync(payload);
+    this.logger.debug('Access token generated successfully');
+    
+    return token;
   }
 
   private async generateRefreshToken(user: User): Promise<string> {
@@ -493,6 +518,91 @@ async verifyGoogleIdToken(idToken: string) {
 
   private sanitizeUser(user: User): Partial<User> {
     const { password, resetPasswordToken, resetPasswordExpires, ...sanitizedUser } = user;
-    return sanitizedUser;
+    
+    // Add connectedAccounts property for frontend compatibility
+    return {
+      ...sanitizedUser,
+      connectedAccounts: {
+        google: !!user.googleId,
+        facebook: !!user.facebookId,
+      }
+    } as any;
+  }
+
+  // OAuth profile-based linking methods (for popup OAuth flow)
+  async linkGoogleProfile(currentUser: User, googleProfile: any): Promise<void> {
+    try {
+      // Check if the current user already has a Google account linked
+      if (currentUser.googleId) {
+        throw new ConflictException('A Google account is already linked to this profile');
+      }
+      
+      // Check if this Google account is already linked to another user
+      const existingGoogleUser = await this.userService.findByGoogleId(googleProfile.id);
+      if (existingGoogleUser && existingGoogleUser.id !== currentUser.id) {
+        throw new ConflictException('This Google account is already linked to another user');
+      }
+      
+      // Link the Google account
+      await this.userService.update(currentUser.id, { googleId: googleProfile.id });
+      
+    } catch (error) {
+      if (error.name === 'ConflictException') {
+        throw error;
+      }
+      throw new BadRequestException('Failed to link Google account');
+    }
+  }
+
+  async linkFacebookProfile(currentUser: User, facebookProfile: any): Promise<void> {
+    try {
+      // Check if the current user already has a Facebook account linked
+      if (currentUser.facebookId) {
+        throw new ConflictException('A Facebook account is already linked to this profile');
+      }
+      
+      // Check if this Facebook account is already linked to another user
+      const existingFacebookUser = await this.userService.findByFacebookId(facebookProfile.id);
+      if (existingFacebookUser && existingFacebookUser.id !== currentUser.id) {
+        throw new ConflictException('This Facebook account is already linked to another user');
+      }
+      
+      // Link the Facebook account
+      await this.userService.update(currentUser.id, { facebookId: facebookProfile.id });
+      
+    } catch (error) {
+      if (error.name === 'ConflictException') {
+        throw error;
+      }
+      throw new BadRequestException('Failed to link Facebook account');
+    }
+  }
+
+  async unlinkGoogleAccount(currentUser: User): Promise<void> {
+    if (!currentUser.googleId) {
+      throw new BadRequestException('No Google account is linked to this profile');
+    }
+    
+    // Ensure user has a password or another social account to prevent lockout
+    if (!currentUser.password && !currentUser.facebookId) {
+      throw new BadRequestException('Cannot unlink Google account: Please set a password or link another social account first to ensure you can still access your account');
+    }
+    
+    // Directly update the database to set googleId to null
+    await this.userService.unlinkGoogleAccount(currentUser.id);
+  }
+
+  async unlinkFacebookAccount(currentUser: User): Promise<void> {
+    if (!currentUser.facebookId) {
+      throw new BadRequestException('No Facebook account is linked to this profile');
+    }
+    
+    // Ensure user has a password or another social account to prevent lockout
+    if (!currentUser.password && !currentUser.googleId) {
+      throw new BadRequestException('Cannot unlink Facebook account: Please set a password or link another social account first to ensure you can still access your account');
+    }
+    
+    // Directly update the database to set facebookId to null
+    await this.userService.unlinkFacebookAccount(currentUser.id);
   }
 }

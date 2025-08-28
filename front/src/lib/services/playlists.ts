@@ -1,48 +1,73 @@
 import { config } from '$lib/config';
 import { authService } from './auth';
+import { socketService } from './socket';
 
 export interface Playlist {
   id: string;
-  title: string;
+  name: string;
   description?: string;
-  ownerId: string;
-  ownerName: string;
-  isPublic: boolean;
-  licenseType: 'free' | 'invited_only';
-  tracks: PlaylistTrack[];
+  creatorId: string;
+  creator?: { id: string; displayName: string };
+  visibility: 'public' | 'private';
+  licenseType: 'open' | 'invited';
+  trackCount: number;
+  totalDuration: number;
+  tracks?: PlaylistTrack[];
   collaborators: Collaborator[];
-  thumbnailUrl?: string;
+  coverImageUrl?: string;
+  eventId?: string; // If set, this playlist belongs to an event
   createdAt: string;
   updatedAt: string;
 }
 
 export interface PlaylistTrack {
   id: string;
-  title: string;
-  artist: string;
-  album?: string;
-  duration?: number;
-  thumbnailUrl?: string;
-  streamUrl?: string;
-  addedBy: string;
-  addedByName: string;
-  addedAt: string;
   position: number;
+  addedAt: string;
+  createdAt: string;
+  playlistId: string;
+  trackId: string;
+  addedById: string;
+  track: {
+    id: string;
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string;
+    duration: number;
+    previewUrl: string;
+    albumCoverUrl: string;
+    albumCoverSmallUrl: string;
+    albumCoverMediumUrl: string;
+    albumCoverBigUrl: string;
+    deezerUrl: string;
+    genres?: string;
+    releaseDate?: string;
+    available: boolean;
+    createdAt: string;
+    updatedAt: string;
+  };
+  addedBy: {
+    id: string;
+    displayName: string;
+    avatarUrl?: string;
+    email?: string;
+  };
 }
 
 export interface Collaborator {
+  id: string;
   userId: string;
   displayName: string;
-  profilePicture?: string;
-  role: 'owner' | 'editor' | 'viewer';
-  addedAt: string;
+  avatarUrl?: string;
+  email?: string;
 }
 
 export interface CreatePlaylistData {
-  title: string;
+  name: string;
   description?: string;
-  isPublic: boolean;
-  licenseType: 'free' | 'invited_only';
+  visibility: 'public' | 'private';
+  licenseType: 'open' | 'invited';
 }
 
 export const playlistsService = {
@@ -78,6 +103,21 @@ export const playlistsService = {
 
     if (!response.ok) {
       throw new Error('Failed to fetch playlist');
+    }
+
+    const result = await response.json();
+    return result.data;
+  },
+
+  async getPlaylistTracks(playlistId: string): Promise<PlaylistTrack[]> {
+    const token = authService.getAuthToken();
+    
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/tracks`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch playlist tracks');
     }
 
     const result = await response.json();
@@ -145,7 +185,16 @@ export const playlistsService = {
     }
   },
 
-  async addTrackToPlaylist(playlistId: string, track: Omit<PlaylistTrack, 'id' | 'addedBy' | 'addedByName' | 'addedAt' | 'position'>): Promise<PlaylistTrack> {
+  async addTrackToPlaylist(playlistId: string, data: {
+    deezerId: string;
+    title: string;
+    artist: string;
+    album: string;
+    albumCoverUrl?: string;
+    previewUrl?: string;
+    duration?: number;
+    position?: number;
+  }): Promise<PlaylistTrack> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
@@ -155,7 +204,7 @@ export const playlistsService = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(track)
+      body: JSON.stringify(data)
     });
 
     if (!response.ok) {
@@ -164,6 +213,16 @@ export const playlistsService = {
     }
 
     const result = await response.json();
+    
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTrackAdded(playlistId, result.data);
+      }
+    } catch (error) {
+      console.warn('Failed to emit track added event:', error);
+    }
+    
     return result.data;
   },
 
@@ -182,43 +241,68 @@ export const playlistsService = {
       const result = await response.json();
       throw new Error(result.message || 'Failed to remove track');
     }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTrackRemoved(playlistId, trackId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit track removed event:', error);
+    }
   },
 
-  async reorderTracks(playlistId: string, trackPositions: { trackId: string; position: number }[]): Promise<void> {
+  async reorderTracks(playlistId: string, trackIds: string[]): Promise<void> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
-    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/reorder`, {
-      method: 'PUT',
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/tracks/reorder`, {
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ trackPositions })
+      body: JSON.stringify({ trackIds })
     });
 
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to reorder tracks');
     }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitTracksReordered(playlistId, trackIds);
+      }
+    } catch (error) {
+      console.warn('Failed to emit tracks reordered event:', error);
+    }
   },
 
-  async addCollaborator(playlistId: string, userId: string, role: 'editor' | 'viewer' = 'viewer'): Promise<void> {
+  async addCollaborator(playlistId: string, userId: string): Promise<void> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
 
-    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/collaborators`, {
+    const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}/collaborators/${userId}`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ userId, role })
+      }
     });
 
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to add collaborator');
+    }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitCollaboratorAdded(playlistId, userId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit collaborator added event:', error);
     }
   },
 
@@ -236,6 +320,15 @@ export const playlistsService = {
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to remove collaborator');
+    }
+
+    // Emit socket event for real-time updates
+    try {
+      if (socketService.isConnected()) {
+        socketService.emitCollaboratorRemoved(playlistId, userId);
+      }
+    } catch (error) {
+      console.warn('Failed to emit collaborator removed event:', error);
     }
   }
 };

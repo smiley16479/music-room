@@ -4,13 +4,14 @@
 </svelte:head>
 
 <script lang="ts">
-  import { authService } from '$lib/services/auth';
+  import { authStore } from '$lib/stores/auth';
   import { onMount } from 'svelte';
   
-  let user: any = null;
+  // Use the global auth store
+  let user = $derived($authStore);
   
   onMount(async () => {
-    user = authService.isAuthenticated();
+    // User is now available through the reactive store
   });
 </script>
 
@@ -83,15 +84,6 @@
 			</a>
 			<a href="/auth/login" class="border border-secondary text-secondary px-8 py-3 rounded-lg font-semibold hover:bg-secondary/10 transition-colors">
 				Sign In
-			</a>
-		</div>
-		{:else}
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl">
-			<a href="/events" class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold text-center hover:bg-secondary/80 transition-colors">
-				Browse Events
-			</a>
-			<a href="/playlists" class="border border-secondary text-secondary px-6 py-3 rounded-lg font-semibold text-center hover:bg-secondary/10 transition-colors">
-				My Playlists
 			</a>
 		</div>
 		{/if}

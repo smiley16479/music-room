@@ -20,10 +20,12 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
       callbackURL,
       scope: 'email',
       profileFields: ['emails', 'name', 'picture.type(large)'],
+      passReqToCallback: true, // This allows us to access the request in validate
     });
   }
 
   async validate(
+    req: any,
     accessToken: string,
     refreshToken: string,
     profile: Profile,
@@ -37,6 +39,9 @@ export class FacebookStrategy extends PassportStrategy(Strategy, 'facebook') {
       name: `${name?.givenName} ${name?.familyName}`,
       picture: photos?.[0],
       accessToken,
+      // Pass through linking information from the original request
+      linkingMode: req.query?.mode,
+      linkingToken: req.query?.token,
     };
     
     done(null, user);

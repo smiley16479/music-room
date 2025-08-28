@@ -18,10 +18,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       clientSecret: clientSecret,
       callbackURL: callbackURL,
       scope: ['email', 'profile'],
+      passReqToCallback: true, // This allows us to access the request in validate
     });
   }
 
   async validate(
+    req: any,
     accessToken: string,
     refreshToken: string,
     profile: any,
@@ -35,6 +37,9 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
       name: `${name.givenName} ${name.familyName}`,
       picture: photos[0].value,
       accessToken,
+      // Pass through linking information from the original request
+      linkingMode: req.query?.mode,
+      linkingToken: req.query?.token,
     };
     
     done(null, user);

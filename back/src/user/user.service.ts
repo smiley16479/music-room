@@ -14,6 +14,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { PaginatedResponse } from '../common/dto/response.dto';
+import { generateGenericAvatar, getFacebookProfilePictureUrl } from 'src/common/utils/avatar.utils';
 import { MusicPreferencesDto } from './dto/music-preferences.dto';
 
 @Injectable()
@@ -139,8 +140,21 @@ export class UserService {
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
     const user = await this.findById(id);
 
+    // Handle avatar URL logic
+    const updateData = { ...updateUserDto };
+    
+    // If avatarUrl is provided and not empty, use it
+    // If avatarUrl is empty or not provided, keep the existing avatar
+    if (updateData.avatarUrl !== undefined) {
+      if (!updateData.avatarUrl || updateData.avatarUrl.trim() === '') {
+        // Remove avatarUrl from update if it's empty - keep existing avatar
+        delete updateData.avatarUrl;
+      }
+      // If it's a valid URL, it will be validated by the DTO and used as-is
+    }
+
     // Update user fields
-    Object.assign(user, updateUserDto);
+    Object.assign(user, updateData);
 
     return this.userRepository.save(user);
   }
@@ -183,6 +197,14 @@ export class UserService {
   async remove(id: string): Promise<void> {
     const user = await this.findById(id);
     await this.userRepository.remove(user);
+  }
+
+  async unlinkGoogleAccount(userId: string): Promise<void> {
+    await this.userRepository.update(userId, { googleId: null });
+  }
+
+  async unlinkFacebookAccount(userId: string): Promise<void> {
+    await this.userRepository.update(userId, { facebookId: null });
   }
 
   // Friend management

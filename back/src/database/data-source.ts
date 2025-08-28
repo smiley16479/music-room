@@ -21,7 +21,7 @@ export const AppDataSource = new DataSource({
   username: configService.get('DB_USERNAME', 'root'),
   password: configService.get('DB_PASSWORD', 'root'),
   database: configService.get('DB_DATABASE', 'db'),
-  synchronize: false,
+  synchronize: configService.get('NODE_ENV') === 'dev',
   logging: configService.get('NODE_ENV') === 'dev',
   entities: [
     User,
@@ -37,4 +37,9 @@ export const AppDataSource = new DataSource({
   subscribers: ['src/database/subscribers/*.ts'],
   timezone: 'Z',
   charset: 'utf8mb4',
+  extra: {
+    connectionLimit: 10,
+    acquireTimeout: 60000,
+    timeout: 60000,
+  },
 });

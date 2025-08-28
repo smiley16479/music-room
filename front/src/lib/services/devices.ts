@@ -58,6 +58,25 @@ export const devicesService = {
     return result.data;
   },
 
+  async getDevice(deviceId: string): Promise<Device> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to fetch device');
+    }
+
+    const result = await response.json();
+    return result.data;
+  },
+
   async registerDevice(deviceData: { name: string; type: string }): Promise<Device> {
     const token = authService.getAuthToken();
     if (!token) throw new Error('Authentication required');
@@ -212,6 +231,115 @@ export const devicesService = {
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.message || 'Failed to update music control');
+    }
+  },
+
+  // Playback control methods
+  async playDevice(deviceId: string, data?: { trackId?: string }): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/play`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(data || {})
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to play on device');
+    }
+  },
+
+  async pauseDevice(deviceId: string): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/pause`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to pause device');
+    }
+  },
+
+  async skipDevice(deviceId: string): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/skip`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to skip on device');
+    }
+  },
+
+  async previousDevice(deviceId: string): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/previous`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to go to previous track on device');
+    }
+  },
+
+  async setDeviceVolume(deviceId: string, volume: number): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/volume`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ volume })
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to set device volume');
+    }
+  },
+
+  async seekDevice(deviceId: string, position: number): Promise<void> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+
+    const response = await fetch(`${config.apiUrl}/api/devices/${deviceId}/seek`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ position })
+    });
+
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.message || 'Failed to seek on device');
     }
   }
 };

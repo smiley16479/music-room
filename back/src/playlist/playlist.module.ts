@@ -1,5 +1,4 @@
-import { Module } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PlaylistController } from './playlist.controller';
 import { PlaylistService } from './playlist.service';
@@ -13,15 +12,21 @@ import { Invitation } from 'src/invitation/entities/invitation.entity';
 
 import { UserModule } from 'src/user/user.module';
 import { EmailModule } from '../email/email.module';
+import { AuthModule } from '../auth/auth.module';
+import { EventModule } from '../event/event.module';
+import { MusicModule } from '../music/music.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Playlist, PlaylistTrack, Track, User, Invitation]),
     UserModule,
     EmailModule,
+    AuthModule,
+    MusicModule,
+    forwardRef(() => EventModule),
   ],
   controllers: [PlaylistController],
-  providers: [PlaylistService, PlaylistGateway, JwtService],
+  providers: [PlaylistService, PlaylistGateway],
   exports: [PlaylistService],
 })
 export class PlaylistModule {}

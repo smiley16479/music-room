@@ -1,5 +1,5 @@
 import type { PageLoad } from './$types';
-import { eventsService } from '$lib/services/events';
+import { getEvents } from '$lib/services/events';
 
 export const load: PageLoad = async ({ url, fetch }) => {
   try {
@@ -7,7 +7,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
     // Only handle explicit public filter during SSR
     const publicFilter = isPublic === 'true' ? true : undefined;
     
-    const events = await eventsService.getEvents(publicFilter, fetch);
+    const events = await getEvents(fetch);
     
     return {
       events

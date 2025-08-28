@@ -56,11 +56,29 @@ export class PlaylistController {
   @Public()
   @ApiOperation({
     summary: 'Get all playlists',
-    description: 'Returns a paginated list of public playlists and those owned by the current user',
+    description: 'Returns a paginated list of playlists based on filters',
   })
   @ApiQuery({ type: PaginationDto })
-  async findAll(@Query() paginationDto: PaginationDto, @CurrentUser() user?: User) {
-    return this.playlistService.findAll(paginationDto, user?.id);
+  @ApiQuery({ 
+    name: 'isPublic', 
+    type: Boolean, 
+    description: 'Filter by public/private playlists',
+    required: false 
+  })
+  @ApiQuery({ 
+    name: 'userId', 
+    type: String, 
+    description: 'Filter by specific user ID (owner)',
+    required: false 
+  })
+  async findAll(
+    @Query() paginationDto: PaginationDto, 
+    @Query('isPublic') isPublic?: string,
+    @Query('userId') ownerId?: string,
+    @CurrentUser() user?: User
+  ) {
+    const isPublicBool = isPublic !== undefined ? isPublic === 'true' : undefined;
+    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId);
   }
 
   @Get('search')
@@ -257,9 +275,6 @@ export class PlaylistController {
     @Body() addTrackDto: AddTrackToPlaylistDto,
     @CurrentUser() user: User,
   ) {
-
-    this.logger.debug('✅ addTrack() entered');
-
     const track = await this.playlistService.addTrack(id, user.id, addTrackDto);
     return {
       success: true,
