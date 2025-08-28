@@ -66,8 +66,6 @@ export class EventService {
   // CRUD Operations
   async create(createEventDto: CreateEventDto, creatorId: string): Promise<Event> {
 
-    console.log('Creating event with DTO:', createEventDto);
-
     const creator = await this.userRepository.findOne({ where: { id: creatorId } });
     if (!creator) {
       throw new NotFoundException('Creator not found');
@@ -89,6 +87,8 @@ export class EventService {
       status: EventStatus.UPCOMING,
     });
  
+    let savedEvent: Event;
+    
     // Add track from selected playlist to event playlist
     if (createEventDto.selectedPlaylistId) {
         const { 
@@ -96,17 +96,33 @@ export class EventService {
           playlistName: newName
         } = createEventDto
         const playlistCopied = await this.playlistService.duplicatePlaylist(originalPlaylistId, creator.id, `[Event] ${newName}`);
-        playlistCopied.event = event;
-        event.playlist = playlistCopied;
+        
+        // Save the event first to get its ID
+        savedEvent = await this.eventRepository.save(event);
+        
+        // Set the eventId on the playlist to link it to this event
+        playlistCopied.eventId = savedEvent.id;
+        playlistCopied.event = savedEvent;
+        await this.playlistRepository.save(playlistCopied);
+        
+        savedEvent.playlist = playlistCopied;
     } else if (createEventDto.playlistName) {
+        // Save the event first to get its ID
+        savedEvent = await this.eventRepository.save(event);
+        
         const playlist = new Playlist()
         playlist.name = `[Event] ${createEventDto.playlistName.trim()}`
-        playlist.event = event;
+        playlist.eventId = savedEvent.id; // Set the eventId to link it to this event
+        playlist.event = savedEvent;
         playlist.creator = creator;
-        event.playlist = playlist;
+        playlist.creatorId = creator.id;
         await this.playlistRepository.save(playlist);
+        
+        savedEvent.playlist = playlist;
+    } else {
+        // Save the event without playlist
+        savedEvent = await this.eventRepository.save(event);
     }
-    const savedEvent = await this.eventRepository.save(event);
 
     // Add creator as first participant
     await this.addParticipant(savedEvent.id, creatorId);
@@ -156,7 +172,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'currentTrack', 
+      relations: ['creator', 'participants', 'admins', 'currentTrack', 
         'playlist', 'playlist.playlistTracks', 
         'votes', 'votes.user', 'votes.track'
       ],
@@ -346,13 +362,15 @@ export class EventService {
     // Check if user can vote
     await this.checkVotingPermissions(event, userId);
 
-    // Check if user has reached vote limit
-    const userVoteCount = await this.voteRepository.count({
-      where: { eventId, userId },
-    });
+    // Check if user has reached vote limit (0 means unlimited)
+    if (event.maxVotesPerUser > 0) {
+      const userVoteCount = await this.voteRepository.count({
+        where: { eventId, userId },
+      });
 
-    if (userVoteCount >= event.maxVotesPerUser) {
-      throw new BadRequestException(`Maximum ${event.maxVotesPerUser} votes allowed per user`);
+      if (userVoteCount >= event.maxVotesPerUser) {
+        throw new BadRequestException(`Maximum ${event.maxVotesPerUser} votes allowed per user`);
+      }
     }
 
     // Get or create track
@@ -387,6 +405,9 @@ export class EventService {
     // Get updated voting results
     const results = await this.getVotingResults(eventId, userId);
 
+    // Reorder playlist tracks based on votes
+    await this.reorderPlaylistByVotes(eventId);
+
     // Notify participants
     this.eventGateway.notifyVoteUpdated(eventId, vote, results);
 
@@ -409,10 +430,66 @@ export class EventService {
     // Get updated voting results
     const results = await this.getVotingResults(eventId, userId);
 
+    // Reorder playlist tracks based on votes
+    await this.reorderPlaylistByVotes(eventId);
+
     // Notify participants
     this.eventGateway.notifyVoteRemoved(eventId, vote, results);
 
     return results;
+  }
+
+  /**
+   * Reorders the playlist tracks based on their vote counts
+   * Tracks with higher vote counts move up in the playlist
+   */
+  private async reorderPlaylistByVotes(eventId: string): Promise<void> {
+    try {
+      // Get the event with its playlist
+      const event = await this.eventRepository.findOne({
+        where: { id: eventId },
+        relations: ['playlist', 'playlist.playlistTracks'],
+      });
+
+      if (!event?.playlist?.playlistTracks) {
+        return;
+      }
+
+      // Get voting results for this event
+      const voteResults = await this.getVotingResults(eventId);
+      const voteMap = new Map(voteResults.map(result => [result.track.id, result.voteCount]));
+
+      // Get playlist tracks and sort them by votes (descending), then by original position
+      const playlistTracks = event.playlist.playlistTracks.sort((a, b) => {
+        const aVotes = voteMap.get(a.trackId) || 0;
+        const bVotes = voteMap.get(b.trackId) || 0;
+        
+        // First sort by votes (higher votes first)
+        if (aVotes !== bVotes) {
+          return bVotes - aVotes;
+        }
+        
+        // If votes are equal, maintain original order (earlier position first)
+        return a.position - b.position;
+      });
+
+      // Update positions based on new order using the playlist service reorder method
+      const trackOrder = playlistTracks.map(pt => pt.trackId);
+      
+      // Use the existing reorder method from playlist service
+      await this.playlistService.reorderTracks(
+        event.playlist.id, 
+        event.creatorId, // Use the event creator as the acting user
+        { trackIds: trackOrder }
+      );
+
+      // Notify participants about the reordering
+      this.eventGateway.notifyTracksReordered(eventId, trackOrder, 'voting-system');
+
+    } catch (error) {
+      console.error('Failed to reorder playlist by votes:', error);
+      // Don't throw the error to avoid disrupting the voting process
+    }
   }
 
   async getVotingResults(eventId: string, userId?: string): Promise<VoteResult[]> {
@@ -696,7 +773,27 @@ export class EventService {
   }
 
   private async checkVotingPermissions(event: Event, userId: string): Promise<void> {
-    if (event.status !== EventStatus.LIVE) {
+    // Check if event should be live based on dates (fallback for cron job delays)
+    const now = new Date();
+    let effectiveStatus = event.status;
+    
+    if (event.eventDate && event.eventEndDate) {
+      if (now >= event.eventDate && now < event.eventEndDate) {
+        effectiveStatus = EventStatus.LIVE;
+        
+        // Update status in database if it's different
+        if (event.status !== EventStatus.LIVE) {
+          await this.eventRepository.update(event.id, { status: EventStatus.LIVE });
+          console.log(`Auto-updated event ${event.id} status to LIVE based on dates`);
+        }
+      } else if (now >= event.eventEndDate && event.status === EventStatus.LIVE) {
+        effectiveStatus = EventStatus.ENDED;
+        await this.eventRepository.update(event.id, { status: EventStatus.ENDED });
+        console.log(`Auto-updated event ${event.id} status to ENDED based on dates`);
+      }
+    }
+
+    if (effectiveStatus !== EventStatus.LIVE) {
       throw new BadRequestException('Voting is only allowed during live events');
     }
 
@@ -743,27 +840,32 @@ export class EventService {
     return degree * (Math.PI / 180);
   }
 
+  // Manual status update method that can be called when needed
+  async manuallyUpdateEventStatuses(): Promise<void> {
+    await this.updateEventStatuses();
+  }
+
   // Automated tasks
   @Cron(CronExpression.EVERY_MINUTE)
   async updateEventStatuses(): Promise<void> {
     const now = new Date();
 
     // Start events that should be live
-    await this.eventRepository.update(
-      {
-        status: EventStatus.UPCOMING,
-        eventDate: { $lte: now } as any,
-      },
-      { status: EventStatus.LIVE },
-    );
+    await this.eventRepository
+      .createQueryBuilder()
+      .update(Event)
+      .set({ status: EventStatus.LIVE })
+      .where('status = :status', { status: EventStatus.UPCOMING })
+      .andWhere('eventDate <= :now', { now })
+      .execute();
 
     // End events that have passed their end time
-    await this.eventRepository.update(
-      {
-        status: EventStatus.LIVE,
-        eventEndDate: { $lte: now } as any,
-      },
-      { status: EventStatus.ENDED },
-    );
+    await this.eventRepository
+      .createQueryBuilder()
+      .update(Event)
+      .set({ status: EventStatus.ENDED })
+      .where('status = :status', { status: EventStatus.LIVE })
+      .andWhere('eventEndDate <= :now', { now })
+      .execute();
   }
 }

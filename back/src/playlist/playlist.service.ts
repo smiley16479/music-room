@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindOptionsWhere, In } from 'typeorm';
+import { Repository, FindOptionsWhere, In, IsNull } from 'typeorm';
 
 import {
   Playlist,
@@ -28,8 +28,10 @@ import { AddTrackToPlaylistDto } from './dto/add-track.dto';
 import { ReorderTracksDto } from './dto/reorder-tracks.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
+import { MusicService } from '../music/music.service';
 import { EmailService } from '../email/email.service';
 import { PlaylistGateway } from './playlist.gateway';
+import { EventGateway } from '../event/event.gateway';
 
 export interface PlaylistWithStats extends Playlist {
   stats: {
@@ -58,18 +60,20 @@ export interface CollaborativeOperation {
 export class PlaylistService {
   constructor(
     @InjectRepository(Playlist)
-    private readonly playlistRepository: Repository<Playlist>,
+    private playlistRepository: Repository<Playlist>,
     @InjectRepository(PlaylistTrack)
-    private readonly playlistTrackRepository: Repository<PlaylistTrack>,
+    private playlistTrackRepository: Repository<PlaylistTrack>,
     @InjectRepository(Track)
-    private readonly trackRepository: Repository<Track>,
+    private trackRepository: Repository<Track>,
     @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    private userRepository: Repository<User>,
     @InjectRepository(Invitation)
-    private readonly invitationRepository: Repository<Invitation>,
-    private readonly emailService: EmailService,
-    private readonly playlistGateway: PlaylistGateway,
-  ) { }
+    private invitationRepository: Repository<Invitation>,
+    private musicService: MusicService,
+    private emailService: EmailService,
+    private playlistGateway: PlaylistGateway,
+    private eventGateway: EventGateway,
+  ) {}
 
   // CRUD Operations
   async create(createPlaylistDto: CreatePlaylistDto, creatorId: string): Promise<PlaylistWithStats> {
@@ -178,6 +182,9 @@ export class PlaylistService {
         queryBuilder.where('playlist.visibility = :visibility', { visibility: PlaylistVisibility.PUBLIC });
       }
     }
+
+    // Always exclude event playlists (playlists that belong to events)
+    queryBuilder.andWhere('playlist.eventId IS NULL');
 
     queryBuilder
       .orderBy('playlist.updatedAt', 'DESC')
@@ -352,6 +359,11 @@ export class PlaylistService {
     // Notify collaborators
     this.playlistGateway.notifyTrackAdded(playlistId, trackWithDetails, userId, updatedPlaylist?.trackCount || 0);
 
+    // If this playlist belongs to an event, also notify the event participants
+    if (playlist.eventId) {
+      this.eventGateway.notifyTrackAdded(playlist.eventId, trackWithDetails.track, userId);
+    }
+
     return trackWithDetails;
   }
 
@@ -392,6 +404,11 @@ export class PlaylistService {
 
     // Notify collaborators
     this.playlistGateway.notifyTrackRemoved(playlistId, trackId, userId, updatedPlaylist?.trackCount || 0);
+
+    // If this playlist belongs to an event, also notify the event participants
+    if (playlist.eventId) {
+      this.eventGateway.notifyTrackRemoved(playlist.eventId, trackId, userId);
+    }
   }
 
   async reorderTracks(
@@ -551,6 +568,7 @@ export class PlaylistService {
       .leftJoinAndSelect('playlist.creator', 'creator')
       .leftJoinAndSelect('playlist.collaborators', 'collaborators')
       .where('playlist.visibility = :visibility', { visibility: PlaylistVisibility.PUBLIC })
+      .andWhere('playlist.eventId IS NULL') // Exclude event playlists
       .andWhere('(playlist.name LIKE :query OR playlist.description LIKE :query)')
       .setParameter('query', `%${query}%`)
       .orderBy('playlist.updatedAt', 'DESC')
@@ -579,7 +597,10 @@ export class PlaylistService {
     // Find playlists with tracks matching user's preferences
     // This is a simplified version - in production you'd want more sophisticated recommendation logic
     const playlists = await this.playlistRepository.find({
-      where: { visibility: PlaylistVisibility.PUBLIC },
+      where: { 
+        visibility: PlaylistVisibility.PUBLIC,
+        eventId: IsNull() // Exclude event playlists
+      },
       relations: ['creator', 'collaborators'],
       order: { updatedAt: 'DESC' },
       take: limit,

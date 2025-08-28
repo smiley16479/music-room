@@ -15,6 +15,7 @@ export interface Playlist {
   tracks?: PlaylistTrack[];
   collaborators: Collaborator[];
   coverImageUrl?: string;
+  eventId?: string; // If set, this playlist belongs to an event
   createdAt: string;
   updatedAt: string;
 }

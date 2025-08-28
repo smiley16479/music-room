@@ -38,6 +38,6 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
   ],
   controllers: [EventController],
   providers: [EventService, EventGateway],
-  exports: [EventService],
+  exports: [EventService, EventGateway],
 })
 export class EventModule { }

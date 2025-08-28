@@ -713,11 +713,11 @@
 					<img
 						src={playlist.coverImageUrl}
 						alt={playlist.name}
-						class="w-30 h-30 rounded-lg object-cover"
+						class="w-32 h-32 rounded-lg object-cover"
 					/>
 				{:else}
 					<div
-						class="w-30 h-30 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center"
+						class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center"
 					>
 						<svg
 							class="w-16 h-16 text-white"
@@ -735,18 +735,16 @@
 					</div>
 				{/if}
 
-				<div class="flex-1">
-					<div
-						class="flex flex-col-reverse sm:flex-row justify-between items-start my-4"
-					>
-						<div>
+				<div class="flex-1 min-w-0 w-full overflow-hidden">
+					<div class="flex flex-col sm:flex-row sm:justify-between sm:items-start my-4">
+						<div id="here" class="w-full min-w-0 max-w-full overflow-hidden">
 							<h1
-								class="font-family-main text-3xl font-bold text-gray-800 mb-2 truncate"
+								class="font-family-main text-2xl sm:text-3xl font-bold text-gray-800 mb-2 truncate w-full"
 							>
 								{playlist.name}
 							</h1>
 							{#if playlist.description}
-								<p class="text-gray-600 mb-4 break-all">
+								<p class="text-gray-600 mb-4 text-sm sm:text-base break-words truncate w-full">
 									{playlist.description}
 								</p>
 							{/if}
@@ -837,9 +835,9 @@
 			</div>
 		{/if}
 
-		<div class="flex flex-col lg:flex-row gap-6">
-			<!-- Tracks Section -->
-			<div class="w-full bg-white rounded-lg shadow-md p-6 md:mb-8">
+		<!-- Tracks Section -->
+		<div class="flex flex-col lg:flex-row gap-8">
+			<div class="w-full bg-white rounded-lg shadow-md p-6">
 				<div class="flex justify-between items-center mb-6">
 					<div>
 						<h2 class="text-xl font-bold text-gray-800">
@@ -1113,13 +1111,11 @@
 
 			<!-- Collaborators Section -->
 			{#if playlist.licenseType === "invited"}
-				<div>
-					<CollaboratorsList
-						{playlist}
-						{isOwner}
-						onCollaboratorRemoved={() => {}}
-					/>
-				</div>
+				<CollaboratorsList
+					{playlist}
+					{isOwner}
+					onCollaboratorRemoved={() => {}}
+				/>
 			{/if}
 		</div>
 	</div>

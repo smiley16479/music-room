@@ -8,10 +8,13 @@
 	import {
 		getEvent,
 		leaveEvent as leaveEventAPI,
-		voteForTrackSimple,
+		voteForTrackInEvent,
 		removeVote,
 		getVotingResults,
 		addTrackToEvent,
+		addTracksToEvent,
+		addPlaylistTracksToEvent,
+		removeTrackFromEvent,
 		inviteToEvent,
 		updateEvent,
 		deleteEvent,
@@ -24,6 +27,7 @@
 		type VoteResult,
 		type Track,
 		type User,
+		type Vote,
 	} from "$lib/services/events";
 	import { eventSocketService } from "$lib/services/event-socket";
 	import { playlistsService, type Playlist } from "$lib/services/playlists";
@@ -32,6 +36,7 @@
 	import { musicPlayerStore } from "$lib/stores/musicPlayer";
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
+	import { flip } from 'svelte/animate';
 
 	interface PageData {
 		event?: Event;
@@ -71,19 +76,9 @@
 	let audioElement: HTMLAudioElement | null = null;
 	let isMusicPlayerInitialized = $state(false);
 	let showMusicSearchModal = $state(false);
-	let draggedIndex: number | null = null;
 
 	// Music player store state
 	const playerState = $derived($musicPlayerStore);
-
-	let newTrack = $state({
-		title: "",
-		artist: "",
-		album: "",
-		duration: 0,
-		thumbnailUrl: "",
-		streamUrl: "",
-	});
 
 	// Edit event form
 	let editEventData = $state({
@@ -97,6 +92,7 @@
 		locationRadius: undefined as number | undefined,
 		votingStartTime: undefined as string | undefined,
 		votingEndTime: undefined as string | undefined,
+		maxVotesPerUser: 1
 	});
 
 	let eventId = $derived($page.params.id);
@@ -149,20 +145,39 @@
 		}
 	});
 
-	// Sorted playlist with voting restrictions
+	// Display playlist tracks sorted by vote count with currently playing track protection
 	function sortedPlaylistTracks() {
 		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
 
-		return [...event.playlist].sort((a: Track, b: Track) => {
-			// Currently playing track stays at top
-			if (currentPlayingTrack === a.id) return -1;
-			if (currentPlayingTrack === b.id) return 1;
-
-			// Then sort by vote count
-			return (
-				(b.voteCount || b.votes || 0) - (a.voteCount || a.votes || 0)
-			);
+		// Sort all tracks by vote count (highest first)
+		const sortedTracks = [...event.playlist].sort((a, b) => {
+			const aVotes = a.voteCount || a.votes || 0;
+			const bVotes = b.voteCount || b.votes || 0;
+			return bVotes - aVotes;
 		});
+
+		// If there's no current playing track, return sorted playlist
+		if (!currentPlayingTrack) {
+			return sortedTracks;
+		}
+
+		// Find the currently playing track
+		const currentTrackIndex = sortedTracks.findIndex(t => t.id === currentPlayingTrack);
+		
+		// If currently playing track is not found, return sorted playlist as-is
+		if (currentTrackIndex === -1) {
+			return sortedTracks;
+		}
+
+		// If currently playing track is already at position 0, return as-is
+		if (currentTrackIndex === 0) {
+			return sortedTracks;
+		}
+
+		// Move currently playing track to position 0, preserve vote-based order for the rest
+		const reorderedPlaylist = [...sortedTracks];
+		const [currentTrack] = reorderedPlaylist.splice(currentTrackIndex, 1);
+		return [currentTrack, ...reorderedPlaylist];
 	}
 
 	// Participants sorted by role
@@ -202,10 +217,46 @@
 				...data.event,
 				// Ensure playlist is always an array
 				playlist: Array.isArray(data.event.playlist) ? data.event.playlist : [],
-				// Start with empty participants - they will be populated via socket events
-				participants: [],
+				// Preserve participants from initial data - socket events will update them
+				participants: Array.isArray(data.event.participants) ? data.event.participants : [],
+				// Ensure allowsVoting defaults to true
+				allowsVoting: data.event.allowsVoting !== false,
 			};
 			initializeEditForm();
+			
+			// Always try to load voting results if we have an eventId and user
+			if (eventId && user) {
+				try {
+					votingResults = await getVotingResults(eventId);
+					
+					// Initialize local user votes from voting results
+					localUserVotes = new Map();
+					votingResults.forEach(result => {
+						if (result.userVote) {
+							localUserVotes.set(result.track.id, result.userVote.type);
+						}
+					});
+					
+					// Update playlist tracks with vote counts from voting results
+					if (event.playlist && Array.isArray(event.playlist)) {
+						event.playlist = event.playlist.map((track) => {
+							const result = votingResults.find((r) => r.track.id === track.id);
+							const newVoteCount = result ? result.voteCount : 0;
+							return {
+								...track,
+								voteCount: newVoteCount,
+								votes: newVoteCount,
+							};
+						});
+						
+						// Don't sort here - let sortedPlaylistTracks() handle display order
+						// Force reactivity update
+						event = { ...event };
+					}
+				} catch (err) {
+					console.error('Failed to load voting results during initialization:', err);
+				}
+			}
 		} else {
 			await loadEvent();
 		}
@@ -240,6 +291,48 @@
 			await initializeMusicPlayer();
 		}
 	});
+
+	// Reactive effect to load voting data when user becomes available
+	$effect(() => {
+		if (user && eventId && event && !votingResults.length) {
+			// Only load if we haven't loaded voting results yet
+			loadVotingDataForUser();
+		}
+	});
+
+	async function loadVotingDataForUser() {
+		if (!user || !eventId) return;
+		
+		try {
+			votingResults = await getVotingResults(eventId);
+			
+			// Initialize local user votes from voting results
+			localUserVotes = new Map();
+			votingResults.forEach(result => {
+				if (result.userVote) {
+					localUserVotes.set(result.track.id, result.userVote.type);
+				}
+			});
+			
+			// Update playlist tracks with vote counts from voting results
+			if (event?.playlist && Array.isArray(event.playlist)) {
+				event.playlist = event.playlist.map((track) => {
+					const result = votingResults.find((r) => r.track.id === track.id);
+					const newVoteCount = result ? result.voteCount : 0;
+					return {
+						...track,
+						voteCount: newVoteCount,
+						votes: newVoteCount,
+					};
+				});
+				
+				// Force reactivity update
+				event = { ...event };
+			}
+		} catch (err) {
+			console.error('Failed to load voting data for user:', err);
+		}
+	}
 
 	onDestroy(() => {
 		if (eventId && isSocketConnected) {
@@ -287,7 +380,8 @@
 			"current-track-changed",
 			handleCurrentTrackChanged,
 		);
-		eventSocketService.on("vote-added", handleVoteUpdated);
+		// Fix: Backend sends 'vote-updated' not 'vote-added'
+		eventSocketService.on("vote-updated", handleVoteUpdated);
 		eventSocketService.on("vote-removed", handleVoteRemoved);
 		eventSocketService.on("user-joined", handleParticipantAdded);
 		eventSocketService.on("user-left", handleParticipantRemoved);
@@ -315,10 +409,11 @@
 				"current-track-changed",
 				handleCurrentTrackChanged,
 			);
+			// Fix: Clean up vote-updated listener
+			eventSocketService.off("vote-updated", handleVoteUpdated);
+			eventSocketService.off("vote-removed", handleVoteRemoved);
 			eventSocketService.off("user-joined", handleParticipantAdded);
 			eventSocketService.off("user-left", handleParticipantRemoved);
-			eventSocketService.off("vote-added", handleVoteUpdated);
-			eventSocketService.off("vote-removed", handleVoteRemoved);
 			eventSocketService.off("joined-event", handleJoinedEvent);
 			eventSocketService.off("left-event", handleLeavedEvent);
 			eventSocketService.off("admin-added", handleAdminAdded);
@@ -335,16 +430,39 @@
 	}
 
 	function handleAdminAdded(data: { eventId: string; userId: string }) {
-		if (event && event.admins && data.eventId === event.id) {
+		if (event && data.eventId === event.id) {
+			// Initialize admins array if it doesn't exist
+			if (!event.admins) {
+				event.admins = [];
+			}
+			
+			// Check if user is already an admin
 			if (!event.admins.some((admin) => admin.id === data.userId)) {
-				event.admins.push({
-					id: data.userId,
-					userId: data.userId,
-					displayName: "New Admin",
-					createdAt: new Date().toISOString(),
-					updatedAt: new Date().toISOString(),
-					email: "",
-				});
+				// Find the user in participants to get their complete data
+				const participant = event.participants?.find((p) => p.id === data.userId);
+				
+				if (participant) {
+					event.admins.push({
+						id: data.userId,
+						userId: data.userId,
+						displayName: participant.displayName || participant.username || "Unknown User",
+						email: participant.email || "",
+						avatarUrl: participant.avatarUrl,
+						createdAt: participant.createdAt || new Date().toISOString(),
+						updatedAt: participant.updatedAt || new Date().toISOString(),
+					});
+				} else {
+					// Fallback if participant not found (shouldn't happen normally)
+					event.admins.push({
+						id: data.userId,
+						userId: data.userId,
+						displayName: "New Admin",
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString(),
+						email: "",
+					});
+				}
+				
 				// Force reactivity update
 				event = { ...event };
 			}
@@ -352,13 +470,20 @@
 	}
 
 	function handleAdminRemoved(data: { eventId: string; userId: string }) {
-		if (event && event.admins && data.eventId === event.id) {
+		if (event && data.eventId === event.id) {
+			// Initialize admins array if it doesn't exist
+			if (!event.admins) {
+				event.admins = [];
+				return;
+			}
+			
 			const initialCount = event.admins.length;
 			event.admins = event.admins.filter(
 				(admin) => admin.id !== data.userId,
 			);
+			
+			// Force reactivity update if there was actually a change
 			if (event.admins.length !== initialCount) {
-				// Force reactivity update
 				event = { ...event };
 			}
 		}
@@ -393,14 +518,6 @@
 			);
 		}
 	}
-	function handleTracksReordered(data: { trackOrder: string[] }) {
-		if (event && event.playlist && Array.isArray(event.playlist)) {
-			const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
-			event.playlist = data.trackOrder
-				.map((id) => trackMap.get(id))
-				.filter((t): t is Track => t !== undefined);
-		}
-	}
 	function handleCurrentTrackChanged(data: {
 		track: Track | null;
 		startedAt: string | null;
@@ -430,26 +547,40 @@
 	}
 	function handleVoteUpdated(data: {
 		eventId: string;
-		vote: { trackId: string; userId: string };
+		vote: Vote;
 		results: VoteResult[];
 	}) {
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
-			// Update vote counts in playlist
+			
+			// Update local user votes from results
+			localUserVotes = new Map();
+			data.results.forEach(result => {
+				if (result.userVote) {
+					localUserVotes.set(result.track.id, result.userVote.type);
+				}
+			});
+			
+			// Update vote counts in playlist 
 			if (event.playlist && Array.isArray(event.playlist)) {
 				event.playlist = event.playlist.map((track) => {
 					const result = votingResults.find(
 						(r) => r.track.id === track.id,
 					);
+					const newVoteCount = result ? result.voteCount : 0;
 					return {
 						...track,
-						voteCount: result ? result.voteCount : 0,
-						votes: result ? result.voteCount : 0,
+						voteCount: newVoteCount,
+						votes: newVoteCount,
 					};
 				});
+				
+				// Force reactivity update
+				event = { ...event };
 			}
 		}
 	}
+	
 	function handleVoteRemoved(data: {
 		eventId: string;
 		trackId: string;
@@ -457,6 +588,15 @@
 	}) {
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
+			
+			// Update local user votes from results
+			localUserVotes = new Map();
+			data.results.forEach(result => {
+				if (result.userVote) {
+					localUserVotes.set(result.track.id, result.userVote.type);
+				}
+			});
+			
 			// Update vote counts in playlist
 			if (event.playlist && Array.isArray(event.playlist)) {
 				event.playlist = event.playlist.map((track) => {
@@ -469,9 +609,84 @@
 						votes: result ? result.voteCount : 0,
 					};
 				});
+				
+				// Force reactivity update
+				event = { ...event };
+				
 			}
 		}
 	}
+	
+	function handleTracksReordered(data: { eventId: string; trackOrder: string[] }) {
+		if (event && data.eventId === event.id && event.playlist && Array.isArray(event.playlist)) {
+			// Store the currently playing track info
+			const currentlyPlayingTrack = event.playlist.length > 0 ? event.playlist[0] : null;
+			
+			// Reorder the playlist based on the new track order
+			const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
+			const reorderedPlaylist = data.trackOrder
+				.map((id) => trackMap.get(id))
+				.filter((t): t is Track => t !== undefined);
+			
+			// Add any tracks that weren't in the reorder list (shouldn't happen but safety)
+			const reorderedIds = new Set(data.trackOrder);
+			const remainingTracks = event.playlist.filter(t => !reorderedIds.has(t.id));
+			
+			// If there was a currently playing track, ensure it stays at the top
+			if (currentlyPlayingTrack) {
+				const filteredReordered = reorderedPlaylist.filter(t => t.id !== currentlyPlayingTrack.id);
+				const filteredRemaining = remainingTracks.filter(t => t.id !== currentlyPlayingTrack.id);
+				event.playlist = [currentlyPlayingTrack, ...filteredReordered, ...filteredRemaining];
+			} else {
+				event.playlist = [...reorderedPlaylist, ...remainingTracks];
+			}
+			
+			// When tracks are reordered, also refresh vote counts for all users
+			refreshVotingResults();
+			
+			// Force reactivity update
+			event = { ...event };
+		}
+	}
+	
+	// Helper function to refresh voting results
+	async function refreshVotingResults() {
+		if (!eventId || !user) return;
+		
+		try {
+			const latestResults = await getVotingResults(eventId);
+			
+			// Update voting results
+			votingResults = latestResults;
+			
+			// Update local user votes from latest results
+			localUserVotes = new Map();
+			latestResults.forEach(result => {
+				if (result.userVote) {
+					localUserVotes.set(result.track.id, result.userVote.type);
+				}
+			});
+			
+			// Update vote counts
+			if (event?.playlist && Array.isArray(event.playlist)) {
+				event.playlist = event.playlist.map((track) => {
+					const result = latestResults.find((r) => r.track.id === track.id);
+					const newVoteCount = result ? result.voteCount : 0;
+					return {
+						...track,
+						voteCount: newVoteCount,
+						votes: newVoteCount,
+					};
+				});
+				
+				// Force reactivity update
+				event = { ...event };
+			}
+		} catch (refreshError) {
+			console.warn('Failed to refresh voting results for all users:', refreshError);
+		}
+	}
+	
 	function handleParticipantAdded(data: any) {
 		if (event) {
 			if (
@@ -553,6 +768,7 @@
 				locationRadius: event.locationRadius || undefined,
 				votingStartTime: event.votingStartTime || undefined,
 				votingEndTime: event.votingEndTime || undefined,
+				maxVotesPerUser: event.maxVotesPerUser || 1
 			};
 		}
 	}
@@ -568,6 +784,7 @@
 			const loadedEvent = await getEvent(eventId);
 
 			// Transform event data to ensure compatibility
+			const preservedParticipants = event?.participants || [];
 			event = {
 				...loadedEvent,
 				title: loadedEvent.title || loadedEvent.name,
@@ -582,15 +799,46 @@
 					voteCount: track.voteCount || track.votes || 0,
 					votes: track.voteCount || track.votes || 0,
 				})),
-				// Start with empty participants - they will be populated via socket events
-				participants: [],
+				// Preserve admins from backend
+				admins: loadedEvent.admins || [],
+				// Preserve existing participants - they are managed via socket events
+				participants: preservedParticipants,
 			};
 
 			initializeEditForm();
 
 			// Load voting results if user can vote
 			if (user && event.allowsVoting) {
-				votingResults = await getVotingResults(eventId);
+				try {
+					votingResults = await getVotingResults(eventId);
+					
+					// Initialize local user votes from voting results
+					localUserVotes = new Map();
+					votingResults.forEach(result => {
+						if (result.userVote) {
+							localUserVotes.set(result.track.id, result.userVote.type);
+						}
+					});
+					
+					// Update playlist tracks with vote counts from voting results
+					if (event.playlist && Array.isArray(event.playlist)) {
+						event.playlist = event.playlist.map((track) => {
+							const result = votingResults.find((r) => r.track.id === track.id);
+							const newVoteCount = result ? result.voteCount : 0;
+							return {
+								...track,
+								voteCount: newVoteCount,
+								votes: newVoteCount,
+							};
+						});
+						
+						// Don't sort here - let sortedPlaylistTracks() handle display order
+						// Force reactivity update
+						event = { ...event };
+					}
+				} catch (err) {
+					console.error('Failed to load voting results in loadEvent:', err);
+				}
 			}
 
 			// Initialize music player for this event
@@ -607,7 +855,7 @@
 
 		try {
 			await leaveEventAPI(eventId);
-			await loadEvent();
+			// Socket events will handle updating the participant list
 		} catch (err) {
 			error =
 				err instanceof Error ? err.message : "Failed to leave event";
@@ -619,24 +867,12 @@
 
 		try {
 			loading = true;
-			const playlistTracks =
-				await playlistsService.getPlaylistTracks(playlistId);
-
-			// Add each track to the event
-			for (const playlistTrack of playlistTracks) {
-				const track = playlistTrack.track;
-				await addTrackToEvent(eventId, {
-					title: track.title,
-					artist: track.artist,
-					album: track.album,
-					duration: track.duration,
-					thumbnailUrl: track.albumCoverUrl,
-					streamUrl: track.previewUrl,
-				});
-			}
+			
+			// Use the optimized batch function to add all tracks at once
+			await addPlaylistTracksToEvent(eventId, playlistId);
 
 			showPlaylistModal = false;
-			await loadEvent();
+			// Socket events will handle updating the track list
 		} catch (err) {
 			error =
 				err instanceof Error
@@ -654,7 +890,7 @@
 		try {
 			await updateEvent(eventId, editEventData);
 			showEditModal = false;
-			await loadEvent();
+			// Socket events will handle updating the event data
 		} catch (err) {
 			error =
 				err instanceof Error ? err.message : "Failed to update event";
@@ -674,13 +910,14 @@
 	}
 
 	async function handlePromoteUserToAdmin() {
-		if (!user || !eventId || !isCreator || !isAdmin || !selectedUserId)
+		if (!user || !eventId || !isAdmin || !selectedUserId)
 			return;
 
 		try {
 			await promoteUserToAdmin(eventId, selectedUserId);
 			showPromoteModal = false;
 			selectedUserId = "";
+			// Note: Admin list will be updated via socket events (handleAdminAdded)
 		} catch (err) {
 			error =
 				err instanceof Error
@@ -947,7 +1184,7 @@
 
 	const canEdit = $derived(isAdmin);
 
-	// Filter tracks based on search query
+	// Filter tracks based on search query - uses vote-sorted tracks
 	function filteredTracks() {
 		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
 		if (!searchQuery.trim()) return sortedPlaylistTracks();
@@ -964,28 +1201,6 @@
 						?.displayName?.toLowerCase()
 						.includes(query)),
 		);
-	}
-
-	// Drag and drop functions
-	function handleDragStart(event: DragEvent, index: number) {
-		draggedIndex = index;
-		if (event.dataTransfer) {
-			event.dataTransfer.effectAllowed = "move";
-		}
-	}
-
-	function handleDragOver(event: DragEvent) {
-		event.preventDefault();
-		if (event.dataTransfer) {
-			event.dataTransfer.dropEffect = "move";
-		}
-	}
-
-	async function handleDrop(event: DragEvent, dropIndex: number) {
-		event.preventDefault();
-		if (draggedIndex === null || draggedIndex === dropIndex || !eventId)
-			return;
-		draggedIndex = null;
 	}
 
 	// Music player initialization and control
@@ -1015,9 +1230,6 @@
 					| "location-time",
 				visibility: event.visibility,
 			};
-
-			console.log("Initializing music player with context:", roomContext);
-			console.log("Event tracks:", event.playlist.length);
 
 			// Convert event tracks to playlist track format
 			const playlistTracks = event.playlist.map((track, index) => ({
@@ -1060,8 +1272,6 @@
 			);
 			isMusicPlayerInitialized = true;
 
-			console.log("Music player initialized successfully");
-			console.log("Current player state:", $musicPlayerStore);
 		} catch (err) {
 			console.error("Failed to initialize music player:", err);
 		}
@@ -1104,9 +1314,6 @@
 				return;
 			}
 
-			console.log("Playing track at index:", trackIndex);
-			console.log("Track data:", event.playlist[trackIndex]);
-
 			await musicPlayerService.playTrack(trackIndex);
 		} catch (err) {
 			console.error("Play track error:", err);
@@ -1118,6 +1325,8 @@
 	async function removeTrack(trackId: string) {
 		if (!user || !eventId) return;
 
+		let originalPlaylist = null; // Declare outside try block for error handling
+
 		try {
 			const track = event?.playlist?.find((t) => t.id === trackId);
 			if (!track) {
@@ -1125,11 +1334,271 @@
 				return;
 			}
 
-			error = "Track removal from events is not yet implemented";
-			setTimeout(() => (error = ""), 3000);
+			// Find track index for UI optimization
+			const trackIndex = event?.playlist?.findIndex((t) => t.id === trackId) ?? -1;
+			
+			// Optimistically remove the track from the UI
+			if (trackIndex !== -1 && event?.playlist) {
+				originalPlaylist = [...event.playlist];
+				event.playlist = event.playlist.filter((t) => t.id !== trackId);
+				// Force reactivity update
+				event = { ...event };
+			}
+			
+			// Call the service to remove the track
+			await removeTrackFromEvent(eventId, trackId);
+			
+			// Show success message temporarily
 		} catch (err) {
-			error =
-				err instanceof Error ? err.message : "Failed to remove track";
+			// Revert the optimistic update on error
+			if (originalPlaylist && event) {
+				event.playlist = originalPlaylist;
+				event = { ...event };
+			}
+			
+			console.error('Error removing track:', err);
+			error = err instanceof Error ? err.message : 'Failed to remove track from event';
+			setTimeout(() => (error = ""), 3000);
+		}
+	}
+
+	// Vote button animation state tracking - local to this user only
+	let voteAnimations = $state(new Map<string, { upvote: string, downvote: string, remove: string }>());
+	
+	// Local user vote state tracking - independent of WebSocket updates
+	let localUserVotes = $state(new Map<string, 'upvote' | 'downvote' | null>());
+
+	// Helper function to get current user vote for a track (uses local state first, then WebSocket data)
+	function getUserVoteForTrack(trackId: string): 'upvote' | 'downvote' | null {
+		// Check local state first (for immediate UI updates)
+		if (localUserVotes.has(trackId)) {
+			return localUserVotes.get(trackId) || null;
+		}
+		
+		// Fall back to WebSocket data
+		const result = votingResults.find(r => r.track.id === trackId);
+		return result?.userVote?.type || null;
+	}
+
+	// Helper function to get button width class based on vote state
+	function getButtonWidthClass(trackId: string, buttonType: 'upvote' | 'downvote' | 'remove'): string {
+		const userVote = getUserVoteForTrack(trackId);
+		const animation = voteAnimations.get(trackId);
+		
+		// Use animation state if transitioning
+		if (animation) {
+			if (buttonType === 'remove') {
+				return animation.remove;
+			}
+			return animation[buttonType as 'upvote' | 'downvote'];
+		}
+		
+		// Default state based on user vote
+		if (!userVote) {
+			if (buttonType === 'remove') {
+				return 'w-0 overflow-hidden'; // Remove button hidden when no vote
+			}
+			return 'w-full'; // Vote buttons full width when no vote
+		}
+		
+		if (buttonType === 'remove') {
+			return userVote === 'upvote' ? 'w-100 bg-gradient-to-l' : 'w-100 bg-gradient-to-r'; // Remove button is visible when user has voted
+		}
+		
+		if (userVote === buttonType) {
+			return 'w-full'; // Voted button stays full width
+		} else {
+			return 'w-0 overflow-hidden'; // Other vote button shrinks to 0
+		}
+	}
+
+	// Voting functionality
+	async function voteForTrackSimple(trackId: string, voteType: 'upvote' | 'downvote' = 'upvote') {
+		if (!user || !eventId || !canVoteForTracks()) {
+			error = "You don't have permission to vote";
+			setTimeout(() => (error = ""), 3000);
+			return;
+		}
+
+		// Prevent voting on the currently playing track (first in the sorted list)
+		const sortedTracks = sortedPlaylistTracks();
+		const isCurrentlyPlaying = sortedTracks.length > 0 && sortedTracks[0].id === trackId;
+		
+		if (isCurrentlyPlaying) {
+			error = "Cannot vote on the currently playing track";
+			setTimeout(() => (error = ""), 3000);
+			return;
+		}
+
+		try {
+			// Update local user vote state immediately for instant UI feedback
+			localUserVotes.set(trackId, voteType);
+			localUserVotes = new Map(localUserVotes);
+			
+			// Start animation - shrink the opposite buttons
+			if (voteType === 'upvote') {
+				voteAnimations.set(trackId, {
+					upvote: 'w-full',
+					downvote: 'w-0 overflow-hidden',
+					remove: 'w-full'
+				});
+			} else {
+				voteAnimations.set(trackId, {
+					upvote: 'w-0 overflow-hidden', 
+					downvote: 'w-full',
+					remove: 'w-full'
+				});
+			}
+			
+			// Force reactive update
+			voteAnimations = new Map(voteAnimations);
+			
+			// Send vote via WebSocket for real-time feedback
+			if (eventSocketService.isConnected()) {
+				eventSocketService.vote(eventId, trackId, voteType, 1);
+			}
+
+			// Call HTTP API for persistence and automatic reordering
+			await voteForTrackInEvent(eventId, trackId, voteType);
+
+			// Manually refresh voting results to ensure we have latest data
+			try {
+				const latestResults = await getVotingResults(eventId);
+				
+				// Update vote counts manually if WebSocket didn't work
+				if (event?.playlist && Array.isArray(event.playlist)) {
+					event.playlist = event.playlist.map((track) => {
+						const result = latestResults.find((r) => r.track.id === track.id);
+						const newVoteCount = result ? result.voteCount : 0;
+						return {
+							...track,
+							voteCount: newVoteCount,
+							votes: newVoteCount,
+						};
+					});
+					
+					// Force reactivity update
+					event = { ...event };
+				}
+			} catch (refreshError) {
+				console.warn('Failed to refresh voting results:', refreshError);
+			}
+
+			// Clear animation state and reset to default
+			voteAnimations.delete(trackId);
+			voteAnimations = new Map(voteAnimations);
+			// Keep local user vote state - it will be synced by WebSocket update
+
+		} catch (err) {
+			// Reset animation state and local vote state on error
+			voteAnimations.delete(trackId);
+			voteAnimations = new Map(voteAnimations);
+			localUserVotes.delete(trackId);
+			localUserVotes = new Map(localUserVotes);
+			
+			console.error('Error voting for track:', err);
+			
+			// Check if the error is about event status and try to help the user
+			if (err instanceof Error && err.message.includes('Voting is only allowed during live events')) {
+				error = "Event status mismatch detected. Please refresh the page and try again.";
+				// Auto-refresh after a short delay
+				setTimeout(() => {
+					window.location.reload();
+				}, 2000);
+			} else {
+				error = err instanceof Error ? err.message : 'Failed to vote for track';
+			}
+			
+			setTimeout(() => (error = ""), 3000);
+		}
+	}
+
+	async function removeVoteForTrack(trackId: string) {
+		if (!user || !eventId) return;
+
+		// Prevent removing votes from the currently playing track (first in the sorted list)
+		const sortedTracks = sortedPlaylistTracks();
+		const isCurrentlyPlaying = sortedTracks.length > 0 && sortedTracks[0].id === trackId;
+		
+		if (isCurrentlyPlaying) {
+			error = "Cannot remove vote from the currently playing track";
+			setTimeout(() => (error = ""), 3000);
+			return;
+		}
+
+		try {
+
+			// Update local user vote state immediately for instant UI feedback
+			localUserVotes.set(trackId, null);
+			localUserVotes = new Map(localUserVotes);
+
+			// Start animation - expand all buttons back to full width
+			voteAnimations.set(trackId, {
+				upvote: 'w-full',
+				downvote: 'w-full',
+				remove: 'w-0 overflow-hidden'
+			});
+			voteAnimations = new Map(voteAnimations);
+
+			// Send via WebSocket
+			if (eventSocketService.isConnected()) {
+				eventSocketService.removeVote(eventId, trackId);
+			}
+
+			// Call HTTP API for persistence
+			await removeVote(eventId, trackId);
+
+			// Manually refresh voting results to ensure we have latest data
+			try {
+				const latestResults = await getVotingResults(eventId);
+				
+				// Update vote counts manually if WebSocket didn't work
+				if (event?.playlist && Array.isArray(event.playlist)) {
+					event.playlist = event.playlist.map((track) => {
+						const result = latestResults.find((r) => r.track.id === track.id);
+						const newVoteCount = result ? result.voteCount : 0;
+						return {
+							...track,
+							voteCount: newVoteCount,
+							votes: newVoteCount,
+						};
+					});
+					
+					// Force reactivity update
+					event = { ...event };
+				}
+			} catch (refreshError) {
+				console.warn('Failed to refresh voting results:', refreshError);
+			}
+
+			// Clear animation state after successful vote removal
+			voteAnimations.delete(trackId);
+			voteAnimations = new Map(voteAnimations);
+			// Keep local user vote state - it will be synced by WebSocket update
+
+		} catch (err) {
+			// Reset animation state and local vote state on error
+			voteAnimations.delete(trackId);
+			voteAnimations = new Map(voteAnimations);
+			localUserVotes.delete(trackId);
+			localUserVotes = new Map(localUserVotes);
+			
+			console.error('Error removing vote:', err);
+			
+			// Only show user-friendly error message for actual vote not found errors
+			if (err instanceof Error && err.message.includes('Vote not found')) {
+				error = "You haven't voted for this track yet";
+			} else if (err instanceof Error && err.message.includes('Voting is only allowed during live events')) {
+				error = "Event status mismatch detected. Please refresh the page and try again.";
+				// Auto-refresh after a short delay
+				setTimeout(() => {
+					window.location.reload();
+				}, 2000);
+			} else {
+				error = err instanceof Error ? err.message : 'Failed to remove vote';
+			}
+			
+			setTimeout(() => (error = ""), 3000);
 		}
 	}
 </script>
@@ -1202,7 +1671,7 @@
 		</div>
 		<!-- Event Header -->
 		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
-			<div class="flex items-start space-x-6">
+			<div class="flex flex-col md:flex-row items-center md:items-start md:space-x-6 text-center md:text-left">
 				{#if event.coverImageUrl}
 					<img
 						src={event.coverImageUrl}
@@ -1211,7 +1680,7 @@
 					/>
 				{:else}
 					<div
-						class="w-32 h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center"
+						class="w-32 h-32 min-w-32 min-h-32 bg-gradient-to-br from-secondary/20 to-purple-300 rounded-lg flex items-center justify-center"
 					>
 						<svg
 							class="w-16 h-16 text-white"
@@ -1229,44 +1698,24 @@
 					</div>
 				{/if}
 
-				<div class="flex-1">
-					<div class="flex justify-between items-start mb-4">
-						<div>
+				<div class="flex-1 min-w-0 w-full overflow-hidden">
+					<div class="flex flex-col sm:flex-row sm:justify-between sm:items-start my-4">
+						<div id="here" class="w-full min-w-0 max-w-full overflow-hidden">
 							<h1
-								class="font-family-main text-3xl font-bold text-gray-800 mb-2"
+								class="font-family-main text-2xl sm:text-3xl font-bold text-gray-800 mb-2 truncate w-full"
 							>
 								{event.name || event.title}
 							</h1>
 							{#if event.description}
-								<p class="text-gray-600 mb-4">
+								<p class="text-gray-600 mb-4 text-sm sm:text-base break-words truncate w-full">
 									{event.description}
 								</p>
-							{/if}
-						</div>
-
-						<div class="flex space-x-2">
-							<span
-								class="px-3 py-1 text-sm rounded-full {event.visibility ===
-								'public'
-									? 'bg-green-100 text-green-800'
-									: 'bg-blue-100 text-blue-800'}"
-							>
-								{event.visibility === "public"
-									? "Public"
-									: "Private"}
-							</span>
-							{#if event.allowsVoting}
-								<span
-									class="px-3 py-1 text-sm rounded-full bg-purple-100 text-purple-800"
-								>
-									Voting Enabled
-								</span>
 							{/if}
 						</div>
 					</div>
 
 					<div
-						class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-4"
+						class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600"
 					>
 						<div>
 							<span class="font-medium">Host:</span>
@@ -1307,6 +1756,49 @@
 							>
 						</div>
 					</div>
+					{#if canEdit && event.licenseType === "invited"}
+						<div class="flex space-x-3 mt-4 justify-center md:justify-start">
+							{#if isCreator || isAdmin}
+								<button
+									onclick={() =>
+										(showAddAdminModal = true)}
+									class="border border-secondary text-secondary px-4 py-2 rounded-lg hover:bg-secondary/10 transition-colors"
+								>
+									Invite Admins
+								</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
+				<div class="flex space-x-2 mt-4 md:mt-0">
+					{#if event.status === "live"}
+						<span
+							class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+						>
+							🔴 Live
+						</span>
+					{/if}
+					{#if event.visibility === "private"}
+						<span
+							class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+						>
+							Private
+						</span>
+					{/if}
+					{#if event.visibility !== "private" && event.licenseType === "invited"}
+						<span
+							class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+						>
+							Closed
+						</span>
+					{/if}
+					{#if event.licenseType === "location_based" && event.locationName}
+						<span
+							class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
+						>
+							{event.locationName}
+						</span>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -1320,400 +1812,376 @@
 		{/if}
 
 		<!-- Playlist -->
-		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
-			<div class="flex justify-between items-center mb-6">
-				<div>
-					<h2 class="text-xl font-bold text-gray-800">
-						Event Playlist
-					</h2>
-					<p class="text-sm text-gray-600">
-						{sortedPlaylistTracks().length} track{sortedPlaylistTracks()
-							.length !== 1
-							? "s"
-							: ""}
-						{canVoteForTracks()
-							? "• Vote to prioritize tracks"
-							: "• Voting available for participants"}
-					</p>
-				</div>
-				<div class="flex space-x-2">
-					{#if isMusicPlayerInitialized}
-						<div class="flex items-center text-sm text-secondary">
-							<svg
-								class="w-4 h-4 mr-1"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-								></path>
-							</svg>
-							Music Player Active
-						</div>
-					{/if}
-					{#if isAdmin || isCreator}
-						<button
-							onclick={() => (showMusicSearchModal = true)}
-							class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors flex items-center space-x-2"
-						>
-							<svg
-								class="w-4 h-4"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M12 4v16m8-8H4"
-								></path>
-							</svg>
-							<span>Search & Add Music</span>
-						</button>
-						<button
-							onclick={() => (showPlaylistModal = true)}
-							class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors flex items-center space-x-2"
-						>
-							<svg
-								class="w-4 h-4"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
-								></path>
-							</svg>
-							<span>Add Playlist</span>
-						</button>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Search for tracks within event -->
-			{#if event?.playlist && event.playlist.length > 0}
-				<div class="mb-6">
-					<div class="relative max-w-md">
-						<div
-							class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-						>
-							<svg
-								class="h-5 w-5 text-gray-400"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-								></path>
-							</svg>
-						</div>
-						<input
-							type="text"
-							bind:value={searchQuery}
-							placeholder="Search tracks in this event..."
-							class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-						/>
-					</div>
-					{#if searchQuery.trim() && filteredTracks().length !== event.playlist.length}
-						<p class="text-sm text-gray-600 mt-2">
-							Showing {filteredTracks().length} of {event.playlist
-								.length} tracks
+		<div class="flex flex-col lg:flex-row gap-8">
+			<div class="w-full bg-white rounded-lg shadow-md p-6">
+				<div class="flex justify-between items-center mb-6">
+					<div>
+						<h2 class="text-xl font-bold text-gray-800">
+							Event Playlist
+						</h2>
+						<p class="text-sm text-gray-600">
+							{sortedPlaylistTracks().length} track{sortedPlaylistTracks()
+								.length !== 1
+								? "s"
+								: ""}
+							{canVoteForTracks()
+								? "• Vote for upcoming tracks"
+								: "• Voting available for participants"}
 						</p>
-					{/if}
-				</div>
-			{/if}
-
-			{#if sortedPlaylistTracks().length === 0}
-				<div class="text-center py-8">
-					<p class="text-gray-500 mb-4">
-						No tracks in this playlist yet
-					</p>
-					{#if canEdit}
-						<button
-							onclick={() => (showMusicSearchModal = true)}
-							class="bg-secondary text-white px-6 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
-						>
-							Search & Add Music
-						</button>
-					{/if}
-				</div>
-			{:else}
-				<div class="space-y-2">
-					{#each filteredTracks() as track, index}
-						<div
-							class="flex items-center space-x-4 p-3 border rounded-lg transition-colors {canEdit
-								? 'cursor-move'
-								: ''} {playerState.currentTrackIndex ===
-								index && !searchQuery.trim()
-								? 'border-secondary bg-secondary/5'
-								: 'border-gray-200 hover:bg-gray-50'}"
-							draggable={canEdit && !searchQuery.trim()}
-							role={canEdit ? "listitem" : "none"}
-							ondragstart={(e) =>
-								!searchQuery.trim() &&
-								handleDragStart(e, index)}
-							ondragover={handleDragOver}
-							ondrop={(e) =>
-								!searchQuery.trim() && handleDrop(e, index)}
-						>
-							<div
-								class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {playerState.currentTrackIndex ===
-									index && !searchQuery.trim()
-									? 'bg-secondary text-white'
-									: 'bg-gray-200 text-gray-600'}"
+					</div>
+					{#if isAdmin || isCreator}
+						<div class="flex space-x-3">
+							<button
+								onclick={() => (showMusicSearchModal = true)}
+								class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors flex items-center space-x-2"
 							>
-								{#if playerState.currentTrackIndex === index && playerState.isPlaying && !searchQuery.trim()}
-									<!-- Now playing indicator -->
-									<svg
-										class="w-4 h-4"
-										fill="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path d="M8 5v14l11-7z" />
-									</svg>
-								{:else}
-									{searchQuery.trim()
-										? (event?.playlist?.indexOf(track) ??
-												index) + 1
-										: index + 1}
-								{/if}
-							</div>
-
-							{#if track.thumbnailUrl}
-								<img
-									src={track.thumbnailUrl}
-									alt={track.title}
-									class="w-12 h-12 rounded object-cover"
-								/>
-							{:else}
-								<div
-									class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center"
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
 								>
-									<svg
-										class="w-6 h-6 text-gray-400"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
-										></path>
-									</svg>
-								</div>
-							{/if}
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M12 4v16m8-8H4"
+									></path>
+								</svg>
+								<span>Search & Add Music</span>
+							</button>
+							<button
+								onclick={() => (showPlaylistModal = true)}
+								class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors flex items-center space-x-2"
+							>
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
+									></path>
+								</svg>
+								<span>Add Playlist</span>
+							</button>
+						</div>
+					{/if}
+				</div>
 
-							<div class="flex-1">
-								<h4 class="font-medium text-gray-800">
-									{track.title}
-								</h4>
-								<p class="text-sm text-gray-600">
-									{track.artist}
-								</p>
-								{#if track.album}
-									<p class="text-xs text-gray-500">
-										{track.album}
-									</p>
-								{/if}
-								<p class="text-xs text-gray-400">
-									Added by {event.participants.find(
-										(p) => p.id === track.addedBy,
-									)?.displayName || "Unknown"} • {formatDate(
-										track.createdAt ||
-											new Date().toISOString(),
-									)}
-								</p>
+				<!-- Search for tracks within event -->
+				{#if event?.playlist && event.playlist.length > 0}
+					<div class="mb-6">
+						<div class="relative max-w-md">
+							<div
+								class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+							>
+								<svg
+									class="h-5 w-5 text-gray-400"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+									></path>
+								</svg>
 							</div>
+							<input
+								type="text"
+								bind:value={searchQuery}
+								placeholder="Search tracks in this event..."
+								class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+							/>
+						</div>
+						{#if searchQuery.trim() && filteredTracks().length !== event.playlist.length}
+							<p class="text-sm text-gray-600 mt-2">
+								Showing {filteredTracks().length} of {event.playlist
+									.length} tracks
+							</p>
+						{/if}
+					</div>
+				{/if}
 
-							<div class="flex items-center space-x-3">
-								{#if track.duration}
-									<span class="text-sm text-gray-500"
-										>{formatDuration(track.duration)}</span
+				{#if sortedPlaylistTracks().length === 0}
+					<div class="text-center py-8">
+						<p class="text-gray-500 mb-4">
+							No tracks in this playlist yet
+						</p>
+						{#if canEdit}
+							<button
+								onclick={() => (showMusicSearchModal = true)}
+								class="bg-secondary text-white px-6 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
+							>
+								Search & Add Music
+							</button>
+						{/if}
+					</div>
+				{:else}
+					<div class="space-y-2">
+						{#each filteredTracks() as track, index (track.id)}
+							<div class="relative" animate:flip={{ duration: 700 }}>
+								<div
+									class="flex relative group items-center overflow-hidden space-x-4 p-3 border rounded-lg transition-colors {index === 0
+										? 'border-secondary bg-secondary/5'
+										: 'border-gray-200 hover:bg-gray-50'}"
+									role={canEdit ? "listitem" : "none"}
+								>
+									<div
+										class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {index === 0
+											? 'bg-secondary text-white'
+											: 'bg-gray-200 text-gray-600'}"
 									>
-								{/if}
+										{#if index === 0}
+											<!-- Now playing indicator -->
+											<svg version="1.0" class="w-4 h-4" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64" enable-background="new 0 0 64 64" xml:space="preserve" fill="#ffffff"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path fill="#ffffff" d="M62.799,23.737c-0.47-1.399-1.681-2.419-3.139-2.642l-16.969-2.593L35.069,2.265 C34.419,0.881,33.03,0,31.504,0c-1.527,0-2.915,0.881-3.565,2.265l-7.623,16.238L3.347,21.096c-1.458,0.223-2.669,1.242-3.138,2.642 c-0.469,1.4-0.115,2.942,0.916,4l12.392,12.707l-2.935,17.977c-0.242,1.488,0.389,2.984,1.62,3.854 c1.23,0.87,2.854,0.958,4.177,0.228l15.126-8.365l15.126,8.365c0.597,0.33,1.254,0.492,1.908,0.492c0.796,0,1.592-0.242,2.269-0.72 c1.231-0.869,1.861-2.365,1.619-3.854l-2.935-17.977l12.393-12.707C62.914,26.68,63.268,25.138,62.799,23.737z"></path> </g></svg>
+										{:else}
+											{track.voteCount ?? track.votes ?? 0}
+										{/if}
+									</div>
 
-								<!-- Music Player Controls -->
-								{#if isMusicPlayerInitialized}
-									<div class="flex items-center space-x-2">
-										<!-- Play Button -->
-										<button
-											onclick={() => {
-												const actualIndex =
-													searchQuery.trim()
+									{#if track.thumbnailUrl}
+										<img
+											src={track.thumbnailUrl}
+											alt={track.title}
+											class="w-12 h-12 rounded object-cover"
+										/>
+									{:else}
+										<div
+											class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center"
+										>
+											<svg
+												class="w-6 h-6 text-gray-400"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
+												></path>
+											</svg>
+										</div>
+									{/if}
+
+									<div class="flex-1">
+										<h4 class="font-medium text-gray-800">
+											{track.title}
+										</h4>
+										<p class="text-sm text-gray-600">
+											{track.artist}
+										</p>
+										{#if track.album}
+											<p class="text-xs text-gray-500">
+												{track.album}
+											</p>
+										{/if}
+										<p class="text-xs text-gray-400">
+											Added by {event.participants.find(
+												(p) => p.id === track.addedBy,
+											)?.displayName || "Unknown"}
+										</p>
+									</div>
+
+									<div class="flex items-center space-x-3 mr-4">
+										<!-- Music Player Controls -->
+										{#if isMusicPlayerInitialized && index === 0}
+											<div class="flex items-center space-x-2">
+												<!-- Play Button -->
+												<button
+													onclick={() => {
+														const actualIndex =
+															searchQuery.trim()
+																? (event?.playlist?.indexOf(
+																		track,
+																	) ?? index)
+																: index;
+														// If this track is currently playing, toggle play/pause
+														if (
+															playerState.currentTrackIndex ===
+																actualIndex &&
+															playerState.currentTrack
+														) {
+															if (playerState.isPlaying) {
+																musicPlayerStore.pause();
+															} else {
+																musicPlayerStore.play();
+															}
+														} else {
+															// Play this track
+															playTrack(actualIndex);
+														}
+													}}
+													disabled={!playerState.canControl}
+													class="p-1.5 rounded-full {playerState.currentTrackIndex ===
+													(searchQuery.trim()
 														? (event?.playlist?.indexOf(
 																track,
 															) ?? index)
-														: index;
-												// If this track is currently playing, toggle play/pause
-												if (
-													playerState.currentTrackIndex ===
-														actualIndex &&
-													playerState.currentTrack
-												) {
-													if (playerState.isPlaying) {
-														musicPlayerStore.pause();
-													} else {
-														musicPlayerStore.play();
-													}
-												} else {
-													// Play this track
-													playTrack(actualIndex);
-												}
-											}}
-											disabled={!playerState.canControl}
-											class="p-1.5 rounded-full {playerState.currentTrackIndex ===
-											(searchQuery.trim()
-												? (event?.playlist?.indexOf(
-														track,
-													) ?? index)
-												: index)
-												? 'bg-secondary text-white'
-												: 'bg-gray-100 text-gray-600'} hover:bg-secondary hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-											title={playerState.currentTrackIndex ===
-											(searchQuery.trim()
-												? (event?.playlist?.indexOf(
-														track,
-													) ?? index)
-												: index)
-												? playerState.isPlaying
-													? "Pause (30s preview)"
-													: "Resume (30s preview)"
-												: "Play 30s preview"}
-											aria-label={`${playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying ? "Pause" : "Play"} ${track.title}`}
-										>
-											{#if playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying}
-												<!-- Pause icon -->
-												<svg
-													class="w-3 h-3"
-													fill="currentColor"
-													viewBox="0 0 24 24"
+														: index)
+														? 'bg-secondary text-white'
+														: 'bg-gray-100 text-gray-600'} hover:bg-secondary hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+													title={playerState.currentTrackIndex ===
+													(searchQuery.trim()
+														? (event?.playlist?.indexOf(
+																track,
+															) ?? index)
+														: index)
+														? playerState.isPlaying
+															? "Pause"
+															: "Resume"
+														: "Play"}
+													aria-label={`${playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying ? "Pause" : "Play"} ${track.title}`}
 												>
-													<path
-														d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"
-													/>
-												</svg>
-											{:else}
-												<!-- Play icon -->
-												<svg
-													class="w-3 h-3"
-													fill="currentColor"
-													viewBox="0 0 24 24"
-												>
-													<path d="M8 5v14l11-7z" />
-												</svg>
-											{/if}
-										</button>
+													{#if playerState.currentTrackIndex === (searchQuery.trim() ? (event?.playlist?.indexOf(track) ?? index) : index) && playerState.isPlaying}
+														<!-- Pause icon -->
+														<svg
+															class="w-3 h-3"
+															fill="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"
+															/>
+														</svg>
+													{:else}
+														<!-- Play icon -->
+														<svg
+															class="w-3 h-3"
+															fill="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path d="M8 5v14l11-7z" />
+														</svg>
+													{/if}
+												</button>
+											</div>
+										{/if}
+										{#if track.duration}
+											<span class="text-sm text-gray-500"
+												>{formatDuration(track.duration)}</span
+											>
+										{/if}
 
-										<!-- Preview indicator -->
-										<span
-											class="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full"
-										>
-											30s preview
-										</span>
 									</div>
-								{/if}
+									<!-- Vote Hover - Only show for tracks that are NOT the first one (currently playing) -->
+									{#if index !== 0 && canVoteForTracks()}
+										<div class="absolute top-0 left-[-4%] w-[108%] h-full rounded-lg flex justify-center {getUserVoteForTrack(track.id) ? '' : 'opacity-0'} group-hover:opacity-100 transition-opacity">
+											<!-- UpVote Button -->
+											<button disabled={getUserVoteForTrack(track.id) === 'upvote'} class="clickable bg-gradient-to-r from-orange-400/20 to-orange-400/80 {getButtonWidthClass(track.id, 'upvote')} flex items-center justify-center opacity-20 -skew-x-19 {getUserVoteForTrack(track.id) === 'upvote' ? '' : 'hover:opacity-80'} cursor-pointer rounded-l-lg transition-all duration-300 ease-in-out" onclick={() => voteForTrackSimple(track.id, 'upvote')} aria-label="upvote track" title="Upvote Track">
+												<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 skew-x-19" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" ><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#f9fafb" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <title>Promote</title> <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"> <g id="Arrow" transform="translate(-432.000000, 0.000000)"> <g id="Promote" transform="translate(432.000000, 0.000000)"> <path d="M24,0 L24,24 L0,24 L0,0 L24,0 Z M12.5934901,23.257841 L12.5819402,23.2595131 L12.5108777,23.2950439 L12.4918791,23.2987469 L12.4918791,23.2987469 L12.4767152,23.2950439 L12.4056548,23.2595131 C12.3958229,23.2563662 12.3870493,23.2590235 12.3821421,23.2649074 L12.3780323,23.275831 L12.360941,23.7031097 L12.3658947,23.7234994 L12.3769048,23.7357139 L12.4804777,23.8096931 L12.4953491,23.8136134 L12.4953491,23.8136134 L12.5071152,23.8096931 L12.6106902,23.7357139 L12.6232938,23.7196733 L12.6232938,23.7196733 L12.6266527,23.7031097 L12.609561,23.275831 C12.6075724,23.2657013 12.6010112,23.2592993 12.5934901,23.257841 L12.5934901,23.257841 Z M12.8583906,23.1452862 L12.8445485,23.1473072 L12.6598443,23.2396597 L12.6498822,23.2499052 L12.6498822,23.2499052 L12.6471943,23.2611114 L12.6650943,23.6906389 L12.6699349,23.7034178 L12.6699349,23.7034178 L12.678386,23.7104931 L12.8793402,23.8032389 C12.8914285,23.8068999 12.9022333,23.8029875 12.9078286,23.7952264 L12.9118235,23.7811639 L12.8776777,23.1665331 C12.8752882,23.1545897 12.8674102,23.1470016 12.8583906,23.1452862 L12.8583906,23.1452862 Z M12.1430473,23.1473072 C12.1332178,23.1423925 12.1221763,23.1452606 12.1156365,23.1525954 L12.1099173,23.1665331 L12.0757714,23.7811639 C12.0751323,23.7926639 12.0828099,23.8018602 12.0926481,23.8045676 L12.108256,23.8032389 L12.3092106,23.7104931 L12.3186497,23.7024347 L12.3186497,23.7024347 L12.3225043,23.6906389 L12.340401,23.2611114 L12.337245,23.2485176 L12.337245,23.2485176 L12.3277531,23.2396597 L12.1430473,23.1473072 Z" id="MingCute" fill-rule="nonzero"> </path> <path d="M11.2929,8.2928 C11.6834,7.90228 12.3166,7.90228 12.7071,8.2928 L18.364,13.9497 C18.7545,14.3402 18.7545,14.9733 18.364,15.3639 C17.9734,15.7544 17.3403,15.7544 16.9497,15.3639 L12,10.4141 L7.05025,15.3639 C6.65973,15.7544 6.02656,15.7544 5.63604,15.3639 C5.24551,14.9733 5.24551,14.3402 5.63604,13.9497 L11.2929,8.2928 Z" fill="#f6a437"> </path> </g> </g> </g> </g></svg>
+											</button>
+											<!-- Remove Vote Button -->
+											<button class="clickable from-gray-400/20 to-gray-600/80 {getButtonWidthClass(track.id, 'remove')} flex items-center justify-center opacity-20 -skew-x-19 hover:opacity-80 cursor-pointer transition-all duration-300 ease-in-out" onclick={() => removeVoteForTrack(track.id)} aria-label="remove vote" title="Remove Vote">
+												<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 skew-x-19" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#ffffff" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z" stroke-width="0"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M6.99486 7.00636C6.60433 7.39689 6.60433 8.03005 6.99486 8.42058L10.58 12.0057L6.99486 15.5909C6.60433 15.9814 6.60433 16.6146 6.99486 17.0051C7.38538 17.3956 8.01855 17.3956 8.40907 17.0051L11.9942 13.4199L15.5794 17.0051C15.9699 17.3956 16.6031 17.3956 16.9936 17.0051C17.3841 16.6146 17.3841 15.9814 16.9936 15.5909L13.4084 12.0057L16.9936 8.42059C17.3841 8.03007 17.3841 7.3969 16.9936 7.00638C16.603 6.61585 15.9699 6.61585 15.5794 7.00638L11.9942 10.5915L8.40907 7.00636C8.01855 6.61584 7.38538 6.61584 6.99486 7.00636Z" fill="#6b7280"></path> </g></svg>
+											</button>
+											<!-- DownVote Button -->
+											<button disabled={getUserVoteForTrack(track.id) === 'downvote'} class="clickable bg-gradient-to-l from-purple-400/20 to-purple-400/80 {getButtonWidthClass(track.id, 'downvote')} flex items-center justify-center opacity-20 -skew-x-19 {getUserVoteForTrack(track.id) === 'downvote' ? '' : 'hover:opacity-80'} cursor-pointer rounded-r-lg transition-all duration-300 ease-in-out" onclick={() => voteForTrackSimple(track.id, 'downvote')} aria-label="downvote track" title="Downvote Track">
+												<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 skew-x-19 rotate-180" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" ><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#f9fafb" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <title>Promote</title> <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"> <g id="Arrow" transform="translate(-432.000000, 0.000000)"> <g id="Promote" transform="translate(432.000000, 0.000000)"> <path d="M24,0 L24,24 L0,24 L0,0 L24,0 Z M12.5934901,23.257841 L12.5819402,23.2595131 L12.5108777,23.2950439 L12.4918791,23.2987469 L12.4918791,23.2987469 L12.4767152,23.2950439 L12.4056548,23.2595131 C12.3958229,23.2563662 12.3870493,23.2590235 12.3821421,23.2649074 L12.3780323,23.275831 L12.360941,23.7031097 L12.3658947,23.7234994 L12.3769048,23.7357139 L12.4804777,23.8096931 L12.4953491,23.8136134 L12.4953491,23.8136134 L12.5071152,23.8096931 L12.6106902,23.7357139 L12.6232938,23.7196733 L12.6232938,23.7196733 L12.6266527,23.7031097 L12.609561,23.275831 C12.6075724,23.2657013 12.6010112,23.2592993 12.5934901,23.257841 L12.5934901,23.257841 Z M12.8583906,23.1452862 L12.8445485,23.1473072 L12.6598443,23.2396597 L12.6498822,23.2499052 L12.6498822,23.2499052 L12.6471943,23.2611114 L12.6650943,23.6906389 L12.6699349,23.7034178 L12.6699349,23.7034178 L12.678386,23.7104931 L12.8793402,23.8032389 C12.8914285,23.8068999 12.9022333,23.8029875 12.9078286,23.7952264 L12.9118235,23.7811639 L12.8776777,23.1665331 C12.8752882,23.1545897 12.8674102,23.1470016 12.8583906,23.1452862 L12.8583906,23.1452862 Z M12.1430473,23.1473072 C12.1332178,23.1423925 12.1221763,23.1452606 12.1156365,23.1525954 L12.1099173,23.1665331 L12.0757714,23.7811639 C12.0751323,23.7926639 12.0828099,23.8018602 12.0926481,23.8045676 L12.108256,23.8032389 L12.3092106,23.7104931 L12.3186497,23.7024347 L12.3186497,23.7024347 L12.3225043,23.6906389 L12.340401,23.2611114 L12.337245,23.2485176 L12.337245,23.2485176 L12.3277531,23.2396597 L12.1430473,23.1473072 Z" id="MingCute" fill-rule="nonzero"> </path> <path d="M11.2929,8.2928 C11.6834,7.90228 12.3166,7.90228 12.7071,8.2928 L18.364,13.9497 C18.7545,14.3402 18.7545,14.9733 18.364,15.3639 C17.9734,15.7544 17.3403,15.7544 16.9497,15.3639 L12,10.4141 L7.05025,15.3639 C6.65973,15.7544 6.02656,15.7544 5.63604,15.3639 C5.24551,14.9733 5.24551,14.3402 5.63604,13.9497 L11.2929,8.2928 Z" fill="#c084fc"> </path> </g> </g> </g> </g></svg>
+											</button>
+										</div>
+									{/if}
+									<!-- "Now Playing" indicator for the first track -->
+									{#if index === 0}
+										<div class="absolute top-0 left-[-4%] w-[108%] h-full rounded-lg flex justify-center items-center opacity-0 group-hover:opacity-100 transition-opacity">
+											<div class="bg-secondary/20 text-secondary w-full h-full rounded-lg flex items-center justify-center opacity-80 text-sm font-medium">
+												♪ Now Playing - No Voting
+											</div>
+										</div>
+									{/if}
+								</div>
+								<!-- Remove Track Button -->
 								{#if canEdit}
-									<button
-										onclick={() => removeTrack(track.id)}
-										aria-label="Remove track"
-										class="text-red-500 hover:text-red-700 transition-colors"
-										title="Remove track"
-									>
-										<svg
-											class="w-4 h-4"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-											></path>
-										</svg>
+									<button class="absolute clickable right-0 top-[50%] translate-x-[50%] translate-y-[-50%] w-10 h-10 group" onclick={() => (removeTrack(track.id))} aria-label="remove track" title="Remove Track">
+										<svg viewBox="-8.4 -8.4 40.80 40.80" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"><path transform="translate(-8.4, -8.4), scale(2.55)" fill="#ffffff" class:group-hover:fill-secondary={index === 0} class="group-hover:fill-gray-200 transition-colors duration-200" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M4 6H20M16 6L15.7294 5.18807C15.4671 4.40125 15.3359 4.00784 15.0927 3.71698C14.8779 3.46013 14.6021 3.26132 14.2905 3.13878C13.9376 3 13.523 3 12.6936 3H11.3064C10.477 3 10.0624 3 9.70951 3.13878C9.39792 3.26132 9.12208 3.46013 8.90729 3.71698C8.66405 4.00784 8.53292 4.40125 8.27064 5.18807L8 6M18 6V16.2C18 17.8802 18 18.7202 17.673 19.362C17.3854 19.9265 16.9265 20.3854 16.362 20.673C15.7202 21 14.8802 21 13.2 21H10.8C9.11984 21 8.27976 21 7.63803 20.673C7.07354 20.3854 6.6146 19.9265 6.32698 19.362C6 18.7202 6 17.8802 6 16.2V6M14 10V17M10 10V17" stroke="#e01b24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
 									</button>
 								{/if}
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<!-- Participants Sidebar -->
-		<div class="lg:col-span-1 space-y-6">
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<!-- Participants Sidebar -->
 			<div class="bg-white rounded-lg shadow-md p-6">
 				<div class="flex items-center justify-between mb-4">
 					<h2 class="text-xl font-bold text-gray-800">
 						Participants
 					</h2>
 					<span
-						class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-sm font-medium"
+						class="bg-secondary/10 text-secondary px-2 py-1 rounded-full text-sm font-medium ml-2"
 					>
 						{event.participants.length}
 					</span>
 				</div>
-
 				<div>
 					{#each sortedParticipants() as participant}
 						{@const role = getUserRole(participant.id)}
-						<button
-							onclick={() => goto(`/users/${participant.id}`)}
-							class="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors w-full text-left {participant.id ===
-							user?.id
-								? 'bg-gray-100'
-								: ''}"
-						>
-							{#if participant.avatarUrl && !participant.avatarUrl.startsWith("data:image/svg+xml")}
-								<img
-									src={participant.avatarUrl}
-									alt={participant.displayName}
-									class="w-10 h-10 rounded-full object-cover"
-								/>
-							{:else}
-								<div
-									class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-									style="background-color: {getAvatarColor(
-										participant.displayName || 'Unknown',
-									)}"
-								>
-									{getAvatarLetter(
-										participant.displayName || "Unknown",
-									)}
+						<div class="group relative">
+							<button
+								onclick={() => goto(`/users/${participant.id}`)}
+								class="flex pr-4 items-center space-x-3 p-2 rounded-lg hover:bg-gray-50 transition-colors w-full relative text-left {participant.id ===
+								user?.id
+									? 'bg-gray-100'
+									: ''}"
+							>
+								{#if participant.avatarUrl && !participant.avatarUrl.startsWith("data:image/svg+xml")}
+									<img
+										src={participant.avatarUrl}
+										alt={participant.displayName}
+										class="w-10 h-10 rounded-full object-cover"
+									/>
+								{:else}
+									<div
+										class="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm"
+										style="background-color: {getAvatarColor(
+											participant.displayName || 'Unknown',
+										)}"
+									>
+										{getAvatarLetter(
+											participant.displayName || "Unknown",
+										)}
+									</div>
+								{/if}
+								<div class="flex-1 min-w-0">
+									<p class="font-medium text-gray-800 truncate">
+										{participant.displayName ||
+											participant.username}
+									</p>
+									<div
+										class="flex items-center space-x-2 text-xs text-gray-500"
+									>
+										{role}
+									</div>
 								</div>
+							</button>
+							{#if (isCreator || isAdmin) && participant.id !== user?.id && role !== "Owner" && role !== "Admin"}
+								<button class="absolute clickable right-0 top-[50%] translate-x-[50%] translate-y-[-50%] opacity-0 group-hover:opacity-100 transition-opacity duration-200" onclick={() => (showPromoteModal = true, selectedUserId = participant.id)} aria-label="Promote to admin">
+									<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 animate-bounce" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" ><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#f9fafb" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <title>Promote</title> <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"> <g id="Arrow" transform="translate(-432.000000, 0.000000)"> <g id="Promote" transform="translate(432.000000, 0.000000)"> <path d="M24,0 L24,24 L0,24 L0,0 L24,0 Z M12.5934901,23.257841 L12.5819402,23.2595131 L12.5108777,23.2950439 L12.4918791,23.2987469 L12.4918791,23.2987469 L12.4767152,23.2950439 L12.4056548,23.2595131 C12.3958229,23.2563662 12.3870493,23.2590235 12.3821421,23.2649074 L12.3780323,23.275831 L12.360941,23.7031097 L12.3658947,23.7234994 L12.3769048,23.7357139 L12.4804777,23.8096931 L12.4953491,23.8136134 L12.4953491,23.8136134 L12.5071152,23.8096931 L12.6106902,23.7357139 L12.6232938,23.7196733 L12.6232938,23.7196733 L12.6266527,23.7031097 L12.609561,23.275831 C12.6075724,23.2657013 12.6010112,23.2592993 12.5934901,23.257841 L12.5934901,23.257841 Z M12.8583906,23.1452862 L12.8445485,23.1473072 L12.6598443,23.2396597 L12.6498822,23.2499052 L12.6498822,23.2499052 L12.6471943,23.2611114 L12.6650943,23.6906389 L12.6699349,23.7034178 L12.6699349,23.7034178 L12.678386,23.7104931 L12.8793402,23.8032389 C12.8914285,23.8068999 12.9022333,23.8029875 12.9078286,23.7952264 L12.9118235,23.7811639 L12.8776777,23.1665331 C12.8752882,23.1545897 12.8674102,23.1470016 12.8583906,23.1452862 L12.8583906,23.1452862 Z M12.1430473,23.1473072 C12.1332178,23.1423925 12.1221763,23.1452606 12.1156365,23.1525954 L12.1099173,23.1665331 L12.0757714,23.7811639 C12.0751323,23.7926639 12.0828099,23.8018602 12.0926481,23.8045676 L12.108256,23.8032389 L12.3092106,23.7104931 L12.3186497,23.7024347 L12.3186497,23.7024347 L12.3225043,23.6906389 L12.340401,23.2611114 L12.337245,23.2485176 L12.337245,23.2485176 L12.3277531,23.2396597 L12.1430473,23.1473072 Z" id="MingCute" fill-rule="nonzero"> </path> <path d="M11.2929,8.2928 C11.6834,7.90228 12.3166,7.90228 12.7071,8.2928 L18.364,13.9497 C18.7545,14.3402 18.7545,14.9733 18.364,15.3639 C17.9734,15.7544 17.3403,15.7544 16.9497,15.3639 L12,10.4141 L7.05025,15.3639 C6.65973,15.7544 6.02656,15.7544 5.63604,15.3639 C5.24551,14.9733 5.24551,14.3402 5.63604,13.9497 L11.2929,8.2928 Z" fill="#f6a437"> </path> </g> </g> </g> </g></svg>
+								</button>
 							{/if}
-
-							<div class="flex-1 min-w-0">
-								<p class="font-medium text-gray-800 truncate">
-									{participant.displayName ||
-										participant.username}
-								</p>
-								<div
-									class="flex items-center space-x-2 text-xs text-gray-500"
-								>
-									{role}
-								</div>
-							</div>
-						</button>
+							{#if role === "Admin" || role === "Owner"}
+								<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 absolute right-0 top-[50%] translate-x-[50%] translate-y-[-50%]" class:group-hover:hidden={isCreator && role === 'Admin'} fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier"><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#ffffff" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M11.2691 4.41115C11.5006 3.89177 11.6164 3.63208 11.7776 3.55211C11.9176 3.48263 12.082 3.48263 12.222 3.55211C12.3832 3.63208 12.499 3.89177 12.7305 4.41115L14.5745 8.54808C14.643 8.70162 14.6772 8.77839 14.7302 8.83718C14.777 8.8892 14.8343 8.93081 14.8982 8.95929C14.9705 8.99149 15.0541 9.00031 15.2213 9.01795L19.7256 9.49336C20.2911 9.55304 20.5738 9.58288 20.6997 9.71147C20.809 9.82316 20.8598 9.97956 20.837 10.1342C20.8108 10.3122 20.5996 10.5025 20.1772 10.8832L16.8125 13.9154C16.6877 14.0279 16.6252 14.0842 16.5857 14.1527C16.5507 14.2134 16.5288 14.2807 16.5215 14.3503C16.5132 14.429 16.5306 14.5112 16.5655 14.6757L17.5053 19.1064C17.6233 19.6627 17.6823 19.9408 17.5989 20.1002C17.5264 20.2388 17.3934 20.3354 17.2393 20.3615C17.0619 20.3915 16.8156 20.2495 16.323 19.9654L12.3995 17.7024C12.2539 17.6184 12.1811 17.5765 12.1037 17.56C12.0352 17.5455 11.9644 17.5455 11.8959 17.56C11.8185 17.5765 11.7457 17.6184 11.6001 17.7024L7.67662 19.9654C7.18404 20.2495 6.93775 20.3915 6.76034 20.3615C6.60623 20.3354 6.47319 20.2388 6.40075 20.1002C6.31736 19.9408 6.37635 19.6627 6.49434 19.1064L7.4341 14.6757C7.46898 14.5112 7.48642 14.429 7.47814 14.3503C7.47081 14.2807 7.44894 14.2134 7.41394 14.1527C7.37439 14.0842 7.31195 14.0279 7.18708 13.9154L3.82246 10.8832C3.40005 10.5025 3.18884 10.3122 3.16258 10.1342C3.13978 9.97956 3.19059 9.82316 3.29993 9.71147C3.42581 9.58288 3.70856 9.55304 4.27406 9.49336L8.77835 9.01795C8.94553 9.00031 9.02911 8.99149 9.10139 8.95929C9.16534 8.93081 9.2226 8.8892 9.26946 8.83718C9.32241 8.77839 9.35663 8.70162 9.42508 8.54808L11.2691 4.41115Z" stroke="#f6a437" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
+								{#if isCreator && role === "Admin"}
+									<button class="absolute right-0 top-[50%] translate-x-[50%] translate-y-[-50%] hidden group-hover:block" onclick={() => (removeAdmin(participant.id))} aria-label="Promote to admin">
+										<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 rotate-180 animate-bounce" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" ><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#f9fafb" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <title>Promote</title> <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"> <g id="Arrow" transform="translate(-432.000000, 0.000000)"> <g id="Promote" transform="translate(432.000000, 0.000000)"> <path d="M24,0 L24,24 L0,24 L0,0 L24,0 Z M12.5934901,23.257841 L12.5819402,23.2595131 L12.5108777,23.2950439 L12.4918791,23.2987469 L12.4918791,23.2987469 L12.4767152,23.2950439 L12.4056548,23.2595131 C12.3958229,23.2563662 12.3870493,23.2590235 12.3821421,23.2649074 L12.3780323,23.275831 L12.360941,23.7031097 L12.3658947,23.7234994 L12.3769048,23.7357139 L12.4804777,23.8096931 L12.4953491,23.8136134 L12.4953491,23.8136134 L12.5071152,23.8096931 L12.6106902,23.7357139 L12.6232938,23.7196733 L12.6232938,23.7196733 L12.6266527,23.7031097 L12.609561,23.275831 C12.6075724,23.2657013 12.6010112,23.2592993 12.5934901,23.257841 L12.5934901,23.257841 Z M12.8583906,23.1452862 L12.8445485,23.1473072 L12.6598443,23.2396597 L12.6498822,23.2499052 L12.6498822,23.2499052 L12.6471943,23.2611114 L12.6650943,23.6906389 L12.6699349,23.7034178 L12.6699349,23.7034178 L12.678386,23.7104931 L12.8793402,23.8032389 C12.8914285,23.8068999 12.9022333,23.8029875 12.9078286,23.7952264 L12.9118235,23.7811639 L12.8776777,23.1665331 C12.8752882,23.1545897 12.8674102,23.1470016 12.8583906,23.1452862 L12.8583906,23.1452862 Z M12.1430473,23.1473072 C12.1332178,23.1423925 12.1221763,23.1452606 12.1156365,23.1525954 L12.1099173,23.1665331 L12.0757714,23.7811639 C12.0751323,23.7926639 12.0828099,23.8018602 12.0926481,23.8045676 L12.108256,23.8032389 L12.3092106,23.7104931 L12.3186497,23.7024347 L12.3186497,23.7024347 L12.3225043,23.6906389 L12.340401,23.2611114 L12.337245,23.2485176 L12.337245,23.2485176 L12.3277531,23.2396597 L12.1430473,23.1473072 Z" id="MingCute" fill-rule="nonzero"> </path> <path d="M11.2929,8.2928 C11.6834,7.90228 12.3166,7.90228 12.7071,8.2928 L18.364,13.9497 C18.7545,14.3402 18.7545,14.9733 18.364,15.3639 C17.9734,15.7544 17.3403,15.7544 16.9497,15.3639 L12,10.4141 L7.05025,15.3639 C6.65973,15.7544 6.02656,15.7544 5.63604,15.3639 C5.24551,14.9733 5.24551,14.3402 5.63604,13.9497 L11.2929,8.2928 Z" fill="#c084fc"> </path> </g> </g> </g> </g></svg>
+									</button>
+								{/if}
+							{/if}
+						</div>
 					{/each}
 				</div>
 			</div>
 		</div>
+
 
 		<!-- Enhanced Music Search Modal -->
 		{#if showMusicSearchModal && eventId}
@@ -1721,8 +2189,7 @@
 				{eventId}
 				onTrackAdded={() => {
 					showMusicSearchModal = false;
-					// Reload event data to show the new track
-					loadEvent();
+					// Socket event will handle updating the track list
 				}}
 				onClose={() => (showMusicSearchModal = false)}
 			/>
@@ -1963,8 +2430,18 @@
 										class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
 									>
 										<div
-											class="flex items-center justify-between"
+											class="flex items-center justify-between truncate break-all overflow-hidden"
 										>
+											<button
+												onclick={() =>
+													addPlaylistToEvent(
+														playlist.id,
+													)}
+												disabled={loading}
+												class="bg-secondary text-white px-4 py-2 mr-4 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors"
+											>
+												{loading ? "Adding..." : "Add"}
+											</button>
 											<div class="flex-1">
 												<div
 													class="flex items-center space-x-2 mb-1"
@@ -2007,16 +2484,7 @@
 													</p>
 												{/if}
 											</div>
-											<button
-												onclick={() =>
-													addPlaylistToEvent(
-														playlist.id,
-													)}
-												disabled={loading}
-												class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors"
-											>
-												{loading ? "Adding..." : "Add"}
-											</button>
+
 										</div>
 									</div>
 								{/each}
@@ -2152,6 +2620,20 @@
 											>Location Based</option
 										>
 									</select>
+								</div>
+								<div>
+									<label
+										for="edit-event-max-votes"
+										class="block text-sm font-medium text-gray-700 mb-2"
+										>Max Votes Per User</label
+									>
+									<input
+										id="edit-event-max-votes"
+										type="number"
+										bind:value={editEventData.maxVotesPerUser}
+										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+										placeholder="1 by default"
+									/>
 								</div>
 
 								{#if editEventData.licenseType === "location_based"}

@@ -22,6 +22,7 @@ export interface EventSocketEvents {
 
   // Voting events
   'vote-added': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
+  'vote-updated': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
   'vote-removed': (data: { eventId: string; trackId: string; results: VoteResult[] }) => void;
 
   // Track management

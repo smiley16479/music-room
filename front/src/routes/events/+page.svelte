@@ -20,9 +20,7 @@
 	let showCreateModal = $state(false);
 	let activeTab: "all" | "mine" = $state("all");
 	let searchQuery = $state("");
-	let sortBy = $state<
-		"date" | "name" | "creator" | "participants" | "status" | "license"
-	>("date");
+	let sortBy = $state<"date" | "participants" | "license" | "tracks">("date");
 	let sortOrder = $state<"asc" | "desc">("asc");
 	let isSocketConnected = $state(false);
 	const maxSocketRetries = 5;
@@ -57,6 +55,12 @@
 		}
 	});
 
+	$effect(() => {
+		if (newEvent.visibility === "private") {
+			newEvent.licenseType = "invited";
+		}
+	});
+
 	// Update events when data changes
 	$effect(() => {
 		if (data?.events) {
@@ -75,10 +79,6 @@
 				const end = new Date(event.eventEndDate);
 				if (now >= start && now < end) {
 					event.status = "live";
-				} else if (now < start) {
-					event.status = "upcoming";
-				} else if (now >= end) {
-					event.status = "ended";
 				}
 			}
 		});
@@ -127,22 +127,14 @@
 			let comparison = 0;
 
 			switch (sortBy) {
-				case "name":
-					comparison = a.name.localeCompare(b.name);
-					break;
-				case "creator":
-					comparison = (a.creator?.displayName || "").localeCompare(
-						b.creator?.displayName || "",
-					);
+				case "tracks":
+					comparison =
+						(a.playlist?.length || 0) - (b.playlist?.length || 0);
 					break;
 				case "participants":
 					comparison =
 						(a.stats?.participantCount || 0) -
 						(b.stats?.participantCount || 0);
-					break;
-				case "status":
-					const statusOrder = { live: 0, upcoming: 1, ended: 2 };
-					comparison = statusOrder[a.status] - statusOrder[b.status];
 					break;
 				case "license":
 					const licenseOrder = {
@@ -294,7 +286,22 @@
 		error = "";
 
 		try {
-			const newEventResponse = await createEventAPI(newEvent);
+			// Convert local datetime to ISO string with timezone offset
+			const eventDataToSend = { ...newEvent };
+
+			if (eventDataToSend.eventDate) {
+				eventDataToSend.eventDate = convertLocalDateTimeToISO(
+					eventDataToSend.eventDate,
+				);
+			}
+
+			if (eventDataToSend.eventEndDate) {
+				eventDataToSend.eventEndDate = convertLocalDateTimeToISO(
+					eventDataToSend.eventEndDate,
+				);
+			}
+
+			const newEventResponse = await createEventAPI(eventDataToSend);
 			showCreateModal = false;
 			// Reset form
 			newEvent = {
@@ -313,16 +320,6 @@
 		} finally {
 			loading = false;
 		}
-	}
-
-	function formatDate(dateString: string) {
-		return new Date(dateString).toLocaleDateString("en-US", {
-			year: "numeric",
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-		});
 	}
 
 	function formatEventDate(dateString: string) {
@@ -363,45 +360,6 @@
 		}
 	}
 
-	function getStatusBadge(status: string) {
-		switch (status) {
-			case "live":
-				return "bg-red-100 text-red-800 animate-pulse";
-			case "upcoming":
-				return "bg-green-100 text-green-800";
-			case "ended":
-				return "bg-gray-100 text-gray-800";
-			default:
-				return "bg-gray-100 text-gray-800";
-		}
-	}
-
-	function getStatusText(status: string) {
-		switch (status) {
-			case "live":
-				return "🔴 Live";
-			case "upcoming":
-				return "📅 Upcoming";
-			case "ended":
-				return "Ended";
-			default:
-				return "Unknown";
-		}
-	}
-
-	function getLicenseTypeText(licenseType: string) {
-		switch (licenseType) {
-			case "open":
-				return "Open Voting";
-			case "invited":
-				return "Invited Only";
-			case "location_based":
-				return "Location Based";
-			default:
-				return "Unknown";
-		}
-	}
-
 	function handleTabChange(newTab: "all" | "mine") {
 		if (activeTab !== newTab) {
 			activeTab = newTab;
@@ -433,6 +391,13 @@
 	function clearDateError(field: "eventDate" | "eventEndDate") {
 		formErrors[field] = "";
 	}
+
+	// Helper function to convert datetime-local value to ISO string with timezone
+	function convertLocalDateTimeToISO(dateTimeLocal: string): string {
+		if (!dateTimeLocal) return "";
+		const localDate = new Date(dateTimeLocal);
+		return localDate.toISOString();
+	}
 </script>
 
 <svelte:head>
@@ -444,7 +409,9 @@
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8">
-	<div class="flex justify-between items-center mb-8">
+	<div
+		class="flex flex-col md:flex-row text-center md:text-start justify-between items-center mb-8"
+	>
 		<div>
 			<h1 class="font-family-main text-4xl font-bold text-gray-800 mb-2">
 				Music Events
@@ -457,7 +424,7 @@
 		{#if user}
 			<button
 				onclick={() => (showCreateModal = true)}
-				class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors"
+				class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors mt-4 md:mt-0"
 			>
 				Create Event
 			</button>
@@ -491,38 +458,44 @@
 	<!-- Search and Sort Controls -->
 	<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
 		<div
-			class="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+			class="flex flex-col md:flex-row gap-4 items-start sm:items-center justify-between"
 		>
 			<!-- Search -->
-			<div class="flex-1 max-w-md">
+			<div class="flex-1 w-full sm:max-w-md">
 				<label for="search" class="sr-only">Search events</label>
 				<div class="relative">
+					<div
+						class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+					>
+						<svg
+							class="h-5 w-5 text-gray-400"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+							></path>
+						</svg>
+					</div>
 					<input
 						id="search"
 						type="text"
 						bind:value={searchQuery}
-						placeholder="Search events, creators, or locations..."
-						class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+						placeholder="Search events by name, creator, or location..."
+						class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 					/>
-					<svg
-						class="absolute left-3 top-2.5 h-5 w-5 text-gray-400"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-						></path>
-					</svg>
 				</div>
 			</div>
 
 			<!-- Sort Controls -->
 			<div class="flex items-center space-x-4">
-				<span class="text-sm text-gray-600 font-medium">Sort by:</span>
+				<span class="text-sm text-gray-600 font-medium hidden lg:block"
+					>Sort by:</span
+				>
 				<button
 					onclick={() => handleSort("date")}
 					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy ===
@@ -533,22 +506,13 @@
 					Date {getSortIcon("date")}
 				</button>
 				<button
-					onclick={() => handleSort("name")}
+					onclick={() => handleSort("tracks")}
 					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy ===
-					'name'
+					'tracks'
 						? 'bg-secondary text-white'
 						: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
 				>
-					Name {getSortIcon("name")}
-				</button>
-				<button
-					onclick={() => handleSort("creator")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy ===
-					'creator'
-						? 'bg-secondary text-white'
-						: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Creator {getSortIcon("creator")}
+					Tracks {getSortIcon("tracks")}
 				</button>
 				<button
 					onclick={() => handleSort("participants")}
@@ -558,15 +522,6 @@
 						: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
 				>
 					Participants {getSortIcon("participants")}
-				</button>
-				<button
-					onclick={() => handleSort("status")}
-					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy ===
-					'status'
-						? 'bg-secondary text-white'
-						: 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-				>
-					Status {getSortIcon("status")}
 				</button>
 				<button
 					onclick={() => handleSort("license")}
@@ -645,7 +600,7 @@
 							? 'hover:bg-red-100'
 							: ''}"
 					>
-						<div class="flex items-start space-x-4">
+						<div class="flex items-start sm:space-x-4 space-x-2">
 							<!-- Event Icon -->
 							<div class="flex-shrink-0">
 								<div
@@ -692,42 +647,49 @@
 										</p>
 									</div>
 									<div
-										class="flex flex-col items-end space-y-1"
+										class="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0 items-center ml-4"
 									>
-										<span
-											class="px-2 py-1 text-xs rounded-full {getStatusBadge(
-												event.status,
-											)}"
-										>
-											{getStatusText(event.status)}
-										</span>
+										{#if event.status === "live"}
+											<span
+												class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+											>
+												🔴 Live
+											</span>
+										{/if}
 										{#if activeTab === "mine" && event.visibility === "private"}
 											<span
-												class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+												class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
 											>
 												Private
 											</span>
 										{/if}
-										<span
-											class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800"
-										>
-											{getLicenseTypeText(
-												event.licenseType,
-											)}
-										</span>
+										{#if event.visibility !== "private" && event.licenseType === "invited"}
+											<span
+												class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
+											>
+												Closed
+											</span>
+										{/if}
+										{#if event.licenseType === "location_based" && event.locationName}
+											<span
+												class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
+											>
+												{event.locationName}
+											</span>
+										{/if}
 									</div>
 								</div>
 
 								{#if event.description}
 									<p
-										class="text-sm text-gray-600 mb-2 line-clamp-2"
+										class="text-sm text-gray-600 mb-2 line-clamp-2 hidden sm:block hyphens-auto break-all truncate"
 									>
 										{event.description}
 									</p>
 								{/if}
 
 								<div
-									class="flex items-center space-x-6 text-sm text-gray-500"
+									class="flex items-center space-x-6 text-sm text-gray-500 hidden sm:flex"
 								>
 									{#if event.locationName}
 										<div class="flex items-center">
@@ -792,44 +754,6 @@
 												0} tracks</span
 										>
 									</div>
-									<div class="flex items-center">
-										<svg
-											class="w-4 h-4 mr-1"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M7 4V2a1 1 0 011-1h8a1 1 0 011 1v2"
-											></path>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M7 4h10l1 16H6L7 4z"
-											></path>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M9 10v4"
-											></path>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M15 10v4"
-											></path>
-										</svg>
-										<span
-											>{event.stats?.voteCount ||
-												event.votes?.length ||
-												0} votes</span
-										>
-									</div>
 									{#if event.eventDate}
 										<div class="flex items-center">
 											<svg
@@ -862,6 +786,25 @@
 										</div>
 									{/if}
 								</div>
+							</div>
+
+							<!-- Arrow indicator -->
+							<div
+								class="flex-shrink-0 hidden sm:flex items-center"
+							>
+								<svg
+									class="w-5 h-5 text-gray-400"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 5l7 7-7 7"
+									></path>
+								</svg>
 							</div>
 						</div>
 					</a>
@@ -1051,8 +994,10 @@
 								bind:value={newEvent.licenseType}
 								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 							>
-								<option value="open"
-									>Open - Anyone can vote</option
+								<option
+									value="open"
+									disabled={newEvent.visibility === "private"}
+									>Open - Anyone can vote (public only)</option
 								>
 								<option value="invited"
 									>Invited Only - Restrict voting to invited
@@ -1065,6 +1010,23 @@
 							</select>
 							<p class="text-xs text-gray-500 mt-1">
 								Choose who can participate in voting for tracks
+							</p>
+						</div>
+						<div>
+							<label
+								for="event-max-votes"
+								class="block text-sm font-medium text-gray-700 mb-2"
+								>Max Votes Per Participant</label
+							>
+							<input
+								type="number"
+								min="0"
+								bind:value={newEvent.maxVotesPerUser}
+								class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
+								placeholder="1 by default"
+							/>
+							<p class="text-xs text-gray-500 mt-1">
+								Set to 0 for unlimited votes per user
 							</p>
 						</div>
 					</div>

@@ -117,12 +117,21 @@
 	// Socket event handlers for real-time updates
 	function handlePlaylistCreated(data: { playlist: Playlist }) {
 		console.log('Playlist created:', data.playlist);
-		playlists = [...playlists, data.playlist];
+		// Only add if it's not an event playlist
+		if (!data.playlist.eventId) {
+			playlists = [...playlists, data.playlist];
+		}
 	}
 
 	function handlePlaylistUpdated(data: { playlist: Playlist }) {
 		console.log('Playlist updated:', data.playlist);
-		playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
+		// Update if it exists and is not an event playlist
+		if (!data.playlist.eventId) {
+			playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
+		} else {
+			// If it became an event playlist, remove it from the list
+			playlists = playlists.filter(p => p.id !== data.playlist.id);
+		}
 	}
 
 	function handlePlaylistDeleted(data: { playlistId: string }) {
@@ -133,6 +142,9 @@
 	// Filter and sort playlists
 	$effect(() => {
 		let filtered = [...playlists];
+
+		// First, filter out event playlists (playlists with eventId)
+		filtered = filtered.filter(playlist => !playlist.eventId);
 
 		// Apply search filter
 		if (searchQuery.trim()) {
@@ -204,17 +216,10 @@
 		loading = true;
 		error = "";
 		try {
-			console.log(`Loading playlists for tab: ${activeTab}, user: ${user?.id || 'none'}`);
-			
 			if (activeTab === "mine" && user) {
-				// For "mine" tab, get all playlists where user is owner or collaborator
-				// This includes both public and private playlists
 				playlists = await playlistsService.getPlaylists(undefined, user.id);
-				console.log(`Loaded ${playlists.length} playlists for "mine" tab`);
 			} else {
-				// For "all" tab, get public playlists plus any private playlists user has access to
 				playlists = await playlistsService.getPlaylists();
-				console.log(`Loaded ${playlists.length} playlists for "all" tab`);
 			}
 		} catch (err) {
 			error = "Failed to load playlists";
@@ -368,30 +373,27 @@
 				</div>
 			</div>
 
-			<!-- Real-time status indicator -->
+			<!-- Sort Controls -->
 			<div class="flex items-center space-x-4">
-				<!-- Sort Controls -->
-				<div class="flex items-center space-x-2">
-					<span class="text-sm text-gray-600 font-medium hidden sm:block">Sort by:</span>
-					<button
-						onclick={() => handleSort("date")}
-						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'date' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-					>
-						Date {getSortIcon("date")}
-					</button>
-					<button
-						onclick={() => handleSort("tracks")}
-						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'tracks' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-					>
-						Tracks {getSortIcon("tracks")}
-					</button>
-					<button
-						onclick={() => handleSort("collaborators")}
-						class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'collaborators' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
-					>
-						Collaborators {getSortIcon("collaborators")}
-					</button>
-				</div>
+				<span class="text-sm text-gray-600 font-medium hidden sm:block">Sort by:</span>
+				<button
+					onclick={() => handleSort("date")}
+					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'date' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+				>
+					Date {getSortIcon("date")}
+				</button>
+				<button
+					onclick={() => handleSort("tracks")}
+					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'tracks' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+				>
+					Tracks {getSortIcon("tracks")}
+				</button>
+				<button
+					onclick={() => handleSort("collaborators")}
+					class="px-3 py-1 text-sm rounded-md transition-colors {sortBy === 'collaborators' ? 'bg-secondary text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}"
+				>
+					Collaborators {getSortIcon("collaborators")}
+				</button>
 			</div>
 		</div>
 	</div>
@@ -465,7 +467,7 @@
 										<h3 class="text-lg font-semibold text-gray-900 truncate">{playlist.name}</h3>
 										<p class="text-sm text-gray-600">by {playlist.creator?.displayName || 'Unknown'}</p>
 									</div>
-									<div class="flex items-center space-x-2 ml-4">
+									<div class="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0 items-center ml-4">
 										{#if user && playlist.collaborators.some(collab => collab.id === user!.id)}
 											<span class="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-800">
 												Collaborator
@@ -615,7 +617,7 @@
 								class="mr-2"
 							/>
 							<label for="public" class="text-sm text-gray-700"
-								>Public playlist (anyone can find it)</label
+								>Public playlist - Anyone can find it</label
 							>
 						</div>
 
@@ -629,7 +631,7 @@
 								class="mr-2"
 							/>
 							<label for="private" class="text-sm text-gray-700"
-								>Private playlist (only you and invited users)</label
+								>Private playlist - Invitation only</label
 							>
 						</div>
 
@@ -646,7 +648,7 @@
 							bind:value={newPlaylist.licenseType}
 							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
 						>
-							<option value="open" disabled={newPlaylist.visibility === 'private'}>Open (anyone can edit)</option>
+							<option value="open" disabled={newPlaylist.visibility === 'private'}>Open - anyone can edit (public only)</option>
 							<option value="invited">Invited users only</option>
 						</select>
 					</div>

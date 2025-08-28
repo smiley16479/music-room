@@ -129,7 +129,6 @@ export class EventController {
   }
 
   @Get(':id/voting-results')
-  @Public()
   @ApiOperation({
     summary: 'Get voting results',
     description: 'Returns the current voting results for tracks in an event',
@@ -150,7 +149,6 @@ export class EventController {
   }
 
   @Get(':id/results')
-  @Public()
   @ApiOperation({
     summary: 'Get voting results (alias)',
     description: 'Returns the current voting results for tracks in an event (alias for voting-results)',

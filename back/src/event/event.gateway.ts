@@ -511,6 +511,45 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
+  // Track Management (for events that use playlists)
+  notifyTrackAdded(eventId: string, track: Track, addedBy: string) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    this.server.to(room).emit('track-added', {
+      eventId,
+      track: {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: track.duration,
+        albumCoverUrl: track.albumCoverUrl,
+        previewUrl: track.previewUrl,
+        addedBy,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyTrackRemoved(eventId: string, trackId: string, removedBy: string) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    this.server.to(room).emit('track-removed', {
+      eventId,
+      trackId,
+      removedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyTracksReordered(eventId: string, trackOrder: string[], reorderedBy: string) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    this.server.to(room).emit('tracks-reordered', {
+      eventId,
+      trackOrder,
+      reorderedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // Get connected users in an event
   async getEventParticipants(eventId: string): Promise<string[]> {
     const room = SOCKET_ROOMS.EVENT(eventId);
@@ -546,25 +585,65 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     }
   }
 
-  // NON ON LES FAIT PASSER PAR HTTP
-  // Vote sur un track (like/dislike)
+  // Track voting via WebSocket for real-time feedback
+  // Note: For persistent voting, use the HTTP endpoints in EventController
+  // This WebSocket method provides real-time user experience feedback
   @SubscribeMessage('vote-track')
   async handleVoteTrack(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId, trackId, type }: { eventId: string; trackId: string; type: 'like' | 'dislike' }
+    @MessageBody() { eventId, trackId, type }: { eventId: string; trackId: string; type: 'upvote' | 'downvote' }
   ) {
-    if (!client.userId) {
-      client.emit('error', { message: 'Authentication required' });
-      return;
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Broadcast optimistic vote update to all participants for immediate feedback
+      // The client should also call the HTTP API for persistent voting
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('vote-optimistic-update', {
+        eventId,
+        vote: { trackId, userId: client.userId, type },
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} voted ${type} for track ${trackId} in event ${eventId} (WebSocket)`);
+      
+    } catch (error) {
+      this.logger.error(`Vote WebSocket error for user ${client.userId}: ${error.message}`);
+      client.emit('error', { 
+        message: 'Failed to vote for track', 
+        details: error.message 
+      });
     }
-    // Ici tu peux appeler ton EventService pour enregistrer le vote
-    // await this.eventService.voteTrack(eventId, trackId, client.userId, type);
-    // Broadcast le résultat à tous les participants
-    this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('vote-updated', {
-      eventId,
-      vote: { trackId, userId: client.userId, type },
-      timestamp: new Date().toISOString(),
-    });
+  }
+
+  // Request voting results
+  @SubscribeMessage('get-voting-results')
+  async handleGetVotingResults(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Send current voting results to the requesting client
+      client.emit('voting-results-update', {
+        eventId,
+        message: 'Use HTTP API /api/events/{eventId}/voting-results for detailed results',
+        timestamp: new Date().toISOString(),
+      });
+      
+    } catch (error) {
+      this.logger.error(`Get voting results error: ${error.message}`);
+      client.emit('error', { 
+        message: 'Failed to get voting results', 
+        details: error.message 
+      });
+    }
   }
 
   // Synchronisation de l'état du player (play/pause/next/previous/position/volume)

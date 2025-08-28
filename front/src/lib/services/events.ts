@@ -443,6 +443,16 @@ export async function voteForTrackSimple(eventId: string, trackId: string): Prom
   return voteForTrack(eventId, { trackId, type: 'upvote', weight: 1 });
 }
 
+// Enhanced voting function that handles playlist reordering
+export async function voteForTrackInEvent(eventId: string, trackId: string, voteType: 'upvote' | 'downvote' = 'upvote'): Promise<void> {
+  try {
+    const results = await voteForTrack(eventId, { trackId, type: voteType, weight: 1 });
+  } catch (error) {
+    console.error('Failed to vote for track:', error);
+    throw error;
+  }
+}
+
 export async function removeVote(eventId: string, trackId: string): Promise<VoteResult[]> {
   const response = await fetch(`${config.apiUrl}/api/events/${eventId}/vote/${trackId}`, {
     method: 'DELETE',
@@ -462,7 +472,7 @@ export async function removeVote(eventId: string, trackId: string): Promise<Vote
 }
 
 export async function getVotingResults(eventId: string): Promise<VoteResult[]> {
-  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/results`, {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/voting-results`, {
     headers: {
       'Authorization': `Bearer ${authService.getAuthToken()}`,
       'Content-Type': 'application/json',
@@ -561,17 +571,27 @@ export async function addTrackToEvent(eventId: string, trackIdOrData: string | P
 }
 
 export async function removeTrackFromEvent(eventId: string, trackId: string): Promise<void> {
-  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/tracks/${trackId}`, {
-    method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${authService.getAuthToken()}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  try {
+    const event = await getEvent(eventId);
+    
+    let playlistId = event.playlistId;
+    
+    if (!playlistId && event.playlist && typeof event.playlist === 'object' && 'id' in event.playlist) {
+      playlistId = (event.playlist as any).id;
+    }
+    
+    
+    if (!playlistId) {
+      throw new Error(`Event playlist not found for "${event.name}". Please refresh the page and try again.`);
+    }
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.message || 'Failed to remove track from event');
+    await playlistsService.removeTrackFromPlaylist(playlistId, trackId);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(error.message);
+    } else {
+      throw new Error('Failed to remove track from event. Please try again.');
+    }
   }
 }
 
@@ -673,5 +693,103 @@ export async function removeUserFromAdmin(eventId: string, userId: string): Prom
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.message || 'Failed to remove admin');
+  }
+}
+
+export async function addTracksToEvent(eventId: string, tracks: Partial<Track>[]): Promise<void> {
+  try {
+    // First, get the event to find its playlist ID
+    const event = await getEvent(eventId);
+    
+    // Extract playlist ID from the event object
+    let playlistId = event.playlistId;
+    
+    // If playlistId is not directly available, try to get it from the playlist object
+    if (!playlistId && event.playlist && typeof event.playlist === 'object' && 'id' in event.playlist) {
+      playlistId = (event.playlist as any).id;
+    }
+    
+    // If still no playlist ID, try to find it by searching for playlists that match the event name
+    if (!playlistId) {
+      try {
+        const playlists = await playlistsService.getPlaylists(false); // Get all playlists
+        const eventPlaylist = playlists.find(p => 
+          p.name.includes(`[Event] ${event.name}`) || 
+          p.name.includes(event.name)
+        );
+        if (eventPlaylist) {
+          playlistId = eventPlaylist.id;
+        }
+      } catch (error) {
+        // Silently continue if playlist search fails
+      }
+    }
+    
+    if (!playlistId) {
+      throw new Error(`Event playlist not found for "${event.name}". Please refresh the page and try again.`);
+    }
+
+    // Add tracks sequentially to maintain order
+    for (const trackData of tracks) {
+      const processedTrackData = {
+        deezerId: trackData.deezerId || '',
+        title: trackData.title || '',
+        artist: trackData.artist || '',
+        album: trackData.album || '',
+        albumCoverUrl: trackData.thumbnailUrl || '',
+        previewUrl: trackData.previewUrl || '',
+        duration: trackData.duration || 0,
+      };
+
+      // Validate required fields
+      if (!processedTrackData.title || !processedTrackData.artist) {
+        continue;
+      }
+
+      // skip tracks already in the playlist
+      const existingTracks = await playlistsService.getPlaylistTracks(playlistId);
+      if (existingTracks.some(t => t.track.title === processedTrackData.title && t.track.artist === processedTrackData.artist)) {
+        continue;
+      }
+
+      try {
+        await playlistsService.addTrackToPlaylist(playlistId, processedTrackData);
+      } catch (error) {
+        console.error(`Failed to add track "${processedTrackData.title}":`, error);
+      }
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(error.message);
+    } else {
+      throw new Error('Failed to add tracks to event. Please try again.');
+    }
+  }
+}
+
+export async function addPlaylistTracksToEvent(eventId: string, sourcePlaylistId: string): Promise<void> {
+  try {
+    // Get tracks from the source playlist
+    const playlistTracks = await playlistsService.getPlaylistTracks(sourcePlaylistId);
+    
+    // Convert playlist tracks to track data format
+    const tracks: Partial<Track>[] = playlistTracks.map(playlistTrack => ({
+      deezerId: playlistTrack.track.deezerId,
+      title: playlistTrack.track.title,
+      artist: playlistTrack.track.artist,
+      album: playlistTrack.track.album,
+      duration: playlistTrack.track.duration,
+      thumbnailUrl: playlistTrack.track.albumCoverUrl,
+      previewUrl: playlistTrack.track.previewUrl,
+    }));
+
+    // Add all tracks to the event
+    await addTracksToEvent(eventId, tracks);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(error.message);
+    } else {
+      throw new Error('Failed to add playlist tracks to event. Please try again.');
+    }
   }
 }
