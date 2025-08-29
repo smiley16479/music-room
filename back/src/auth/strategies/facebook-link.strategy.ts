@@ -47,7 +47,7 @@ export class FacebookLinkStrategy extends PassportStrategy(Strategy, 'facebook-l
       picture: photos?.[0],
       accessToken,
       // This strategy is specifically for linking
-      isLinking: true,
+      linkingMode: 'link',
       linkingToken: linkingToken,
     };
     

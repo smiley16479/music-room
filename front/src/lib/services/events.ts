@@ -235,6 +235,23 @@ export async function getEvents(fetchFn?: typeof fetch): Promise<Event[]> {
   return processedEvents;
 }
 
+export async function getMyEvents(fetchFn?: typeof fetch): Promise<Event[]> {
+  const fetchToUse = fetchFn || fetch;
+  const response = await fetchToUse(`${config.apiUrl}/api/events/my-event`, {
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch my events');
+  }
+
+  const result = await response.json();
+  return result.data || [];
+}
+
 export async function getEvent(id: string, fetchFn?: typeof fetch): Promise<Event> {
   const fetchToUse = fetchFn || fetch;
   const response = await fetchToUse(`${config.apiUrl}/api/events/${id}`, {
@@ -570,22 +587,26 @@ export async function addTrackToEvent(eventId: string, trackIdOrData: string | P
   }
 }
 
-export async function removeTrackFromEvent(eventId: string, trackId: string): Promise<void> {
+export async function removeTrackFromEvent(eventId: string, trackId: string, playlistId?: string): Promise<void> {
   try {
-    const event = await getEvent(eventId);
+    let targetPlaylistId = playlistId;
     
-    let playlistId = event.playlistId;
-    
-    if (!playlistId && event.playlist && typeof event.playlist === 'object' && 'id' in event.playlist) {
-      playlistId = (event.playlist as any).id;
+    // Only call getEvent if we don't have the playlist ID
+    if (!targetPlaylistId) {
+      const event = await getEvent(eventId);
+      
+      targetPlaylistId = event.playlistId;
+      
+      if (!targetPlaylistId && event.playlist && typeof event.playlist === 'object' && 'id' in event.playlist) {
+        targetPlaylistId = (event.playlist as any).id;
+      }
     }
     
-    
-    if (!playlistId) {
-      throw new Error(`Event playlist not found for "${event.name}". Please refresh the page and try again.`);
+    if (!targetPlaylistId) {
+      throw new Error(`Event playlist not found. Please refresh the page and try again.`);
     }
 
-    await playlistsService.removeTrackFromPlaylist(playlistId, trackId);
+    await playlistsService.removeTrackFromPlaylist(targetPlaylistId, trackId);
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(error.message);
@@ -792,4 +813,45 @@ export async function addPlaylistTracksToEvent(eventId: string, sourcePlaylistId
       throw new Error('Failed to add playlist tracks to event. Please try again.');
     }
   }
+}
+
+export async function canUserAccessEvent(event: Event, userId: string): Promise<boolean> {
+  // Public events are accessible to everyone
+  if (event.visibility === 'public') {
+    return true;
+  }
+
+  // Event creator always has access
+  if (event.creatorId === userId) {
+    return true;
+  }
+
+  // Event admins have access
+  if (event.admins?.some(admin => admin.id === userId)) {
+    return true;
+  }
+
+  // For private events, check if user is a collaborator of the event's playlist
+  if (event.visibility === 'private' && event.playlistId) {
+    try {
+      const playlist = await playlistsService.getPlaylist(event.playlistId);
+      return playlist.collaborators?.some(collaborator => collaborator.id === userId) || false;
+    } catch (error) {
+      console.error('Failed to check playlist collaborators:', error);
+      return false;
+    }
+  }
+
+  // For invited events (licenseType), also check playlist collaborators
+  if (event.licenseType === 'invited' && event.playlistId) {
+    try {
+      const playlist = await playlistsService.getPlaylist(event.playlistId);
+      return playlist.collaborators?.some(collaborator => collaborator.id === userId) || false;
+    } catch (error) {
+      console.error('Failed to check playlist collaborators:', error);
+      return false;
+    }
+  }
+
+  return false;
 }

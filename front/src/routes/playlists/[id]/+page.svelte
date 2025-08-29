@@ -21,6 +21,7 @@
 		getUserAvatarUrl,
 	} from "$lib/utils/avatar";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
+	import { flip } from 'svelte/animate';
 
 	// Get initial data from load function
 	let { data } = $props();
@@ -55,6 +56,13 @@
 	const playerState = $derived($musicPlayerStore);
 
 	const playlistId = $derived($page?.params?.id);
+
+	// Automatically set licenseType to 'invited' when visibility is 'private'
+	$effect(() => {
+		if (editPlaylistData.visibility === 'private') {
+			editPlaylistData.licenseType = 'invited';
+		}
+	});
 
 	onMount(() => {
 		// Async initialization function
@@ -119,24 +127,30 @@
 
 	async function setupSocketConnection(playlistId: string) {
 		try {
+			console.log("🔌 Setting up socket connection for playlist:", playlistId);
 			if (!socketService.isConnected()) {
+				console.log("🔌 Socket not connected, connecting...");
 				await socketService.connect();
 			}
 
 			// Join the specific playlist room for collaborative editing
+			console.log("🏠 Joining playlist room:", playlistId);
 			socketService.joinPlaylist(playlistId);
 
 			// Set up playlist-specific collaboration listeners
+			console.log("👂 Setting up socket listeners");
 			setupPlaylistSocketListeners();
 
 			isSocketConnected = true;
+			console.log("✅ Socket connection setup complete");
 		} catch (err) {
-			console.error("Failed to set up socket connection:", err);
+			console.error("❌ Failed to set up socket connection:", err);
 			error = "Failed to connect to real-time updates";
 		}
 	}
 
 	function setupPlaylistSocketListeners() {
+		console.log("👂 Setting up playlist socket listeners");
 		// Listen for real-time playlist updates (metadata changes)
 		socketService.on("playlist-updated", handlePlaylistUpdated);
 
@@ -148,6 +162,8 @@
 		// Listen for collaborator changes (correct event names from backend)
 		socketService.on("collaborator-added", handleCollaboratorAdded);
 		socketService.on("collaborator-removed", handleCollaboratorRemoved);
+		
+		console.log("✅ Socket listeners set up");
 	}
 
 	function cleanupSocketConnection(playlistId: string) {
@@ -178,6 +194,10 @@
 			// Preserve tracks if they're not included in the update
 			if (!data.playlist.tracks && playlist?.tracks) {
 				data.playlist.tracks = playlist.tracks;
+			}
+			// Ensure collaborators is always an array
+			if (!data.playlist.collaborators) {
+				data.playlist.collaborators = playlist?.collaborators || [];
 			}
 			playlist = data.playlist;
 		}
@@ -230,7 +250,15 @@
 		addedBy: string;
 		timestamp: string;
 	}) {
+		console.log("🎵 Track added event received:", data);
 		if (data.playlistId === playlistId && playlist) {
+			// Check if this track already exists to prevent duplicates
+			const existingTrack = playlist.tracks?.find(t => t.id === data.track.id);
+			if (existingTrack) {
+				console.log("🔍 Track already exists, skipping duplicate:", data.track.id);
+				return;
+			}
+
 			// Convert the backend track format to PlaylistTrack format
 			const newTrack: PlaylistTrack = {
 				id: data.track.id,
@@ -281,6 +309,7 @@
 		removedBy: string;
 		timestamp: string;
 	}) {
+		console.log("🗑️ Track removed event received:", data);
 		if (data.playlistId === playlistId && playlist?.tracks) {
 			const removedTrackIndex = playlist.tracks.findIndex(
 				(t) => t.trackId === data.trackId,
@@ -331,6 +360,7 @@
 		reorderedBy: string;
 		timestamp: string;
 	}) {
+		console.log("🔄 Tracks reordered event received:", data);
 		if (data.playlistId === playlistId && playlist?.tracks) {
 			// Reorder tracks based on the trackIds array from backend
 			const reorderedTracks: PlaylistTrack[] = [];
@@ -383,14 +413,18 @@
 		timestamp: string;
 	}) {
 		if (data.playlistId === playlistId && playlist) {
+			// Ensure collaborators array exists
+			if (!playlist.collaborators) {
+				playlist.collaborators = [];
+			}
+			
 			if (
 				!playlist.collaborators.some(
-					(c) => c.userId === data.collaborator.id,
+					(c) => c.id === data.collaborator.id,
 				)
 			) {
 				playlist.collaborators.push({
 					id: data.collaborator.id,
-					userId: data.collaborator.id,
 					displayName: data.collaborator.displayName,
 					avatarUrl: data.collaborator.avatarUrl,
 				});
@@ -407,9 +441,13 @@
 		timestamp: string;
 	}) {
 		if (playlist && data.playlistId === playlistId) {
+			// Ensure collaborators array exists
+			if (!playlist.collaborators) {
+				playlist.collaborators = [];
+			}
+			
 			const remainingCollaborators = playlist.collaborators.filter(
 				(c) =>
-					c.userId !== data.collaborator.id &&
 					c.id !== data.collaborator.id,
 			);
 			if (
@@ -469,7 +507,7 @@
 				type: "playlist" as const,
 				id: playlist.id,
 				ownerId: playlist.creatorId || "",
-				participants: playlist.collaborators.map((c) => c.id),
+				participants: (playlist.collaborators || []).map((c) => c.id),
 				licenseType: playlist.licenseType,
 				visibility: playlist.visibility,
 			};
@@ -774,7 +812,7 @@
 							<div>
 								<span class="font-medium">Collaborators:</span>
 								<span class="ml-1"
-									>{playlist.collaborators.length}</span
+									>{playlist.collaborators?.length || 0}</span
 								>
 							</div>
 						{/if}
@@ -802,7 +840,7 @@
 					{/if}
 				</div>
 				<div class="flex space-x-2 mt-4 md:mt-0">
-					{#if user && playlist.collaborators.some((collab) => collab.id === user!.id)}
+					{#if user && playlist.collaborators?.some((collab) => collab.id === user!.id)}
 						<span
 							class="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-800"
 						>
@@ -915,180 +953,60 @@
 					</div>
 				{:else}
 					<div class="space-y-2">
-						{#each filteredTracks() as track, index}
-							<div
-								class="flex items-center space-x-4 p-3 border rounded-lg transition-colors {canEdit
-									? 'cursor-move'
-									: ''} {playerState.currentTrackIndex ===
-									index && !searchQuery.trim()
-									? 'border-secondary bg-secondary/5'
-									: 'border-gray-200 hover:bg-gray-50'}"
-								draggable={canEdit && !searchQuery.trim()}
-								role={canEdit ? "listitem" : "none"}
-								ondragstart={(e) =>
-									!searchQuery.trim() &&
-									handleDragStart(e, index)}
-								ondragover={handleDragOver}
-								ondrop={(e) =>
-									!searchQuery.trim() && handleDrop(e, index)}
-							>
+						{#each filteredTracks() as track, index ( track.id )}
+							<div class="relative" animate:flip={{ duration: 700 }}>
 								<div
-									class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {playerState.currentTrackIndex ===
+									class="flex items-center space-x-4 p-3 border rounded-lg transition-colors {canEdit
+										? 'cursor-move'
+										: ''} {playerState.currentTrackIndex ===
 										index && !searchQuery.trim()
-										? 'bg-secondary text-white'
-										: 'bg-gray-200 text-gray-600'}"
+										? 'border-secondary bg-secondary/5'
+										: 'border-gray-200 hover:bg-gray-50'}"
+									draggable={canEdit && !searchQuery.trim()}
+									role={canEdit ? "listitem" : "none"}
+									ondragstart={(e) =>
+										!searchQuery.trim() &&
+										handleDragStart(e, index)}
+									ondragover={handleDragOver}
+									ondrop={(e) =>
+										!searchQuery.trim() && handleDrop(e, index)}
 								>
-									{#if playerState.currentTrackIndex === index && playerState.isPlaying && !searchQuery.trim()}
-										<!-- Now playing indicator -->
-										<svg
-											class="w-4 h-4"
-											fill="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path d="M8 5v14l11-7z" />
-										</svg>
-									{:else}
-										{searchQuery.trim()
-											? (playlist?.tracks?.indexOf(
-													track,
-												) ?? index) + 1
-											: index + 1}
-									{/if}
-								</div>
-
-								{#if track.track.albumCoverMediumUrl}
-									<img
-										src={track.track.albumCoverMediumUrl}
-										alt={track.track.title}
-										class="w-12 h-12 rounded object-cover"
-									/>
-								{:else}
 									<div
-										class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center"
+										class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {playerState.currentTrackIndex ===
+											index && !searchQuery.trim()
+											? 'bg-secondary text-white'
+											: 'bg-gray-200 text-gray-600'}"
 									>
-										<svg
-											class="w-6 h-6 text-gray-400"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
-											></path>
-										</svg>
-									</div>
-								{/if}
-
-								<div class="flex-1">
-									<h4 class="font-medium text-gray-800">
-										{track.track.title}
-									</h4>
-									<p class="text-sm text-gray-600">
-										{track.track.artist}
-									</p>
-									{#if track.track.album}
-										<p class="text-xs text-gray-500">
-											{track.track.album}
-										</p>
-									{/if}
-									<p class="text-xs text-gray-400">
-										Added by {track.addedBy.displayName} • {formatDate(
-											track.addedAt,
-										)}
-									</p>
-								</div>
-
-								<div class="flex items-center space-x-3">
-									{#if track.track.duration}
-										<span class="text-sm text-gray-500"
-											>{formatDuration(
-												track.track.duration,
-											)}</span
-										>
-									{/if}
-
-									<!-- Music Player Controls -->
-									{#if isMusicPlayerInitialized}
-										<div
-											class="flex items-center space-x-2"
-										>
-											<!-- Play Button -->
-											<button
-												onclick={() => {
-													const actualIndex =
-														searchQuery.trim()
-															? (playlist?.tracks?.indexOf(
-																	track,
-																) ?? index)
-															: index;
-													// If this track is currently playing, toggle play/pause
-													if (
-														playerState.currentTrackIndex ===
-															actualIndex &&
-														playerState.currentTrack
-													) {
-														if (
-															playerState.isPlaying
-														) {
-															musicPlayerStore.pause();
-														} else {
-															musicPlayerStore.play();
-														}
-													} else {
-														// Play this track
-														playTrack(actualIndex);
-													}
-												}}
-												disabled={!playerState.canControl}
-												class="p-1.5 rounded-full {playerState.currentTrackIndex ===
-												(searchQuery.trim()
-													? (playlist?.tracks?.indexOf(
-															track,
-														) ?? index)
-													: index)
-													? 'bg-secondary text-white'
-													: 'bg-gray-100 text-gray-600'} hover:bg-secondary hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-												aria-label={`${playerState.currentTrackIndex === (searchQuery.trim() ? (playlist?.tracks?.indexOf(track) ?? index) : index) && playerState.isPlaying ? "Pause" : "Play"} ${track.track.title}`}
-											>
-												{#if playerState.currentTrackIndex === (searchQuery.trim() ? (playlist?.tracks?.indexOf(track) ?? index) : index) && playerState.isPlaying}
-													<!-- Pause icon -->
-													<svg
-														class="w-3 h-3"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-													>
-														<path
-															d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"
-														/>
-													</svg>
-												{:else}
-													<!-- Play icon -->
-													<svg
-														class="w-3 h-3"
-														fill="currentColor"
-														viewBox="0 0 24 24"
-													>
-														<path
-															d="M8 5v14l11-7z"
-														/>
-													</svg>
-												{/if}
-											</button>
-										</div>
-									{/if}
-									{#if canEdit}
-										<button
-											onclick={() =>
-												removeTrack(track.trackId)}
-											aria-label="Remove track"
-											class="text-red-500 hover:text-red-700 transition-colors"
-											title="Remove track"
-										>
+										{#if playerState.currentTrackIndex === index && playerState.isPlaying && !searchQuery.trim()}
+											<!-- Now playing indicator -->
 											<svg
 												class="w-4 h-4"
+												fill="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path d="M8 5v14l11-7z" />
+											</svg>
+										{:else}
+											{searchQuery.trim()
+												? (playlist?.tracks?.indexOf(
+														track,
+													) ?? index) + 1
+												: index + 1}
+										{/if}
+									</div>
+
+									{#if track.track.albumCoverUrl}
+										<img
+											src={track.track.albumCoverUrl}
+											alt={track.track.title}
+											class="w-12 h-12 rounded object-cover"
+										/>
+									{:else}
+										<div
+											class="w-12 h-12 bg-gray-200 rounded flex items-center justify-center"
+										>
+											<svg
+												class="w-6 h-6 text-gray-400"
 												fill="none"
 												stroke="currentColor"
 												viewBox="0 0 24 24"
@@ -1097,9 +1015,114 @@
 													stroke-linecap="round"
 													stroke-linejoin="round"
 													stroke-width="2"
-													d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+													d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
 												></path>
 											</svg>
+										</div>
+									{/if}
+
+									<div class="flex-1">
+										<h4 class="font-medium text-gray-800">
+											{track.track.title}
+										</h4>
+										<p class="text-sm text-gray-600">
+											{track.track.artist}
+										</p>
+										{#if track.track.album}
+											<p class="text-xs text-gray-500">
+												{track.track.album}
+											</p>
+										{/if}
+										<p class="text-xs text-gray-400">
+											Added by {track.addedBy.displayName} • {formatDate(
+												track.addedAt,
+											)}
+										</p>
+									</div>
+
+									<div class="flex items-center space-x-3 mr-4">
+										<!-- Music Player Controls -->
+										{#if isMusicPlayerInitialized}
+											<div
+												class="flex items-center space-x-2"
+											>
+												<!-- Play Button -->
+												<button
+													onclick={() => {
+														const actualIndex =
+															searchQuery.trim()
+																? (playlist?.tracks?.indexOf(
+																		track,
+																	) ?? index)
+																: index;
+														// If this track is currently playing, toggle play/pause
+														if (
+															playerState.currentTrackIndex ===
+																actualIndex &&
+															playerState.currentTrack
+														) {
+															if (
+																playerState.isPlaying
+															) {
+																musicPlayerStore.pause();
+															} else {
+																musicPlayerStore.play();
+															}
+														} else {
+															// Play this track
+															playTrack(actualIndex);
+														}
+													}}
+													disabled={!playerState.canControl}
+													class="p-1.5 rounded-full {playerState.currentTrackIndex ===
+													(searchQuery.trim()
+														? (playlist?.tracks?.indexOf(
+																track,
+															) ?? index)
+														: index)
+														? 'bg-secondary text-white'
+														: 'bg-gray-100 text-gray-600'} hover:bg-secondary hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+													aria-label={`${playerState.currentTrackIndex === (searchQuery.trim() ? (playlist?.tracks?.indexOf(track) ?? index) : index) && playerState.isPlaying ? "Pause" : "Play"} ${track.track.title}`}
+												>
+													{#if playerState.currentTrackIndex === (searchQuery.trim() ? (playlist?.tracks?.indexOf(track) ?? index) : index) && playerState.isPlaying}
+														<!-- Pause icon -->
+														<svg
+															class="w-3 h-3"
+															fill="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"
+															/>
+														</svg>
+													{:else}
+														<!-- Play icon -->
+														<svg
+															class="w-3 h-3"
+															fill="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																d="M8 5v14l11-7z"
+															/>
+														</svg>
+													{/if}
+												</button>
+											</div>
+										{/if}
+										{#if track.track.duration}
+											<span class="text-sm text-gray-500"
+												>{formatDuration(
+													track.track.duration,
+												)}</span
+											>
+										{/if}
+
+									</div>
+									<!-- Remove Track Button -->
+									{#if canEdit}
+										<button class="absolute clickable right-0 top-[50%] translate-x-[50%] translate-y-[-50%] w-10 h-10 group" onclick={() => (removeTrack(track.trackId))} aria-label="remove track" title="Remove Track">
+											<svg viewBox="-8.4 -8.4 40.80 40.80" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"><path transform="translate(-8.4, -8.4), scale(2.55)" fill="#ffffff" class:group-hover:fill-secondary={index === 0} class="group-hover:fill-gray-200 transition-colors duration-200" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M4 6H20M16 6L15.7294 5.18807C15.4671 4.40125 15.3359 4.00784 15.0927 3.71698C14.8779 3.46013 14.6021 3.26132 14.2905 3.13878C13.9376 3 13.523 3 12.6936 3H11.3064C10.477 3 10.0624 3 9.70951 3.13878C9.39792 3.26132 9.12208 3.46013 8.90729 3.71698C8.66405 4.00784 8.53292 4.40125 8.27064 5.18807L8 6M18 6V16.2C18 17.8802 18 18.7202 17.673 19.362C17.3854 19.9265 16.9265 20.3854 16.362 20.673C15.7202 21 14.8802 21 13.2 21H10.8C9.11984 21 8.27976 21 7.63803 20.673C7.07354 20.3854 6.6146 19.9265 6.32698 19.362C6 18.7202 6 17.8802 6 16.2V6M14 10V17M10 10V17" stroke="#e01b24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
 										</button>
 									{/if}
 								</div>
@@ -1226,9 +1249,8 @@
 									bind:value={editPlaylistData.licenseType}
 									class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 								>
-									<option value="open">Open</option>
-									<option value="invited">Invited Only</option
-									>
+									<option value="open" disabled={editPlaylistData.visibility === 'private'}>Open</option>
+									<option value="invited">Invited Only</option>
 								</select>
 							</div>
 							{#if isOwner}
@@ -1327,9 +1349,8 @@
 	{#if showMusicSearchModal && playlistId}
 		<EnhancedMusicSearchModal
 			{playlistId}
-			onTrackAdded={() => {
-				showMusicSearchModal = false;
-			}}
+			{playlist}
+			onTrackAdded={() => {}}
 			onClose={() => (showMusicSearchModal = false)}
 		/>
 	{/if}

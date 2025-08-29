@@ -371,7 +371,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   // Server-side notification methods (called by EventsService)
-  notifyEventCreated(event: Event, creatorId: string) {
+  notifyEventCreated(event: Event, creator: User) {
     this.server.to(SOCKET_ROOMS.EVENTS).emit('event-created', {
       event : {
         id: event.id,
@@ -385,8 +385,8 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         eventEndDate: event.eventEndDate,
         participants: event.participants ? event.participants.map(p => ({ id: p.id, displayName: p.displayName, avatarUrl: p.avatarUrl })) : [],
         participantsCount: event.participants ? event.participants.length : 0,
+        creator: creator ? { id: creator.id, displayName: creator.displayName, avatarUrl: creator.avatarUrl } : null,
       },
-      creatorId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -522,7 +522,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         artist: track.artist,
         album: track.album,
         duration: track.duration,
-        albumCoverUrl: track.albumCoverUrl,
+        thumbnailUrl: track.albumCoverUrl,
         previewUrl: track.previewUrl,
         addedBy,
       },

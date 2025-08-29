@@ -42,6 +42,70 @@ const initialState: PlayerState = {
 function createMusicPlayerStore() {
   const { subscribe, set, update } = writable<PlayerState>(initialState);
 
+  // Helper function to find next valid track with preview URL
+  const findNextValidTrack = (playlist: PlaylistTrack[], startIndex: number): number => {
+    if (playlist.length === 0) return -1;
+    
+    // Track which indices we've checked to avoid infinite loops
+    const checkedIndices = new Set<number>();
+    let currentIndex = startIndex;
+    
+    while (checkedIndices.size < playlist.length) {
+      // Wrap around to beginning if we reach the end
+      if (currentIndex >= playlist.length) {
+        currentIndex = 0;
+      }
+      
+      // If we've already checked this index, we've gone full circle
+      if (checkedIndices.has(currentIndex)) {
+        break;
+      }
+      
+      checkedIndices.add(currentIndex);
+      
+      // Check if this track has a valid preview URL
+      if (playlist[currentIndex].track.previewUrl) {
+        return currentIndex;
+      }
+      
+      currentIndex++;
+    }
+    
+    return -1; // No valid track found
+  };
+
+  // Helper function to find previous valid track with preview URL
+  const findPreviousValidTrack = (playlist: PlaylistTrack[], startIndex: number): number => {
+    if (playlist.length === 0) return -1;
+    
+    // Track which indices we've checked to avoid infinite loops
+    const checkedIndices = new Set<number>();
+    let currentIndex = startIndex;
+    
+    while (checkedIndices.size < playlist.length) {
+      // Wrap around to end if we reach the beginning
+      if (currentIndex < 0) {
+        currentIndex = playlist.length - 1;
+      }
+      
+      // If we've already checked this index, we've gone full circle
+      if (checkedIndices.has(currentIndex)) {
+        break;
+      }
+      
+      checkedIndices.add(currentIndex);
+      
+      // Check if this track has a valid preview URL
+      if (playlist[currentIndex].track.previewUrl) {
+        return currentIndex;
+      }
+      
+      currentIndex--;
+    }
+    
+    return -1; // No valid track found
+  };
+
   return {
     subscribe,
     
@@ -60,9 +124,6 @@ function createMusicPlayerStore() {
     setPlaylist: (playlist: PlaylistTrack[], currentIndex: number = 0) => {
       update(state => {
         const newTrack = playlist[currentIndex];
-        console.log('MusicPlayerStore: Setting playlist with', playlist.length, 'tracks, currentIndex:', currentIndex);
-        console.log('MusicPlayerStore: New track at index:', newTrack);
-        
         return {
           ...state,
           playlist,
@@ -96,55 +157,100 @@ function createMusicPlayerStore() {
 
     nextTrack: () => {
       update(state => {
-        const nextIndex = state.currentTrackIndex + 1;
-        if (nextIndex < state.playlist.length) {
-          const nextTrack = state.playlist[nextIndex];
-          return {
-            ...state,
-            currentTrackIndex: nextIndex,
-            currentTrack: {
-              id: nextTrack.track.id,
-              title: nextTrack.track.title,
-              artist: nextTrack.track.artist,
-              album: nextTrack.track.album,
-              duration: nextTrack.track.duration || 30, // Default to 30 seconds for previews
-              albumCoverUrl: nextTrack.track.albumCoverUrl,
-              previewUrl: nextTrack.track.previewUrl
-            },
-            currentTime: 0,
-            duration: nextTrack.track.duration || 30,
-            // Keep playing state - the audio component will handle auto-play
-            isPlaying: state.isPlaying
-          };
+        let nextIndex = state.currentTrackIndex + 1;
+        
+        // If we're playing, try to find the next track with a valid preview URL
+        if (state.isPlaying) {
+          // If we've reached the end of the playlist, loop back to the beginning
+          if (nextIndex >= state.playlist.length) {
+            nextIndex = 0;
+          }
+          
+          // Try to find the next valid track, starting from nextIndex
+          const validIndex = findNextValidTrack(state.playlist, nextIndex);
+          
+          if (validIndex === -1) {
+            // No valid tracks found anywhere in the playlist
+            // Try to find from the beginning in case we missed something
+            const validFromStart = findNextValidTrack(state.playlist, 0);
+            
+            if (validFromStart === -1) {
+              // Really no valid tracks anywhere, stop playing
+              console.warn('No tracks with valid preview URLs available in entire playlist');
+              return { ...state, isPlaying: false };
+            } else {
+              nextIndex = validFromStart;
+            }
+          } else {
+            nextIndex = validIndex;
+          }
+        } else {
+          // If not playing, just go to the next track (even if no preview)
+          if (nextIndex >= state.playlist.length) {
+            // Loop back to beginning when not playing too
+            nextIndex = 0;
+          }
         }
-        return { ...state, isPlaying: false }; // Stop if no next track
+        
+        const nextTrack = state.playlist[nextIndex];
+        return {
+          ...state,
+          currentTrackIndex: nextIndex,
+          currentTrack: {
+            id: nextTrack.track.id,
+            title: nextTrack.track.title,
+            artist: nextTrack.track.artist,
+            album: nextTrack.track.album,
+            duration: nextTrack.track.duration || 30, // Default to 30 seconds for previews
+            albumCoverUrl: nextTrack.track.albumCoverUrl,
+            previewUrl: nextTrack.track.previewUrl
+          },
+          currentTime: 0,
+          duration: nextTrack.track.duration || 30,
+          // Keep playing state - the audio component will handle auto-play
+          isPlaying: state.isPlaying
+        };
       });
     },
 
     previousTrack: () => {
       update(state => {
-        const prevIndex = state.currentTrackIndex - 1;
-        if (prevIndex >= 0) {
-          const prevTrack = state.playlist[prevIndex];
-          return {
-            ...state,
-            currentTrackIndex: prevIndex,
-            currentTrack: {
-              id: prevTrack.track.id,
-              title: prevTrack.track.title,
-              artist: prevTrack.track.artist,
-              album: prevTrack.track.album,
-              duration: prevTrack.track.duration || 30, // Default to 30 seconds for previews
-              albumCoverUrl: prevTrack.track.albumCoverUrl,
-              previewUrl: prevTrack.track.previewUrl
-            },
-            currentTime: 0,
-            duration: prevTrack.track.duration || 30,
-            // Keep playing state - the audio component will handle auto-play
-            isPlaying: state.isPlaying
-          };
+        let prevIndex = state.currentTrackIndex - 1;
+        
+        // If we're playing, try to find the previous track with a valid preview URL
+        if (state.isPlaying) {
+          prevIndex = findPreviousValidTrack(state.playlist, prevIndex);
+          
+          if (prevIndex === -1) {
+            // No valid tracks found, stay on current track
+            console.warn('No previous tracks with valid preview URLs available');
+            return state;
+          }
+        } else {
+          // If not playing, just go to the previous track (even if no preview)
+          if (prevIndex < 0) {
+            return state;
+          }
         }
-        return state;
+        
+        const prevTrack = state.playlist[prevIndex];
+        return {
+          ...state,
+          currentTrackIndex: prevIndex,
+          currentTrack: {
+            id: prevTrack.track.id,
+            title: prevTrack.track.title,
+            artist: prevTrack.track.artist,
+            album: prevTrack.track.album,
+            duration: prevTrack.track.duration || 30, // Default to 30 seconds for previews
+            albumCoverUrl: prevTrack.track.albumCoverUrl,
+            previewUrl: prevTrack.track.previewUrl
+          },
+          currentTime: 0,
+          duration: prevTrack.track.duration || 30,
+          // Keep playing state - the audio component will handle auto-play
+          isPlaying: state.isPlaying
+        };
       });
     },
 

@@ -597,6 +597,7 @@ export class AuthController {
   }
 
   // Dedicated OAuth linking endpoints
+  @Public()
   @Get('google/link')
   @UseGuards(GoogleLinkAuthGuard)
   @ApiOperation({
@@ -609,6 +610,7 @@ export class AuthController {
     console.log('Google link endpoint reached with token:', token ? 'token present' : 'no token');
   }
 
+  @Public()
   @Get('google/link-callback')
   @UseGuards(GoogleLinkAuthGuard)
   @ApiOperation({
@@ -670,6 +672,7 @@ export class AuthController {
     }
   }
 
+  @Public()
   @Get('facebook/link')
   @UseGuards(FacebookLinkAuthGuard)
   @ApiOperation({
@@ -682,6 +685,7 @@ export class AuthController {
     console.log('Facebook link endpoint reached with token:', token ? 'token present' : 'no token');
   }
 
+  @Public()
   @Get('facebook/link-callback')
   @UseGuards(FacebookLinkAuthGuard)
   @ApiOperation({

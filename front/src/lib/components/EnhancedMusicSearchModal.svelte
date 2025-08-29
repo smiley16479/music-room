@@ -1,21 +1,48 @@
 <script lang="ts">
 	import { deezerService, type DeezerTrack } from '$lib/services/deezer';
-	import { playlistsService } from '$lib/services/playlists';
+	import { playlistsService, type Playlist } from '$lib/services/playlists';
 	import { addTrackToEvent } from '$lib/services/events';
 	import { authStore } from '$lib/stores/auth';
 	import { onMount } from 'svelte';
 
 	let { 
 		playlistId,
+		playlist: playlistProp,
 		eventId,
+		eventTracks,
 		onTrackAdded = () => {},
 		onClose = () => {}
 	}: {
 		playlistId?: string;
+		playlist?: Playlist;
 		eventId?: string;
+		eventTracks?: any[]; // Array of event tracks
 		onTrackAdded?: () => void;
 		onClose?: () => void;
 	} = $props();
+
+	// Make playlist reactive to prop changes
+	let playlist = $state<Playlist | undefined>(playlistProp);
+	let currentEventTracks = $state<any[]>(eventTracks || []);
+	
+	// Update local state when props change
+	$effect(() => {
+		playlist = playlistProp;
+	});
+	
+	$effect(() => {
+		currentEventTracks = eventTracks || [];
+	});
+
+	// Debug effect to log when data changes (can be removed in production)
+	$effect(() => {
+		if (playlist?.tracks) {
+			console.log('🎵 Modal playlist updated - track count:', playlist.tracks.length);
+		}
+		if (currentEventTracks.length > 0) {
+			console.log('🎵 Modal event tracks updated - track count:', currentEventTracks.length);
+		}
+	});
 
 	// Ensure we have either playlistId or eventId, but not both
 	if (!playlistId && !eventId) {
@@ -65,6 +92,28 @@
 			isLoadingTop = false;
 		}
 	}
+
+	// Reactive function to check if track is already in playlist or event
+	const isAlreadyInPlaylist = $derived((trackId: string): boolean => {
+		// For playlist mode
+		if (playlist && playlist.tracks) {
+			return playlist.tracks.some(track => 
+				track.track.id === trackId || 
+				track.track.deezerId === trackId
+			);
+		}
+		
+		// For event mode - check against event tracks
+		if (currentEventTracks && currentEventTracks.length > 0) {
+			return currentEventTracks.some(track => 
+				track.id === trackId || 
+				track.deezerId === trackId ||
+				(track.track && (track.track.id === trackId || track.track.deezerId === trackId))
+			);
+		}
+		
+		return false;
+	});
 
 	// Debounced search function
 	function handleSearchInput() {
@@ -147,6 +196,9 @@
 		searchError = '';
 
 		try {
+			if (typeof deezerTrack.deezerId === 'number') {
+				deezerTrack.deezerId = String(deezerTrack.deezerId);
+			}
 			const trackData = {
 				deezerId: deezerTrack.deezerId,
 				title: deezerTrack.title,
@@ -156,6 +208,25 @@
 				previewUrl: deezerTrack.previewUrl,
 				duration: deezerTrack.duration
 			};
+
+			// Optimistically update the state to show "Added" immediately
+			if (eventId && currentEventTracks) {
+				// For events, add to current event tracks
+				currentEventTracks = [...currentEventTracks, {
+					id: deezerTrack.id,
+					deezerId: deezerTrack.deezerId,
+					title: deezerTrack.title,
+					artist: deezerTrack.artist,
+					album: deezerTrack.album,
+					thumbnailUrl: deezerTrack.albumCoverUrl,
+					previewUrl: deezerTrack.previewUrl,
+					duration: deezerTrack.duration
+				}];
+			} else if (playlistId && playlist?.tracks) {
+				// For playlists, skip optimistic update to prevent duplicates
+				// Real update will come via socket event
+				console.log('🎵 Skipping optimistic update for playlist - will be handled by socket event');
+			}
 
 			// Add to event or playlist based on which ID was provided
 			if (eventId) {
@@ -328,22 +399,25 @@
 										Your browser does not support the audio element.
 									</audio>
 								{/if}
-								
-								<button
-									onclick={() => addTrackToPlaylist(track)}
-									disabled={isAddingTrack === track.id}
-									class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-								>
-									{#if isAddingTrack === track.id}
-										<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-										<span>Adding...</span>
-									{:else}
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-										</svg>
-										<span>Add</span>
-									{/if}
-								</button>
+								{#if isAlreadyInPlaylist(track.id)}
+									<span class="text-sm text-gray-500 italic">Added</span>
+								{:else}
+									<button
+										onclick={() => addTrackToPlaylist(track)}
+										disabled={isAddingTrack === track.id}
+										class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+									>
+										{#if isAddingTrack === track.id}
+											<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+											<span>Adding...</span>
+										{:else}
+											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+											</svg>
+											<span>Add</span>
+										{/if}
+									</button>
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -394,22 +468,25 @@
 										Your browser does not support the audio element.
 									</audio>
 								{/if}
-								
-								<button
-									onclick={() => addTrackToPlaylist(track)}
-									disabled={isAddingTrack === track.id}
-									class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-								>
-									{#if isAddingTrack === track.id}
-										<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-										<span>Adding...</span>
-									{:else}
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-										</svg>
-										<span>Add</span>
-									{/if}
-								</button>
+								{#if isAlreadyInPlaylist(track.id)}
+									<span class="text-sm text-gray-500 italic">Added</span>
+								{:else}
+									<button
+										onclick={() => addTrackToPlaylist(track)}
+										disabled={isAddingTrack === track.id}
+										class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+									>
+										{#if isAddingTrack === track.id}
+											<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+											<span>Adding...</span>
+										{:else}
+											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+											</svg>
+											<span>Add</span>
+										{/if}
+									</button>
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -552,21 +629,25 @@
 									</audio>
 								{/if}
 								
-								<button
-									onclick={() => addTrackToPlaylist(track)}
-									disabled={isAddingTrack === track.id}
-									class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-								>
-									{#if isAddingTrack === track.id}
-										<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-										<span>Adding...</span>
-									{:else}
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-										</svg>
-										<span>Add</span>
-									{/if}
-								</button>
+								{#if isAlreadyInPlaylist(track.id)}
+									<span class="text-sm text-gray-500 italic">Added</span>
+								{:else}
+									<button
+										onclick={() => addTrackToPlaylist(track)}
+										disabled={isAddingTrack === track.id}
+										class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+									>
+										{#if isAddingTrack === track.id}
+											<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+											<span>Adding...</span>
+										{:else}
+											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+											</svg>
+											<span>Add</span>
+										{/if}
+									</button>
+								{/if}
 							</div>
 						{/each}
 					</div>

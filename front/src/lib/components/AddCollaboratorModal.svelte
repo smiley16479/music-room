@@ -3,19 +3,33 @@
 	import { friendsService, type Friend } from '$lib/services/friends';
 	import { userService, type User } from '$lib/services/users';
 	import { playlistsService } from '$lib/services/playlists';
+	import * as eventsService from '$lib/services/events';
 	import { getAvatarColor, getAvatarLetter } from '$lib/utils/avatar';
 	import { onMount } from 'svelte';
 
+	// Props - support both playlist collaborators and event participants
 	let { 
-		playlistId,
+		playlistId = undefined,
+		eventId = undefined,
 		onCollaboratorAdded = () => {},
+		onParticipantAdded = () => {},
 		onClose = () => {}
+	}: {
+		playlistId?: string;
+		eventId?: string;
+		onCollaboratorAdded?: () => void;
+		onParticipantAdded?: () => void;
+		onClose?: () => void;
 	} = $props();
 
 	const currentUser = $derived($authStore);
+	
+	// Determine if this is for playlist or event
+	const isPlaylistMode = $derived(!!playlistId);
+	const isEventMode = $derived(!!eventId);
 
 	// Tab state
-	let activeTab = $state<'friends' | 'search' | 'direct'>('friends');
+	let activeTab = $state<'friends' | 'search'>('friends');
 	
 	// Friends data
 	let friends = $state<Friend[]>([]);
@@ -86,11 +100,22 @@
 		error = '';
 
 		try {
-			await playlistsService.addCollaborator(playlistId, userId);
-			onCollaboratorAdded();
+			if (isPlaylistMode) {
+				await playlistsService.addCollaborator(playlistId!, userId);
+				onCollaboratorAdded();
+			} else if (isEventMode) {
+				// For events, add the user as a collaborator to the event's playlist
+				// This grants them access to the private event through playlist collaboration
+				const event = await eventsService.getEvent(eventId!);
+				if (!event.playlistId) {
+					throw new Error('Event playlist not found');
+				}
+				await playlistsService.addCollaborator(event.playlistId, userId);
+				onParticipantAdded();
+			}
 			onClose();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to add collaborator';
+			error = err instanceof Error ? err.message : `Failed to ${isPlaylistMode ? 'add collaborator' : 'invite to event'}`;
 		} finally {
 			adding = false;
 		}
@@ -135,11 +160,11 @@
 
 			await addCollaborator(userId, displayName);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to add collaborator';
+			error = err instanceof Error ? err.message : `Failed to ${isPlaylistMode ? 'add collaborator' : 'invite to event'}`;
 		}
 	}
 
-	function setTab(tab: 'friends' | 'search' | 'direct') {
+	function setTab(tab: 'friends' | 'search') {
 		activeTab = tab;
 		error = '';
 		// Clear search when switching tabs
@@ -147,17 +172,25 @@
 			searchQuery = '';
 			searchResults = [];
 		}
-		if (tab !== 'direct') {
-			directInput = '';
-		}
 	}
+
+	// Dynamic text based on mode
+	const modalTitle = $derived(isPlaylistMode ? 'Add Collaborator' : 'Invite to Event');
+	const actionButtonText = $derived(isPlaylistMode ? 'Add Collaborator' : 'Invite');
+	const addingText = $derived(isPlaylistMode ? 'Adding...' : 'Inviting...');
+	const shortAddText = $derived(isPlaylistMode ? 'Add' : 'Invite');
+	const emailPlaceholder = $derived(isPlaylistMode ? 'friend@example.com or user-id-123...' : 'participant@example.com or user-id-123...');
+	const directInputDescription = $derived(isPlaylistMode ? 
+		'You can enter an email address, user ID, or display name' : 
+		'Invite users to access this private event by adding them as playlist collaborators'
+	);
 </script>
 
 <div class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4">
 	<div class="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
 		<div class="p-6 border-b border-gray-200">
 			<div class="flex justify-between items-center">
-				<h2 class="text-xl font-bold text-gray-800">Add Collaborator</h2>
+				<h2 class="text-xl font-bold text-gray-800">{modalTitle}</h2>
 				<button 
 					onclick={() => onClose()}
 					aria-label="Close modal"
@@ -168,6 +201,12 @@
 					</svg>
 				</button>
 			</div>
+
+			{#if isEventMode}
+				<p class="text-sm text-gray-600 mt-2">
+					Inviting users will grant them access to this private event by adding them as playlist collaborators.
+				</p>
+			{/if}
 
 			<!-- Tab Navigation -->
 			<div class="flex space-x-1 mt-4 bg-gray-100 rounded-lg p-1">
@@ -182,12 +221,6 @@
 					class="tab-button {activeTab === 'search' ? 'active' : ''}"
 				>
 					Search Users
-				</button>
-				<button 
-					onclick={() => setTab('direct')}
-					class="tab-button {activeTab === 'direct' ? 'active' : ''}"
-				>
-					Email/ID
 				</button>
 			</div>
 		</div>
@@ -237,7 +270,7 @@
 									disabled={adding}
 									class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50"
 								>
-									{adding ? 'Adding...' : 'Add'}
+									{adding ? addingText : shortAddText}
 								</button>
 							</div>
 						{/each}
@@ -294,62 +327,23 @@
 										disabled={adding}
 										class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50"
 									>
-										{adding ? 'Adding...' : 'Add'}
+										{adding ? addingText : shortAddText}
 									</button>
 								</div>
 							{/each}
 						{/if}
 					</div>
 				</div>
-
-			{:else if activeTab === 'direct'}
-				<!-- Direct Input Tab -->
-				<div class="space-y-4">
-					<div>
-						<label for="directInput" class="block text-sm font-medium text-gray-700 mb-2">
-							Enter email address or user ID:
-						</label>
-						<input 
-							id="directInput"
-							type="text" 
-							bind:value={directInput}
-							placeholder="friend@example.com or user-id-123..."
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary"
-						/>
-						<p class="text-xs text-gray-500 mt-1">
-							You can enter an email address, user ID, or display name
-						</p>
-					</div>
-
-					<div class="flex space-x-3">
-						<button 
-							onclick={() => onClose()}
-							class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-						>
-							Cancel
-						</button>
-						<button 
-							onclick={handleDirectAdd}
-							disabled={adding || !directInput.trim()}
-							class="flex-1 bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 disabled:opacity-50"
-						>
-							{adding ? 'Adding...' : 'Add Collaborator'}
-						</button>
-					</div>
-				</div>
 			{/if}
 		</div>
-
-		{#if activeTab !== 'direct'}
-			<div class="p-6 border-t border-gray-200">
-				<button 
-					onclick={() => onClose()}
-					class="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-				>
-					Cancel
-				</button>
-			</div>
-		{/if}
+		<div class="p-6 border-t border-gray-200">
+			<button 
+				onclick={() => onClose()}
+				class="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+			>
+				Cancel
+			</button>
+		</div>
 	</div>
 </div>
 

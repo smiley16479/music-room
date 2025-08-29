@@ -39,9 +39,9 @@ export interface PlaylistSocketEvents {
   'playlist-deleted': (data: { playlistId: string }) => void;
   
   // Collaborative editing events for tracks
-  'playlist-track-added': (data: { playlistId: string; track: any; trackCount: number }) => void;
-  'playlist-track-removed': (data: { playlistId: string; trackId: string; trackCount: number }) => void;
-  'playlist-tracks-reordered': (data: { playlistId: string; tracks: any[] }) => void;
+  'track-added': (data: { playlistId: string; track: any; addedBy: string; timestamp: string }) => void;
+  'track-removed': (data: { playlistId: string; trackId: string; trackCount: number }) => void;
+  'tracks-reordered': (data: { playlistId: string; tracks: any[] }) => void;
   
   // Collaborator management events
   'playlist-collaborator-added': (data: { playlistId: string; collaborator: any; playlist?: any }) => void;
@@ -60,9 +60,12 @@ class SocketService {
       const token = authService.getAuthToken();
       
       if (!token) {
+        console.error('❌ No authentication token available');
         reject(new Error('No authentication token available'));
         return;
       }
+
+      console.log('🔐 Auth token found, connecting to socket...');
 
       // Connect to the playlists namespace
       this.socket = io(`${config.apiUrl}/playlists`, {
@@ -73,18 +76,24 @@ class SocketService {
       });
 
       this.socket.on('connect', () => {
-        console.log('Connected to playlist socket');
+        console.log('✅ Connected to playlist socket');
         this.reconnectAttempts = 0;
+        
+        // Add a catch-all listener for debugging
+        this.socket!.onAny((event, ...args) => {
+          console.log(`🔍 Socket event received: ${event}`, args);
+        });
+        
         resolve(this.socket!);
       });
 
       this.socket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
+        console.error('❌ Socket connection error:', error);
         reject(error);
       });
 
       this.socket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
+        console.log('❌ Socket disconnected:', reason);
         
         if (reason === 'io server disconnect') {
           // Server disconnected us, reconnect manually
@@ -94,7 +103,7 @@ class SocketService {
 
       // Set up error handler
       this.socket.on('error', (error) => {
-        console.error('Socket error:', error);
+        console.error('❌ Socket error:', error);
       });
     });
   }
@@ -125,7 +134,17 @@ class SocketService {
       throw new Error('Socket not connected');
     }
     
+    console.log(`🏠 Joining playlist room: ${playlistId}`);
     this.socket.emit('join-playlist', { playlistId });
+    
+    // Listen for join confirmation
+    this.socket.once('joined-playlist', (data) => {
+      console.log('✅ Successfully joined playlist room:', data);
+    });
+    
+    this.socket.once('error', (error) => {
+      console.error('❌ Error joining playlist:', error);
+    });
   }
 
   leavePlaylist(playlistId: string) {
@@ -197,7 +216,11 @@ class SocketService {
       throw new Error('Socket not connected');
     }
     
-    this.socket.on(event, callback);
+    console.log(`🎧 Setting up listener for event: ${event}`);
+    this.socket.on(event, (...args) => {
+      console.log(`📨 Received socket event: ${event}`, args);
+      callback(...args);
+    });
   }
 
   off(event: string, callback?: (...args: any[]) => void) {

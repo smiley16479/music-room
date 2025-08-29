@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere, In } from 'typeorm';
@@ -58,6 +60,7 @@ export class EventService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    @Inject(forwardRef(() => PlaylistService))
     private readonly playlistService: PlaylistService,
     private readonly emailService: EmailService,
     private readonly eventGateway: EventGateway,
@@ -127,7 +130,7 @@ export class EventService {
     // Add creator as first participant
     await this.addParticipant(savedEvent.id, creatorId);
 
-    this.eventGateway.notifyEventCreated(savedEvent, creatorId);
+    this.eventGateway.notifyEventCreated(savedEvent, creator);
 
     return this.findById(savedEvent.id, creatorId);
   }
@@ -138,10 +141,25 @@ export class EventService {
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('event.admins', 'admins')
       .leftJoinAndSelect('event.currentTrack', 'currentTrack')
       .leftJoinAndSelect('event.playlist', 'playlist')
-      .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
-      .orWhere('event.creatorId = :userId', { userId })
+      .leftJoinAndSelect('playlist.collaborators', 'playlistCollaborators');
+
+    if (userId) {
+      // Show public events + private events where user has access (creator, participant, admin, or playlist collaborator)
+      queryBuilder
+        .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
+        .orWhere('event.creatorId = :userId', { userId })
+        .orWhere('participants.id = :userId', { userId })
+        .orWhere('admins.id = :userId', { userId })
+        .orWhere('playlistCollaborators.id = :userId', { userId });
+    } else {
+      // For unauthenticated users, only show public events
+      queryBuilder.where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC });
+    }
+
+    queryBuilder
       .orderBy('event.createdAt', 'DESC')
       .skip(skip)
       .take(limit);
@@ -173,7 +191,7 @@ export class EventService {
     const event = await this.eventRepository.findOne({
       where: { id },
       relations: ['creator', 'participants', 'admins', 'currentTrack', 
-        'playlist', 'playlist.playlistTracks', 
+        'playlist', 'playlist.playlistTracks', 'playlist.collaborators',
         'votes', 'votes.user', 'votes.track'
       ],
     });
@@ -191,9 +209,9 @@ export class EventService {
   async update(id: string, updateEventDto: UpdateEventDto, userId: string): Promise<Event> {
     const event = await this.findById(id, userId);
 
-    // Only creator can update event
-    if (event.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can update this event');
+    // Only creator or admin can update event
+    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
+      throw new ForbiddenException('Only the creator or admin can update this event');
     }
 
     Object.assign(event, updateEventDto);
@@ -221,7 +239,7 @@ export class EventService {
   async addParticipant(eventId: string, userId: string): Promise<void> {
     const event = await this.eventRepository.findOne({
       where: { id: eventId },
-      relations: ['participants'],
+      relations: ['participants', 'playlist', 'playlist.collaborators'],
     });
 
     if (!event) {
@@ -286,6 +304,8 @@ export class EventService {
         'creator',
         'admins',
         'participants',
+        'playlist',
+        'playlist.collaborators'
       ]
     });
 
@@ -301,21 +321,47 @@ export class EventService {
     if (event.creatorId === userId) {
       throw new BadRequestException('Event creator is already an admin by default');
     }
+
+    // Check if user has access to this event (creator, participant, or playlist collaborator)
+    const hasAccess = event.creatorId === userId ||
+      event.participants?.some(p => p.id === userId) ||
+      (event.playlist?.collaborators?.some(c => c.id === userId));
+
+    if (!hasAccess) {
+      throw new ForbiddenException('User must have access to the event to be promoted to admin');
+    }
     
+    // Add user as participant if not already participating
     const isParticipant = event.participants?.some(p => p.id === userId);
     if (!isParticipant) {
-      await this.addParticipant(eventId, userId);
+      // Add directly without access check since we already verified access above
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      await this.eventRepository
+        .createQueryBuilder()
+        .relation(Event, 'participants')
+        .of(eventId)
+        .add(userId);
+
+      // Notify other participants
+      this.eventGateway.notifyParticipantJoined(eventId, user);
     }
+
     // Check if already admin
     if (event.admins?.some(a => a.id === userId)) {
       throw new ConflictException('User is already an admin');
     }
+
     // Add user to admins relation
     await this.eventRepository
       .createQueryBuilder()
       .relation(Event, 'admins')
       .of(eventId)
       .add(userId);
+    
     // Optionally notify participants
     this.eventGateway.notifyAdminAdded(eventId, userId);
   }
@@ -403,15 +449,53 @@ export class EventService {
     await this.voteRepository.save(vote);
 
     // Get updated voting results
-    const results = await this.getVotingResults(eventId, userId);
+    const results = await this.getVotingResults(eventId);
 
     // Reorder playlist tracks based on votes
     await this.reorderPlaylistByVotes(eventId);
 
-    // Notify participants
+    // Notify participants (without user-specific vote data)
     this.eventGateway.notifyVoteUpdated(eventId, vote, results);
 
-    return results;
+    // Return user-specific results for the HTTP response
+    return await this.getVotingResults(eventId, userId);
+  }
+
+  async removeVotesOfEvent(eventId: string): Promise<void> {
+    await this.voteRepository.delete({ eventId });
+  }
+
+  async removeVotesOfTrack(eventId: string, trackId: string, userId?: string): Promise<void> {
+    // If userId is provided, use normal access check. If not, skip access check for internal operations
+    const event = userId ? await this.findById(eventId, userId) : await this.eventRepository.findOne({
+      where: { id: eventId }
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    const votesToRemove = await this.voteRepository.find({
+      where: { eventId, trackId },
+      relations: ['user'],
+    });
+
+    // Remove all votes for the specified track
+    await this.voteRepository.delete({
+      eventId,
+      trackId,
+    });
+
+    // Get updated voting results after removal
+    const results = await this.getVotingResults(eventId);
+
+    // Reorder playlist tracks based on updated votes
+    await this.reorderPlaylistByVotes(eventId);
+
+    // Notify all participants about each removed vote (users regain their vote capacity)
+    for (const vote of votesToRemove) {
+      this.eventGateway.notifyVoteRemoved(eventId, vote, results);
+    }
   }
 
   async removeVote(eventId: string, userId: string, trackId: string): Promise<VoteResult[]> {
@@ -428,15 +512,16 @@ export class EventService {
     await this.voteRepository.remove(vote);
 
     // Get updated voting results
-    const results = await this.getVotingResults(eventId, userId);
+    const results = await this.getVotingResults(eventId);
 
     // Reorder playlist tracks based on votes
     await this.reorderPlaylistByVotes(eventId);
 
-    // Notify participants
+    // Notify participants (without user-specific vote data)
     this.eventGateway.notifyVoteRemoved(eventId, vote, results);
 
-    return results;
+    // Return user-specific results for the HTTP response
+    return await this.getVotingResults(eventId, userId);
   }
 
   /**
@@ -493,6 +578,17 @@ export class EventService {
   }
 
   async getVotingResults(eventId: string, userId?: string): Promise<VoteResult[]> {
+    // First get the event with its playlist tracks
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: ['playlist', 'playlist.playlistTracks', 'playlist.playlistTracks.track'],
+    });
+
+    if (!event || !event.playlist) {
+      throw new NotFoundException('Event or playlist not found');
+    }
+
+    // Get all votes for tracks in this event
     const votes = await this.voteRepository
       .createQueryBuilder('vote')
       .leftJoinAndSelect('vote.track', 'track')
@@ -510,10 +606,16 @@ export class EventService {
       trackVotes.get(trackId)!.push(vote);
     });
 
-    // Calculate vote results
+    // Calculate vote results for ALL tracks in the playlist
     const results: VoteResult[] = [];
-    for (const [trackId, trackVoteList] of trackVotes) {
-      const track = trackVoteList[0].track;
+    
+    // Sort playlist tracks by position to maintain consistent order
+    const sortedPlaylistTracks = event.playlist.playlistTracks.sort((a, b) => a.position - b.position);
+    
+    for (const playlistTrack of sortedPlaylistTracks) {
+      const track = playlistTrack.track;
+      const trackVoteList = trackVotes.get(track.id) || [];
+      
       const voteCount = trackVoteList.reduce((sum, vote) => {
         return sum + (vote.type === VoteType.UPVOTE ? vote.weight : -vote.weight);
       }, 0);
@@ -602,8 +704,8 @@ export class EventService {
   async startEvent(eventId: string, userId: string): Promise<Event> {
     const event = await this.findById(eventId, userId);
 
-    if (event.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can start the event');
+    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
+      throw new ForbiddenException('Only the creator or admin can start the event');
     }
 
     if (event.status !== EventStatus.UPCOMING) {
@@ -622,8 +724,8 @@ export class EventService {
   async endEvent(eventId: string, userId: string): Promise<Event> {
     const event = await this.findById(eventId, userId);
 
-    if (event.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can end the event');
+    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
+      throw new ForbiddenException('Only the creator or admin can end the event');
     }
 
     if (event.status !== EventStatus.LIVE) {
@@ -642,8 +744,11 @@ export class EventService {
   async playNextTrack(eventId: string, userId: string): Promise<Track | null> {
     const event = await this.findById(eventId, userId);
 
-    if (event.creatorId !== userId) {
-      throw new ForbiddenException('Only the creator can control playback');
+    const isCreator = event.creatorId === userId;
+    const isAdmin = event.admins?.some(admin => admin.id === userId) || false;
+
+    if (!isCreator && !isAdmin) {
+      throw new ForbiddenException('Only the creator or admins can control playback');
     }
 
     // Get top voted track
@@ -665,15 +770,18 @@ export class EventService {
     return nextTrack;
   }
 
-  /** Récupère tous les events où l'utilisateur est créateur ou participant, avec les admins */
+  /** Récupère tous les events où l'utilisateur est créateur, participant, ou collaborateur de playlist, avec les admins */
   async getEventsUserCanInviteWithAdmins(userId: string): Promise<Event[]> {
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
       .leftJoinAndSelect('event.admins', 'admin')
       .leftJoinAndSelect('event.playlist', 'playlist')
+      .leftJoinAndSelect('playlist.collaborators', 'playlistCollaborators')
+      .leftJoinAndSelect('event.creator', 'creator')
       .where('event.creatorId = :userId', { userId })
       .orWhere('participant.id = :userId', { userId })
+      .orWhere('playlistCollaborators.id = :userId', { userId })
       .getMany();
     return events;
   }
@@ -758,6 +866,11 @@ export class EventService {
       return;
     }
 
+    // Check if user is an admin
+    if (event.admins?.some(admin => admin.id === userId)) {
+      return; // User is an admin
+    }
+
     // Check if user is invited
     const invitation = await this.invitationRepository.findOne({
       where: {
@@ -767,9 +880,29 @@ export class EventService {
       },
     });
 
-    if (!invitation) {
-      throw new ForbiddenException('You are not invited to this private event');
+    if (invitation) {
+      return; // User has an accepted invitation
     }
+
+    // Check if user is a collaborator on the event's playlist
+    if (event.playlist && event.playlist.id) {
+      const playlistWithCollaborators = await this.playlistRepository.findOne({
+        where: { id: event.playlist.id },
+        relations: ['collaborators'],
+      });
+
+      if (playlistWithCollaborators && playlistWithCollaborators.collaborators) {
+        const isPlaylistCollaborator = playlistWithCollaborators.collaborators.some(
+          collaborator => collaborator.id === userId
+        );
+        
+        if (isPlaylistCollaborator) {
+          return; // User is a playlist collaborator
+        }
+      }
+    }
+
+    throw new ForbiddenException('You are not invited to this private event');
   }
 
   private async checkVotingPermissions(event: Event, userId: string): Promise<void> {
@@ -784,17 +917,11 @@ export class EventService {
         // Update status in database if it's different
         if (event.status !== EventStatus.LIVE) {
           await this.eventRepository.update(event.id, { status: EventStatus.LIVE });
-          console.log(`Auto-updated event ${event.id} status to LIVE based on dates`);
         }
       } else if (now >= event.eventEndDate && event.status === EventStatus.LIVE) {
         effectiveStatus = EventStatus.ENDED;
         await this.eventRepository.update(event.id, { status: EventStatus.ENDED });
-        console.log(`Auto-updated event ${event.id} status to ENDED based on dates`);
       }
-    }
-
-    if (effectiveStatus !== EventStatus.LIVE) {
-      throw new BadRequestException('Voting is only allowed during live events');
     }
 
     switch (event.licenseType) {
@@ -802,6 +929,17 @@ export class EventService {
         return; // Everyone can vote
 
       case EventLicenseType.INVITED:
+        // Check if user is the event creator
+        if (event.creatorId === userId) {
+          return;
+        }
+
+        // Check if user is an admin
+        if (event.admins?.some(admin => admin.id === userId)) {
+          return;
+        }
+
+        // Check if user has an accepted invitation
         const invitation = await this.invitationRepository.findOne({
           where: {
             eventId: event.id,
@@ -810,9 +948,29 @@ export class EventService {
           },
         });
 
-        if (!invitation && event.creatorId !== userId) {
-          throw new ForbiddenException('Only invited users can vote in this event');
+        if (invitation) {
+          return;
         }
+
+        // Check if user is a collaborator on the event's playlist
+        if (event.playlist && event.playlist.id) {
+          const playlistWithCollaborators = await this.playlistRepository.findOne({
+            where: { id: event.playlist.id },
+            relations: ['collaborators'],
+          });
+
+          if (playlistWithCollaborators && playlistWithCollaborators.collaborators) {
+            const isPlaylistCollaborator = playlistWithCollaborators.collaborators.some(
+              collaborator => collaborator.id === userId
+            );
+            
+            if (isPlaylistCollaborator) {
+              return;
+            }
+          }
+        }
+
+        throw new ForbiddenException('Only invited users or playlist collaborators can vote in this event');
         break;
 
       case EventLicenseType.LOCATION_BASED:

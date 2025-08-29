@@ -41,36 +41,49 @@
       }
       
       currentAudioSrc = currentTrack.previewUrl;
-      audioElement.src = currentAudioSrc;
-      audioElement.load(); // Force reload of the audio
       
-      // Auto-play if the player is in playing state
-      if (isPlaying) {
-        // Small delay to ensure audio is loaded
-        setTimeout(() => {
-          audioElement?.play().catch(error => {
-            musicPlayerStore.pause();
-          });
-        }, 100);
-      }
-      
-      // Set a timeout to clear loading state if audio doesn't load
-      loadTimeout = setTimeout(() => {
-        // Use a more specific check to avoid reading playerState during effect
-        musicPlayerStore.setLoading(false);
-        loadTimeout = null;
-      }, 5000); // 5 second timeout
-      
-      // Clear timeout when audio loads successfully
-      const handleLoadSuccess = () => {
-        if (loadTimeout) {
-          clearTimeout(loadTimeout);
-          loadTimeout = null;
+      // Validate URL before setting it
+      try {
+        new URL(currentAudioSrc); // This will throw if URL is invalid
+        
+        audioElement.src = currentAudioSrc;
+        audioElement.load(); // Force reload of the audio
+        
+        // Auto-play if the player is in playing state
+        if (isPlaying) {
+          // Small delay to ensure audio is loaded
+          setTimeout(() => {
+            audioElement?.play().catch(error => {
+              console.warn('Auto-play failed after track change:', error);
+              musicPlayerStore.pause();
+            });
+          }, 100);
         }
-      };
-      
-      audioElement.addEventListener('canplay', handleLoadSuccess, { once: true });
-      audioElement.addEventListener('loadeddata', handleLoadSuccess, { once: true });
+        
+        // Set a timeout to clear loading state if audio doesn't load
+        loadTimeout = setTimeout(() => {
+          // Use a more specific check to avoid reading playerState during effect
+          musicPlayerStore.setLoading(false);
+          loadTimeout = null;
+          console.warn('Audio load timeout for track:', currentTrack.title);
+        }, 5000); // 5 second timeout
+        
+        // Clear timeout when audio loads successfully
+        const handleLoadSuccess = () => {
+          if (loadTimeout) {
+            clearTimeout(loadTimeout);
+            loadTimeout = null;
+          }
+        };
+        
+        audioElement.addEventListener('canplay', handleLoadSuccess, { once: true });
+        audioElement.addEventListener('loadeddata', handleLoadSuccess, { once: true });
+        
+      } catch (urlError) {
+        console.warn('Invalid preview URL for track:', currentTrack.title, urlError);
+        musicPlayerStore.setLoading(false);
+        // Don't set the invalid URL, keep the previous state
+      }
     }
   });
 
@@ -114,19 +127,79 @@
   }
   
   function handleEnded() {
-    // Check if there's a next track and auto-advance
-    if (currentTrackIndex < playlist.length - 1) {
-      musicPlayerStore.nextTrack();
-      // Auto-play the next track after a brief delay
-      setTimeout(() => {
-        if (audioElement && isPlaying) {
-          audioElement.play().catch(console.error);
+    console.log('Track ended, current index:', currentTrackIndex, 'playlist length:', playlist.length);
+    
+    // Always advance to the next track when a track ends naturally
+    musicPlayerStore.nextTrack();
+    
+    // Auto-play the next track after a brief delay, with better error handling
+    setTimeout(async () => {
+      const newPlayerState = $musicPlayerStore;
+      
+      // Only auto-play if we were playing and we have a valid next track
+      if (isPlaying && audioElement && newPlayerState.currentTrack) {
+        try {
+          // Check if the audio source is properly loaded before playing
+          if (audioElement.error) {
+            console.warn('Next track failed to load, attempting to skip:', audioElement.error);
+            
+            // Try to skip unplayable tracks, but with a limit to avoid infinite loops
+            let skipAttempts = 0;
+            const maxSkipAttempts = playlist.length; // Don't skip more than the total playlist length
+            
+            while (audioElement.error && skipAttempts < maxSkipAttempts) {
+              console.log(`Skip attempt ${skipAttempts + 1}/${maxSkipAttempts}`);
+              musicPlayerStore.nextTrack();
+              skipAttempts++;
+              
+              // Wait a bit for the new track to load
+              await new Promise(resolve => setTimeout(resolve, 200));
+              
+              // If we've come full circle and still have errors, stop
+              if (skipAttempts >= maxSkipAttempts) {
+                console.warn('Reached maximum skip attempts, stopping playback to avoid infinite loop');
+                musicPlayerStore.pause();
+                return;
+              }
+            }
+          }
+          
+          // Try to play the current track
+          await audioElement.play();
+          console.log('Successfully auto-played next track');
+          
+        } catch (error) {
+          console.warn('Failed to auto-play next track:', error);
+          
+          // Try to skip to the next available track, but limit attempts
+          let skipAttempts = 0;
+          const maxSkipAttempts = Math.min(5, playlist.length); // Limit to 5 attempts or playlist length
+          
+          while (skipAttempts < maxSkipAttempts) {
+            console.log(`Auto-skip attempt ${skipAttempts + 1}/${maxSkipAttempts} due to playback error`);
+            musicPlayerStore.nextTrack();
+            skipAttempts++;
+            
+            // Wait a bit and try to play
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            try {
+              if (audioElement && !audioElement.error) {
+                await audioElement.play();
+                console.log('Successfully played after skip attempts');
+                return; // Success, stop trying
+              }
+            } catch (retryError) {
+              console.log('Retry failed:', retryError);
+            }
+          }
+          
+          // If we've exhausted our skip attempts, stop playing
+          console.warn('Exhausted skip attempts, stopping playback to prevent infinite loop');
+          musicPlayerStore.pause();
         }
-      }, 100);
-    } else {
-      // End of playlist, stop playing
-      musicPlayerStore.pause();
-    }
+      }
+    }, 100);
   }
   
   function handleCanPlay() {
@@ -142,15 +215,61 @@
     if (audioError) {
       // Only log detailed error in development mode, show user-friendly messages
       if (audioError.code === MediaError.MEDIA_ERR_NETWORK) {
-        console.info('Preview not available: Network/CORS restriction');
+        console.info('Preview not available: Network/CORS restriction for track:', currentTrack?.title);
       } else if (audioError.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-        console.info('Preview not available: Format not supported');
+        console.info('Preview not available: Format not supported for track:', currentTrack?.title);
       } else {
-        console.info('Preview not available: Media load failed');
+        console.info('Preview not available: Media load failed for track:', currentTrack?.title);
+      }
+      
+      // If we're currently playing and this error occurred, try to skip to the next track
+      if (isPlaying) {
+        console.log('Auto-skipping failed track during playback...');
+        
+        // Use a timeout to avoid immediate recursive calls
+        setTimeout(async () => {
+          const initialIndex = currentTrackIndex;
+          let skipAttempts = 0;
+          const maxSkipAttempts = Math.min(playlist.length, 10); // Reasonable limit
+          
+          // Try to find a playable track
+          while (skipAttempts < maxSkipAttempts) {
+            musicPlayerStore.nextTrack();
+            skipAttempts++;
+            
+            const newState = $musicPlayerStore;
+            
+            // If we've circled back to where we started, stop to avoid infinite loop
+            if (newState.currentTrackIndex === initialIndex && skipAttempts > 1) {
+              console.warn('Circled back to original track, stopping to avoid infinite loop');
+              musicPlayerStore.pause();
+              break;
+            }
+            
+            // Wait a moment for the new track to load
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Check if the new track is playable
+            if (audioElement && !audioElement.error) {
+              try {
+                await audioElement.play();
+                console.log(`Successfully found playable track after ${skipAttempts} attempts`);
+                return; // Success!
+              } catch (playError) {
+                console.log(`Track ${newState.currentTrackIndex} also failed to play:`, playError);
+                // Continue to next iteration
+              }
+            }
+          }
+          
+          // If we get here, we couldn't find any playable tracks
+          console.warn('Could not find any playable tracks, stopping playback');
+          musicPlayerStore.pause();
+        }, 500);
       }
     }
     musicPlayerStore.setLoading(false);
-    // Don't automatically pause on error - let user try to play manually
+    // Don't automatically pause on error for manual play attempts
   }
 
   async function handlePlayPause() {
@@ -456,7 +575,7 @@
       <div class="flex items-center space-x-3 mx-6">
         <button
           onclick={handlePrevious}
-          disabled={!canControl || currentTrackIndex <= 0}
+          disabled={!canControl || playlist.length === 0}
           class="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Previous track"
           aria-label="Previous track"
@@ -495,7 +614,7 @@
 
         <button
           onclick={handleNext}
-          disabled={!canControl || currentTrackIndex >= playlist.length - 1}
+          disabled={!canControl || playlist.length === 0}
           class="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title="Next track"
           aria-label="Next track"

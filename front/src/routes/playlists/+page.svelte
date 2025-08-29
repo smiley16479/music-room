@@ -117,21 +117,14 @@
 	// Socket event handlers for real-time updates
 	function handlePlaylistCreated(data: { playlist: Playlist }) {
 		console.log('Playlist created:', data.playlist);
-		// Only add if it's not an event playlist
-		if (!data.playlist.eventId) {
-			playlists = [...playlists, data.playlist];
-		}
+		// Add the playlist - filtering will be handled by the effect
+		playlists = [...playlists, data.playlist];
 	}
 
 	function handlePlaylistUpdated(data: { playlist: Playlist }) {
 		console.log('Playlist updated:', data.playlist);
-		// Update if it exists and is not an event playlist
-		if (!data.playlist.eventId) {
-			playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
-		} else {
-			// If it became an event playlist, remove it from the list
-			playlists = playlists.filter(p => p.id !== data.playlist.id);
-		}
+		// Update the playlist - filtering will be handled by the effect
+		playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
 	}
 
 	function handlePlaylistDeleted(data: { playlistId: string }) {
@@ -142,9 +135,6 @@
 	// Filter and sort playlists
 	$effect(() => {
 		let filtered = [...playlists];
-
-		// First, filter out event playlists (playlists with eventId)
-		filtered = filtered.filter(playlist => !playlist.eventId);
 
 		// Apply search filter
 		if (searchQuery.trim()) {
@@ -158,16 +148,19 @@
 
 		// Apply tab filter
 		if (activeTab === "mine" && user) {
+			// For "mine" tab, show all playlists the user owns or collaborates on (including event playlists)
 			filtered = filtered.filter(playlist => 
 				playlist.creatorId === user!.id || 
-				playlist.collaborators.some(collab => collab.userId === user!.id)
+				(playlist.collaborators?.some(collab => collab.id === user!.id) || false)
 			);
 		} else if (activeTab === "all") {
-			// For "all" tab, show only public playlists and private ones user has access to
+			// For "all" tab, show only public playlists and private ones user has access to (exclude event playlists)
 			filtered = filtered.filter(playlist => 
-				playlist.visibility === "public" || 
-				(user && (playlist.creatorId === user.id || 
-					playlist.collaborators.some(collab => collab.userId === user!.id)))
+				!playlist.eventId && (
+					playlist.visibility === "public" || 
+					(user && (playlist.creatorId === user.id || 
+						(playlist.collaborators?.some(collab => collab.id === user!.id) || false)))
+				)
 			);
 		}
 
@@ -186,7 +179,7 @@
 					compareValue = (a.trackCount || 0) - (b.trackCount || 0);
 					break;
 				case "collaborators":
-					compareValue = a.collaborators.length - b.collaborators.length;
+					compareValue = (a.collaborators?.length || 0) - (b.collaborators?.length || 0);
 					break;
 				case "date":
 				default:
@@ -217,7 +210,7 @@
 		error = "";
 		try {
 			if (activeTab === "mine" && user) {
-				playlists = await playlistsService.getPlaylists(undefined, user.id);
+				playlists = await playlistsService.getMyPlaylists();
 			} else {
 				playlists = await playlistsService.getPlaylists();
 			}
@@ -345,6 +338,7 @@
 					? 'bg-secondary text-white'
 					: 'bg-gray-200 text-gray-700 hover:bg-gray-300'}"
 				onclick={() => handleTabChange("mine")}
+				title="Shows all playlists you own or collaborate on, including event playlists"
 			>
 				My Playlists
 			</button>
@@ -423,7 +417,7 @@
 			</h3>
 			<p class="text-gray-500 mb-4">
 				{#if activeTab === "mine"}
-					You haven't created any playlists yet, and you haven't been invited to any.
+					You haven't created any playlists yet, and you haven't been invited to any. This includes event playlists.
 				{:else}
 					Be the first to create a playlist!
 				{/if}
@@ -468,9 +462,14 @@
 										<p class="text-sm text-gray-600">by {playlist.creator?.displayName || 'Unknown'}</p>
 									</div>
 									<div class="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0 items-center ml-4">
-										{#if user && playlist.collaborators.some(collab => collab.id === user!.id)}
+										{#if user && (playlist.collaborators?.some(collab => collab.id === user!.id) || false)}
 											<span class="px-2 py-1 text-xs rounded-full bg-amber-100 text-amber-800">
 												Collaborator
+											</span>
+										{/if}
+										{#if playlist.eventId}
+											<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">
+												Event Playlist
 											</span>
 										{/if}
 										{#if playlist.visibility === 'private'}
@@ -502,7 +501,7 @@
 											<svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
 											</svg>
-											<span>{playlist.collaborators.length + 1} collaborators</span>
+											<span>{(playlist.collaborators?.length || 0) + 1} collaborators</span>
 										</div>
 									{/if}
 									<div class="flex items-center">

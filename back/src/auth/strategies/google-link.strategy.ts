@@ -47,7 +47,7 @@ export class GoogleLinkStrategy extends PassportStrategy(Strategy, 'google-link'
       picture: photos[0].value,
       accessToken,
       // This strategy is specifically for linking
-      isLinking: true,
+      linkingMode: 'link',
       linkingToken: linkingToken,
     };
     

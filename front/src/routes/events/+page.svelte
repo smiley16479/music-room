@@ -4,10 +4,13 @@
 	import { authStore } from "$lib/stores/auth";
 	import {
 		getEvents,
+		getMyEvents,
+		getEvent,
 		createEvent as createEventAPI,
 		type Event,
 		type CreateEventData,
 	} from "$lib/services/events";
+	import { playlistsService, type Playlist } from "$lib/services/playlists";
 	import { eventSocketService } from "$lib/services/event-socket";
 	import { goto, replaceState } from "$app/navigation";
 
@@ -68,6 +71,19 @@
 		}
 	});
 
+	// NOTE: Collaborative events are now automatically included in the backend response
+	// through the updated access control logic, so no need for separate loading
+
+	// Helper functions for event management
+
+	// NOTE: Since collaborative events are included in backend response,
+	// manual refresh is no longer needed
+
+	// Reload events when tab changes
+	$effect(() => {
+		loadEvents();
+	});
+
 	// Filter and sort events
 	$effect(() => {
 		let filtered = [...events];
@@ -96,18 +112,8 @@
 		}
 
 		// Filter by tab
-		if (activeTab === "mine" && user) {
-			filtered = filtered.filter(
-				(event) =>
-					event.creatorId === user.id ||
-					event.participants.some((p) => p.id === user.id),
-			);
-		} else if (activeTab === "all") {
-			// Only show public events in 'all' tab
-			filtered = filtered.filter(
-				(event) => event.visibility === "public",
-			);
-		}
+		// NOTE: No filtering needed for "mine" tab since the backend endpoint returns the correct data
+		// The getMyEvents() endpoint already includes events where user is creator, participant, or collaborator
 
 		// Sort events - Live events first, then by nearest date
 		filtered.sort((a, b) => {
@@ -241,7 +247,13 @@
 		loading = true;
 		error = "";
 		try {
-			events = await getEvents();
+			if (activeTab === "mine" && user) {
+				// Use dedicated "my events" endpoint for authenticated users
+				events = await getMyEvents();
+			} else {
+				// Use general events endpoint (includes public + accessible private events)
+				events = await getEvents();
+			}
 		} catch (err) {
 			error = "Failed to load events";
 			console.error(err);
@@ -422,12 +434,24 @@
 		</div>
 
 		{#if user}
-			<button
-				onclick={() => (showCreateModal = true)}
-				class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors mt-4 md:mt-0"
-			>
-				Create Event
-			</button>
+			<div class="flex space-x-3 mt-4 md:mt-0">
+				<button
+					onclick={() => loadEvents()}
+					class="bg-gray-100 text-gray-700 px-4 py-3 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+					title="Refresh events"
+					aria-label="Refresh events"
+				>
+					<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+					</svg>
+				</button>
+				<button
+					onclick={() => (showCreateModal = true)}
+					class="bg-secondary text-white px-6 py-3 rounded-lg font-semibold hover:bg-secondary/80 transition-colors"
+				>
+					Create Event
+				</button>
+			</div>
 		{/if}
 	</div>
 
@@ -651,12 +675,14 @@
 									>
 										{#if event.status === "live"}
 											<span
-												class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+												class="flex px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
 											>
-												🔴 Live
+												<div class='absolute animate-ping mr-2'>🔴</div>
+												<div class='mr-2'>🔴</div>
+												<div>Live</div>
 											</span>
 										{/if}
-										{#if activeTab === "mine" && event.visibility === "private"}
+										{#if event.visibility === "private"}
 											<span
 												class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
 											>

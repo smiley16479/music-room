@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -34,7 +34,7 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
     }),
     UserModule,
     EmailModule,
-    PlaylistModule
+    forwardRef(() => PlaylistModule)
   ],
   controllers: [EventController],
   providers: [EventService, EventGateway],

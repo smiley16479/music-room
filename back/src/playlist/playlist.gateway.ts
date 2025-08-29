@@ -436,7 +436,7 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   // Server-side notification methods (called by PlaylistService)
-  notifyPlaylistCreated(playlist: Playlist, userId: string) {
+  notifyPlaylistCreated(playlist: Playlist, creator: User) {
     // Notify all users in the general playlists room for public playlists
     if (playlist.visibility === 'public') {
       this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-created', {
@@ -452,8 +452,11 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
           creatorId: playlist.creatorId,
           trackCount: playlist.trackCount,
           collaborators: [],
+          creator: {
+            id: creator.id,
+            displayName: creator.displayName,
+          },
         },
-        createdBy: userId,
         timestamp: new Date().toISOString(),
       });
     }
@@ -523,15 +526,6 @@ export class PlaylistGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       addedBy: userId,
       timestamp: new Date().toISOString(),
     });
-
-    // Also notify global playlists room with track count update
-    if (updatedTrackCount !== undefined) {
-      this.server.to(SOCKET_ROOMS.PLAYLISTS).emit('playlist-track-added', {
-        playlistId,
-        trackCount: updatedTrackCount,
-        timestamp: new Date().toISOString(),
-      });
-    }
   }
 
   notifyTrackRemoved(playlistId: string, trackId: string, userId: string, updatedTrackCount?: number) {

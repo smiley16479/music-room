@@ -7,6 +7,8 @@ export const load: PageLoad = async ({ url, fetch }) => {
     // Only handle explicit public filter during SSR
     const publicFilter = isPublic === 'true' ? true : undefined;
     
+    // Load regular events (public + user's own events)
+    // The collaborative events will be loaded on the client side
     const events = await getEvents(fetch);
     
     return {

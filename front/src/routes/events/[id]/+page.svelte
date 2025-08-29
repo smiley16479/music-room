@@ -34,7 +34,9 @@
 	import { deezerService, type DeezerTrack } from "$lib/services/deezer";
 	import { musicPlayerService } from "$lib/services/musicPlayer";
 	import { musicPlayerStore } from "$lib/stores/musicPlayer";
+	import MusicPlayer from "$lib/components/MusicPlayer.svelte";
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
+	import AddCollaboratorModal from "$lib/components/AddCollaboratorModal.svelte";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
 	import { flip } from 'svelte/animate';
 
@@ -54,11 +56,18 @@
 	let showEditModal = $state(false);
 	let showDeleteConfirm = $state(false);
 	let showPromoteModal = $state(false);
-	let showAddAdminModal = $state(false);
-	let addAdminEmail = $state("");
 	let userPlaylists: Playlist[] = $state([]);
 	let selectedUserId = $state("");
 	let isSocketConnected = $state(false);
+	let isPlaylistCollaborator = $state(false);
+	let hasEventAccess = $state(true); // Assume access initially, check when data loads
+
+	// Location-based voting state
+	let hasLocationPermission = $state(false);
+	let locationStatus = $state<'checking' | 'allowed' | 'denied' | 'unavailable' | 'outside_time'>('checking');
+	let locationError = $state("");
+	let currentUserLocation = $state<{latitude: number, longitude: number} | null>(null);
+	let locationWatchId: number | null = null;
 
 	// Music search state
 	let searchQuery = $state("");
@@ -76,6 +85,7 @@
 	let audioElement: HTMLAudioElement | null = null;
 	let isMusicPlayerInitialized = $state(false);
 	let showMusicSearchModal = $state(false);
+	let hasAttemptedPlaylistLoad = $state(false);
 
 	// Music player store state
 	const playerState = $derived($musicPlayerStore);
@@ -117,6 +127,13 @@
 		return "ended";
 	});
 
+	let numberOfVotesAvailable = $derived(() => {
+		if (!event) return 0;
+		// Count only votes that are not null (actual votes)
+		const activeVotes = Array.from(localUserVotes.values()).filter(vote => vote !== null).length;
+		return event.maxVotesPerUser - activeVotes;
+	});
+
 	let canVoteForTracks = $derived(() => {
 		if (!user || !event) return false;
 
@@ -136,10 +153,11 @@
 			case "open":
 				return true;
 			case "invited":
-				return event.participants.some((p) => p.id === user.id);
+				// Allow voting if user is a participant OR a playlist collaborator
+				return event.participants.some((p) => p.id === user.id) || isPlaylistCollaborator;
 			case "location_based":
-				// TODO: Implement location-based voting validation
-				return false;
+				// Allow voting if user has valid location and time permission
+				return hasLocationPermission;
 			default:
 				return false;
 		}
@@ -228,6 +246,7 @@
 			if (eventId && user) {
 				try {
 					votingResults = await getVotingResults(eventId);
+					hasLoadedVotingData = true; // Mark as loaded to prevent reactive effect from triggering
 					
 					// Initialize local user votes from voting results
 					localUserVotes = new Map();
@@ -261,17 +280,7 @@
 			await loadEvent();
 		}
 
-		// Load user playlists for adding tracks
-		if (user) {
-			try {
-				userPlaylists = await playlistsService.getPlaylists(
-					false,
-					user.id,
-				);
-			} catch (err) {
-				console.error("Failed to load user playlists:", err);
-			}
-		}
+		// NOTE: User playlists will be loaded on-demand when the playlist modal is opened
 
 		// Set up socket connection for real-time collaborative features
 		if (eventId && user) {
@@ -290,21 +299,106 @@
 		if (event && user) {
 			await initializeMusicPlayer();
 		}
+
+		// Initialize location-based voting if needed
+		if (event && event.licenseType === 'location_based' && user) {
+			await checkLocationPermission();
+			startLocationWatching();
+		}
 	});
+
+	// Track if we've already loaded voting data to prevent infinite loops
+	let hasLoadedVotingData = $state(false);
+
+	// Check if user is a playlist collaborator
+	async function checkPlaylistCollaboratorStatus() {
+		if (!user || !event?.playlistId) {
+			isPlaylistCollaborator = false;
+			return;
+		}
+
+		try {
+			const playlist = await playlistsService.getPlaylist(event.playlistId);
+			isPlaylistCollaborator = playlist.collaborators?.some(collaborator => collaborator.id === user.id) || false;
+		} catch (error) {
+			console.error('Failed to check playlist collaborator status:', error);
+			isPlaylistCollaborator = false;
+		}
+	}
+
+	// Check if user has access to this event
+	async function checkEventAccess() {
+		if (!user || !event) {
+			hasEventAccess = event?.visibility === 'public';
+			return;
+		}
+
+		// Public events are always accessible
+		if (event.visibility === 'public') {
+			hasEventAccess = true;
+			return;
+		}
+
+		// Event creator and admins always have access
+		if (event.creatorId === user.id || event.admins?.some(admin => admin.id === user.id)) {
+			hasEventAccess = true;
+			return;
+		}
+
+		// For private/invited events, check if user is a playlist collaborator
+		if ((event.visibility === 'private' || event.licenseType === 'invited') && event.playlistId) {
+			try {
+				const playlist = await playlistsService.getPlaylist(event.playlistId);
+				hasEventAccess = playlist.collaborators?.some(collaborator => collaborator.id === user.id) || false;
+			} catch (error) {
+				console.error('Failed to check event access:', error);
+				hasEventAccess = false;
+			}
+		} else {
+			hasEventAccess = false;
+		}
+	}
 
 	// Reactive effect to load voting data when user becomes available
 	$effect(() => {
-		if (user && eventId && event && !votingResults.length) {
+		if (user && eventId && event && !hasLoadedVotingData && !votingResults.length) {
 			// Only load if we haven't loaded voting results yet
 			loadVotingDataForUser();
 		}
 	});
 
+	// Check playlist collaborator status when user or event changes
+	$effect(() => {
+		if (user && event?.playlistId) {
+			checkPlaylistCollaboratorStatus();
+		}
+	});
+
+	// Check event access when user or event changes
+	$effect(() => {
+		if (event) {
+			checkEventAccess();
+		}
+	});
+
+	// Check location permission when event becomes location-based
+	$effect(() => {
+		if (event && event.licenseType === 'location_based' && user) {
+			checkLocationPermission(false); // Fresh location check initially
+			startLocationWatching();
+		} else if (event && event.licenseType !== 'location_based') {
+			stopLocationWatching();
+			hasLocationPermission = true;
+			locationStatus = 'allowed';
+		}
+	});
+
 	async function loadVotingDataForUser() {
-		if (!user || !eventId) return;
+		if (!user || !eventId || hasLoadedVotingData) return;
 		
 		try {
 			votingResults = await getVotingResults(eventId);
+			hasLoadedVotingData = true; // Mark as loaded to prevent re-triggering
 			
 			// Initialize local user votes from voting results
 			localUserVotes = new Map();
@@ -350,6 +444,9 @@
 			musicPlayerService.leaveRoom();
 			isMusicPlayerInitialized = false;
 		}
+
+		// Cleanup location watching
+		stopLocationWatching();
 	});
 
 	async function setupSocketConnection(playlistId: string) {
@@ -508,7 +605,25 @@
 			if (!event.playlist || !Array.isArray(event.playlist)) {
 				event.playlist = [];
 			}
-			event.playlist.push(data.track);
+			
+			// Ensure the track has proper vote count properties initialized
+			const trackWithVotes = {
+				...data.track,
+				voteCount: data.track.voteCount || data.track.votes || 0,
+				votes: data.track.voteCount || data.track.votes || 0,
+			};
+			
+			event.playlist.push(trackWithVotes);
+			
+			// Clear any persisting visual states for this track when it's re-added
+			if (data.track.id) {
+				voteAnimations.delete(data.track.id);
+				voteAnimations = new Map(voteAnimations);
+				
+				// Reset local vote state for this track
+				localUserVotes.delete(data.track.id);
+				localUserVotes = new Map(localUserVotes);
+			}
 		}
 	}
 	function handleTrackRemoved(data: { trackId: string }) {
@@ -516,6 +631,13 @@
 			event.playlist = event.playlist.filter(
 				(t) => t.id !== data.trackId,
 			);
+			
+			// Remove the user's vote for this track if they had voted for it
+			// This ensures the vote counter updates correctly when tracks are removed
+			if (localUserVotes.has(data.trackId)) {
+				localUserVotes.delete(data.trackId);
+				localUserVotes = new Map(localUserVotes);
+			}
 		}
 	}
 	function handleCurrentTrackChanged(data: {
@@ -532,9 +654,38 @@
 			audioElement = new Audio(data.track.streamUrl);
 			audioElement.currentTime =
 				(Date.now() - new Date(data.startedAt).getTime()) / 1000;
+			
+			// Add event listener for when this track ends to handle automatic progression
+			audioElement.addEventListener('ended', async () => {
+				console.log('Event track ended, triggering automatic progression...');
+				if (isAdmin) {
+					// Only admins can trigger automatic track progression in events
+					await playNextTrack();
+				}
+			});
+			
+			// Add error handler for unplayable tracks
+			audioElement.addEventListener('error', async (error) => {
+				console.warn('Event track failed to load:', error, 'Track:', data.track?.title);
+				if (isAdmin && isPlaying) {
+					console.log('Automatically skipping unplayable track in event...');
+					// Wait a moment and then try the next track
+					setTimeout(async () => {
+						await playNextTrack();
+					}, 1000);
+				}
+			});
+			
 			if (isPlaying) {
 				audioElement.play().catch((err) => {
 					console.error("Failed to play audio:", err);
+					// If this track fails to play and we're an admin, try to skip to next
+					if (isAdmin) {
+						console.log('Automatically skipping failed track...');
+						setTimeout(async () => {
+							await playNextTrack();
+						}, 1000);
+					}
 				});
 			}
 		} else {
@@ -552,14 +703,6 @@
 	}) {
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
-			
-			// Update local user votes from results
-			localUserVotes = new Map();
-			data.results.forEach(result => {
-				if (result.userVote) {
-					localUserVotes.set(result.track.id, result.userVote.type);
-				}
-			});
 			
 			// Update vote counts in playlist 
 			if (event.playlist && Array.isArray(event.playlist)) {
@@ -589,13 +732,9 @@
 		if (event && data.eventId === event.id) {
 			votingResults = data.results;
 			
-			// Update local user votes from results
-			localUserVotes = new Map();
-			data.results.forEach(result => {
-				if (result.userVote) {
-					localUserVotes.set(result.track.id, result.userVote.type);
-				}
-			});
+			// Don't update localUserVotes from WebSocket data
+			// since it doesn't contain user-specific vote information.
+			// Local state is managed by user actions and HTTP responses.
 			
 			// Update vote counts in playlist
 			if (event.playlist && Array.isArray(event.playlist)) {
@@ -641,49 +780,11 @@
 				event.playlist = [...reorderedPlaylist, ...remainingTracks];
 			}
 			
-			// When tracks are reordered, also refresh vote counts for all users
-			refreshVotingResults();
+			// Note: Vote counts are preserved during reordering, no need to refresh
+			// WebSocket events handle any necessary vote count updates
 			
 			// Force reactivity update
 			event = { ...event };
-		}
-	}
-	
-	// Helper function to refresh voting results
-	async function refreshVotingResults() {
-		if (!eventId || !user) return;
-		
-		try {
-			const latestResults = await getVotingResults(eventId);
-			
-			// Update voting results
-			votingResults = latestResults;
-			
-			// Update local user votes from latest results
-			localUserVotes = new Map();
-			latestResults.forEach(result => {
-				if (result.userVote) {
-					localUserVotes.set(result.track.id, result.userVote.type);
-				}
-			});
-			
-			// Update vote counts
-			if (event?.playlist && Array.isArray(event.playlist)) {
-				event.playlist = event.playlist.map((track) => {
-					const result = latestResults.find((r) => r.track.id === track.id);
-					const newVoteCount = result ? result.voteCount : 0;
-					return {
-						...track,
-						voteCount: newVoteCount,
-						votes: newVoteCount,
-					};
-				});
-				
-				// Force reactivity update
-				event = { ...event };
-			}
-		} catch (refreshError) {
-			console.warn('Failed to refresh voting results for all users:', refreshError);
 		}
 	}
 	
@@ -805,12 +906,14 @@
 				participants: preservedParticipants,
 			};
 
+			hasEventAccess = true;
 			initializeEditForm();
 
 			// Load voting results if user can vote
 			if (user && event.allowsVoting) {
 				try {
 					votingResults = await getVotingResults(eventId);
+					hasLoadedVotingData = true; // Mark as loaded to prevent reactive effect from triggering
 					
 					// Initialize local user votes from voting results
 					localUserVotes = new Map();
@@ -844,6 +947,8 @@
 			// Initialize music player for this event
 			await initializeMusicPlayer();
 		} catch (err) {
+			// With the backend now supporting playlist collaborator access,
+			// most access denied errors should be legitimate
 			error = err instanceof Error ? err.message : "Failed to load event";
 		} finally {
 			loading = false;
@@ -871,7 +976,7 @@
 			// Use the optimized batch function to add all tracks at once
 			await addPlaylistTracksToEvent(eventId, playlistId);
 
-			showPlaylistModal = false;
+			closePlaylistModal();
 			// Socket events will handle updating the track list
 		} catch (err) {
 			error =
@@ -885,7 +990,7 @@
 
 	async function handleEditEvent(event: SubmitEvent) {
 		event.preventDefault();
-		if (!user || !eventId || !isCreator || !isAdmin) return;
+		if (!user || !eventId || (!isCreator && !isAdmin)) return;
 
 		try {
 			await updateEvent(eventId, editEventData);
@@ -923,49 +1028,6 @@
 				err instanceof Error
 					? err.message
 					: "Failed to promote user to admin";
-		}
-	}
-
-	async function handleAddAdminByEmail() {
-		if (
-			!user ||
-			!eventId ||
-			!isCreator ||
-			!isAdmin ||
-			!addAdminEmail.trim()
-		)
-			return;
-
-		try {
-			// First, try to find user by email or username
-			const response = await fetch(
-				`${config.apiUrl}/api/users/search?q=${encodeURIComponent(addAdminEmail.trim())}`,
-				{
-					headers: {
-						Authorization: `Bearer ${authService.getAuthToken()}`,
-						"Content-Type": "application/json",
-					},
-				},
-			);
-
-			if (!response.ok) {
-				throw new Error("Failed to find user");
-			}
-
-			const result = await response.json();
-			const users = result.data || [];
-
-			if (users.length === 0) {
-				throw new Error("No user found with that email or username");
-			}
-
-			const targetUser = users[0]; // Take the first match
-			await promoteUserToAdmin(eventId, targetUser.id);
-			showAddAdminModal = false;
-			addAdminEmail = "";
-			await loadEvent();
-		} catch (err) {
-			error = err instanceof Error ? err.message : "Failed to add admin";
 		}
 	}
 
@@ -1012,17 +1074,33 @@
 		}
 	});
 
-	// Load playlists when modal opens
+	// Initialize page data when component loads or event ID changes
 	$effect(() => {
-		if (showPlaylistModal && userPlaylists.length === 0) {
-			loadUserPlaylists();
+		if (eventId && user) {
+			if (!event || event.id !== eventId) {
+				loadEvent();
+			}
 		}
 	});
+
+	// Load playlists manually when needed (no reactive effects to prevent loops)
+	async function openPlaylistModal() {
+		showPlaylistModal = true;
+		if (userPlaylists.length === 0 && !hasAttemptedPlaylistLoad) {
+			await loadUserPlaylists();
+		}
+	}
+
+	function closePlaylistModal() {
+		showPlaylistModal = false;
+		hasAttemptedPlaylistLoad = false; // Reset for next time
+	}
 
 	async function loadUserPlaylists() {
 		if (!user) return;
 
 		try {
+			hasAttemptedPlaylistLoad = true;
 			loading = true;
 			// Get user's own playlists
 			const myPlaylists = await playlistsService.getPlaylists(
@@ -1113,12 +1191,24 @@
 			const currentIndex = sortedTracks.findIndex(
 				(t) => t.id === currentPlayingTrack,
 			);
-			const nextTrack = sortedTracks[currentIndex + 1];
+			
+			let nextIndex = currentIndex + 1;
+			
+			// If we've reached the end of the playlist, loop back to the beginning
+			if (nextIndex >= sortedTracks.length) {
+				nextIndex = 0;
+			}
+			
+			const nextTrack = sortedTracks[nextIndex];
 
 			if (nextTrack) {
-				await playTrack(currentIndex + 1);
+				// Try to play the next track
+				await playTrack(nextIndex);
+			} else if (sortedTracks.length > 0) {
+				// If for some reason we don't have a next track but have tracks, try the first one
+				await playTrack(0);
 			} else {
-				// No more tracks, stop playing
+				// No tracks at all, stop playing
 				currentPlayingTrack = null;
 				isPlaying = false;
 				if (audioElement) {
@@ -1127,6 +1217,44 @@
 				}
 			}
 		} catch (err) {
+			console.error("Error in playNextTrack:", err);
+			
+			// If the next track fails to play, try to skip to a different one
+			try {
+				const sortedTracks = sortedPlaylistTracks();
+				if (sortedTracks.length > 1) {
+					console.log("Attempting to skip problematic track and try next one...");
+					
+					const currentIndex = sortedTracks.findIndex(
+						(t) => t.id === currentPlayingTrack,
+					);
+					
+					// Try a few different tracks to find one that works
+					for (let attempt = 0; attempt < Math.min(3, sortedTracks.length); attempt++) {
+						let skipIndex = (currentIndex + 1 + attempt) % sortedTracks.length;
+						
+						try {
+							await playTrack(skipIndex);
+							console.log(`Successfully played track at index ${skipIndex} after ${attempt + 1} attempts`);
+							return; // Success, exit
+						} catch (skipError) {
+							console.log(`Attempt ${attempt + 1} failed:`, skipError);
+						}
+					}
+					
+					// If all attempts failed, stop playing gracefully
+					console.warn("All tracks failed to play, stopping playback");
+					currentPlayingTrack = null;
+					isPlaying = false;
+					if (audioElement) {
+						audioElement.pause();
+						audioElement = null;
+					}
+				}
+			} catch (fallbackError) {
+				console.error("Fallback track selection also failed:", fallbackError);
+			}
+			
 			error =
 				err instanceof Error
 					? err.message
@@ -1345,8 +1473,11 @@
 				event = { ...event };
 			}
 			
-			// Call the service to remove the track
-			await removeTrackFromEvent(eventId, trackId);
+			// Get playlist ID from the event object to avoid unnecessary API call
+			const playlistId = event?.playlistId || (event?.playlist && typeof event.playlist === 'object' && 'id' in event.playlist ? (event.playlist as any).id : undefined);
+			
+			// Call the service to remove the track with the playlist ID
+			await removeTrackFromEvent(eventId, trackId, playlistId);
 			
 			// Show success message temporarily
 		} catch (err) {
@@ -1384,7 +1515,12 @@
 	function getButtonWidthClass(trackId: string, buttonType: 'upvote' | 'downvote' | 'remove'): string {
 		const userVote = getUserVoteForTrack(trackId);
 		const animation = voteAnimations.get(trackId);
-		
+
+		// if no votes left, hide vote and downvote buttons
+		if (numberOfVotesAvailable() <= 0 && (buttonType === 'upvote' || buttonType === 'downvote') && !userVote) {
+			return 'w-0 overflow-hidden';
+		}
+
 		// Use animation state if transitioning
 		if (animation) {
 			if (buttonType === 'remove') {
@@ -1459,35 +1595,17 @@
 			}
 
 			// Call HTTP API for persistence and automatic reordering
-			await voteForTrackInEvent(eventId, trackId, voteType);
+			const httpResults = await voteForTrackInEvent(eventId, trackId, voteType);
 
-			// Manually refresh voting results to ensure we have latest data
-			try {
-				const latestResults = await getVotingResults(eventId);
-				
-				// Update vote counts manually if WebSocket didn't work
-				if (event?.playlist && Array.isArray(event.playlist)) {
-					event.playlist = event.playlist.map((track) => {
-						const result = latestResults.find((r) => r.track.id === track.id);
-						const newVoteCount = result ? result.voteCount : 0;
-						return {
-							...track,
-							voteCount: newVoteCount,
-							votes: newVoteCount,
-						};
-					});
-					
-					// Force reactivity update
-					event = { ...event };
-				}
-			} catch (refreshError) {
-				console.warn('Failed to refresh voting results:', refreshError);
-			}
+			// Note: WebSocket events will handle updating vote counts automatically
+			// No need to manually refresh results as it creates redundant requests
 
 			// Clear animation state and reset to default
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			// Keep local user vote state - it will be synced by WebSocket update
+			
+			// The localUserVotes state is already correctly set from the optimistic update
+			// No need to sync from server since the local state is accurate
 
 		} catch (err) {
 			// Reset animation state and local vote state on error
@@ -1497,17 +1615,6 @@
 			localUserVotes = new Map(localUserVotes);
 			
 			console.error('Error voting for track:', err);
-			
-			// Check if the error is about event status and try to help the user
-			if (err instanceof Error && err.message.includes('Voting is only allowed during live events')) {
-				error = "Event status mismatch detected. Please refresh the page and try again.";
-				// Auto-refresh after a short delay
-				setTimeout(() => {
-					window.location.reload();
-				}, 2000);
-			} else {
-				error = err instanceof Error ? err.message : 'Failed to vote for track';
-			}
 			
 			setTimeout(() => (error = ""), 3000);
 		}
@@ -1546,35 +1653,17 @@
 			}
 
 			// Call HTTP API for persistence
-			await removeVote(eventId, trackId);
+			const httpResults = await removeVote(eventId, trackId);
 
-			// Manually refresh voting results to ensure we have latest data
-			try {
-				const latestResults = await getVotingResults(eventId);
-				
-				// Update vote counts manually if WebSocket didn't work
-				if (event?.playlist && Array.isArray(event.playlist)) {
-					event.playlist = event.playlist.map((track) => {
-						const result = latestResults.find((r) => r.track.id === track.id);
-						const newVoteCount = result ? result.voteCount : 0;
-						return {
-							...track,
-							voteCount: newVoteCount,
-							votes: newVoteCount,
-						};
-					});
-					
-					// Force reactivity update
-					event = { ...event };
-				}
-			} catch (refreshError) {
-				console.warn('Failed to refresh voting results:', refreshError);
-			}
+			// Note: WebSocket events will handle updating vote counts automatically
+			// No need to manually refresh results as it creates redundant requests
 
 			// Clear animation state after successful vote removal
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			// Keep local user vote state - it will be synced by WebSocket update
+			
+			// The localUserVotes state is already correctly set from the optimistic update
+			// No need to sync from server since the local state is accurate
 
 		} catch (err) {
 			// Reset animation state and local vote state on error
@@ -1583,22 +1672,147 @@
 			localUserVotes.delete(trackId);
 			localUserVotes = new Map(localUserVotes);
 			
-			console.error('Error removing vote:', err);
-			
 			// Only show user-friendly error message for actual vote not found errors
 			if (err instanceof Error && err.message.includes('Vote not found')) {
 				error = "You haven't voted for this track yet";
-			} else if (err instanceof Error && err.message.includes('Voting is only allowed during live events')) {
-				error = "Event status mismatch detected. Please refresh the page and try again.";
-				// Auto-refresh after a short delay
-				setTimeout(() => {
-					window.location.reload();
-				}, 2000);
 			} else {
 				error = err instanceof Error ? err.message : 'Failed to remove vote';
 			}
 			
 			setTimeout(() => (error = ""), 3000);
+		}
+	}
+
+	// Location-based voting functions
+	async function getCurrentLocation(useCache = true): Promise<{latitude: number, longitude: number}> {
+		// If we have a recent cached location and user wants to use cache, return it
+		if (useCache && currentUserLocation) {
+			return currentUserLocation;
+		}
+
+		return new Promise((resolve, reject) => {
+			if (!navigator.geolocation) {
+				reject(new Error('Geolocation is not supported by this browser'));
+				return;
+			}
+
+			navigator.geolocation.getCurrentPosition(
+				(position) => {
+					const coordinates = {
+						latitude: position.coords.latitude,
+						longitude: position.coords.longitude,
+					};
+					currentUserLocation = coordinates;
+					resolve(coordinates);
+				},
+				(error) => {
+					let errorMessage = 'Failed to get location';
+					switch (error.code) {
+						case error.PERMISSION_DENIED:
+							errorMessage = 'Location access denied. Please enable location access to vote.';
+							break;
+						case error.POSITION_UNAVAILABLE:
+							errorMessage = 'Location information unavailable';
+							break;
+						case error.TIMEOUT:
+							errorMessage = 'Location request timed out';
+							break;
+					}
+					reject(new Error(errorMessage));
+				},
+				{
+					enableHighAccuracy: true,
+					timeout: 10000,
+					maximumAge: 300000, // 5 minutes - use cached position if recent
+				}
+			);
+		});
+	}
+
+	async function checkLocationPermission(useCache = true): Promise<void> {
+		if (!event || event.licenseType !== 'location_based' || !eventId) {
+			hasLocationPermission = true;
+			return;
+		}
+
+		try {
+			locationStatus = 'checking';
+			locationError = "";
+			
+			// Get current location (use cache for voting, fresh for initial check)
+			const location = await getCurrentLocation(useCache);
+			
+			// Check with backend if location is valid
+			const response = await fetch(`${config.apiUrl}/api/events/${eventId}/check-location`, {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${authService.getAuthToken()}`,
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					latitude: location.latitude,
+					longitude: location.longitude,
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to check location permission');
+			}
+
+			const result = await response.json();
+			hasLocationPermission = result.data.hasPermission;
+			
+			if (hasLocationPermission) {
+				locationStatus = 'allowed';
+				locationError = "";
+			} else {
+				locationStatus = 'denied';
+				locationError = "You're not in the correct location or time to vote for this event.";
+			}
+		} catch (err) {
+			console.error('Location permission check failed:', err);
+			hasLocationPermission = false;
+			locationStatus = 'unavailable';
+			locationError = err instanceof Error ? err.message : 'Location check failed';
+		}
+	}
+
+	function startLocationWatching(): void {
+		if (!navigator.geolocation || locationWatchId !== null || event?.licenseType !== 'location_based') {
+			return;
+		}
+
+		locationWatchId = navigator.geolocation.watchPosition(
+			async (position) => {
+				const coordinates = {
+					latitude: position.coords.latitude,
+					longitude: position.coords.longitude,
+				};
+				currentUserLocation = coordinates;
+				
+				// Recheck permission when location changes significantly (use cached coordinates)
+				if (event && eventId) {
+					await checkLocationPermission(true);
+				}
+			},
+			(error) => {
+				console.error('Location watch error:', error);
+				locationStatus = 'unavailable';
+				locationError = 'Unable to track location changes';
+			},
+			{
+				enableHighAccuracy: true,
+				timeout: 10000,
+				maximumAge: 300000, // 5 minutes
+			}
+		);
+	}
+
+	function stopLocationWatching(): void {
+		if (locationWatchId !== null) {
+			navigator.geolocation.clearWatch(locationWatchId);
+			locationWatchId = null;
 		}
 	}
 </script>
@@ -1617,57 +1831,66 @@
 			class="animate-spin rounded-full h-12 w-12 border-b-2 border-secondary"
 		></div>
 	</div>
-{:else if error && !event}
+{:else if event && !hasEventAccess}
 	<div class="container mx-auto px-4 py-8">
-		<div
-			class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded"
-		>
-			{error}
+		<div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
+			<h3 class="font-semibold mb-2">Access Restricted</h3>
+			<p>This is a private event. You need to be invited by the event creator to access it.</p>
+			<div class="mt-4">
+				<button
+					onclick={() => goto('/events')}
+					class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
+				>
+					← Back to Events
+				</button>
+			</div>
 		</div>
 	</div>
-{:else if event}
+{:else if event && hasEventAccess}
 	<div class="container mx-auto px-4 py-8">
 		<div class="flex items-center justify-between w-full">
 			<BackNavBtn />
-			<button
-				onclick={() => (showEditModal = true)}
-				class="clickable"
-				aria-label="Edit Event"
-			>
-				<svg
-					viewBox="-2.4 -2.4 28.80 28.80"
-					class="w-8 mb-2 hover:rotate-180 transition-transform duration-100 ease-in-out origin-center"
-					fill="none"
-					xmlns="http://www.w3.org/2000/svg"
-					><g id="SVGRepo_bgCarrier" stroke-width="0"
-						><rect
-							x="-2.4"
-							y="-2.4"
-							width="28.80"
-							height="28.80"
-							rx="14.4"
-							fill="#ffffff"
-						></rect></g
-					><g
-						id="SVGRepo_tracerCarrier"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					></g><g id="SVGRepo_iconCarrier">
-						<circle
-							cx="12"
-							cy="12"
-							r="3"
-							stroke="#f6a437"
-							stroke-width="1.5"
-						></circle>
-						<path
-							d="M13.7654 2.15224C13.3978 2 12.9319 2 12 2C11.0681 2 10.6022 2 10.2346 2.15224C9.74457 2.35523 9.35522 2.74458 9.15223 3.23463C9.05957 3.45834 9.0233 3.7185 9.00911 4.09799C8.98826 4.65568 8.70226 5.17189 8.21894 5.45093C7.73564 5.72996 7.14559 5.71954 6.65219 5.45876C6.31645 5.2813 6.07301 5.18262 5.83294 5.15102C5.30704 5.08178 4.77518 5.22429 4.35436 5.5472C4.03874 5.78938 3.80577 6.1929 3.33983 6.99993C2.87389 7.80697 2.64092 8.21048 2.58899 8.60491C2.51976 9.1308 2.66227 9.66266 2.98518 10.0835C3.13256 10.2756 3.3397 10.437 3.66119 10.639C4.1338 10.936 4.43789 11.4419 4.43786 12C4.43783 12.5581 4.13375 13.0639 3.66118 13.3608C3.33965 13.5629 3.13248 13.7244 2.98508 13.9165C2.66217 14.3373 2.51966 14.8691 2.5889 15.395C2.64082 15.7894 2.87379 16.193 3.33973 17C3.80568 17.807 4.03865 18.2106 4.35426 18.4527C4.77508 18.7756 5.30694 18.9181 5.83284 18.8489C6.07289 18.8173 6.31632 18.7186 6.65204 18.5412C7.14547 18.2804 7.73556 18.27 8.2189 18.549C8.70224 18.8281 8.98826 19.3443 9.00911 19.9021C9.02331 20.2815 9.05957 20.5417 9.15223 20.7654C9.35522 21.2554 9.74457 21.6448 10.2346 21.8478C10.6022 22 11.0681 22 12 22C12.9319 22 13.3978 22 13.7654 21.8478C14.2554 21.6448 14.6448 21.2554 14.8477 20.7654C14.9404 20.5417 14.9767 20.2815 14.9909 19.902C15.0117 19.3443 15.2977 18.8281 15.781 18.549C16.2643 18.2699 16.8544 18.2804 17.3479 18.5412C17.6836 18.7186 17.927 18.8172 18.167 18.8488C18.6929 18.9181 19.2248 18.7756 19.6456 18.4527C19.9612 18.2105 20.1942 17.807 20.6601 16.9999C21.1261 16.1929 21.3591 15.7894 21.411 15.395C21.4802 14.8691 21.3377 14.3372 21.0148 13.9164C20.8674 13.7243 20.6602 13.5628 20.3387 13.3608C19.8662 13.0639 19.5621 12.558 19.5621 11.9999C19.5621 11.4418 19.8662 10.9361 20.3387 10.6392C20.6603 10.4371 20.8675 10.2757 21.0149 10.0835C21.3378 9.66273 21.4803 9.13087 21.4111 8.60497C21.3592 8.21055 21.1262 7.80703 20.6602 7C20.1943 6.19297 19.9613 5.78945 19.6457 5.54727C19.2249 5.22436 18.693 5.08185 18.1671 5.15109C17.9271 5.18269 17.6837 5.28136 17.3479 5.4588C16.8545 5.71959 16.2644 5.73002 15.7811 5.45096C15.2977 5.17191 15.0117 4.65566 14.9909 4.09794C14.9767 3.71848 14.9404 3.45833 14.8477 3.23463C14.6448 2.74458 14.2554 2.35523 13.7654 2.15224Z"
-							stroke="#f6a437"
-							stroke-width="1.5"
-						></path>
-					</g></svg
+			{#if canEdit}
+				<button
+					onclick={() => (showEditModal = true)}
+					class="clickable"
+					aria-label="Edit Event"
 				>
-			</button>
+					<svg
+						viewBox="-2.4 -2.4 28.80 28.80"
+						class="w-8 mb-2 hover:rotate-180 transition-transform duration-100 ease-in-out origin-center"
+						fill="none"
+						xmlns="http://www.w3.org/2000/svg"
+						><g id="SVGRepo_bgCarrier" stroke-width="0"
+							><rect
+								x="-2.4"
+								y="-2.4"
+								width="28.80"
+								height="28.80"
+								rx="14.4"
+								fill="#ffffff"
+							></rect></g
+						><g
+							id="SVGRepo_tracerCarrier"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						></g><g id="SVGRepo_iconCarrier">
+							<circle
+								cx="12"
+								cy="12"
+								r="3"
+								stroke="#f6a437"
+								stroke-width="1.5"
+							></circle>
+							<path
+								d="M13.7654 2.15224C13.3978 2 12.9319 2 12 2C11.0681 2 10.6022 2 10.2346 2.15224C9.74457 2.35523 9.35522 2.74458 9.15223 3.23463C9.05957 3.45834 9.0233 3.7185 9.00911 4.09799C8.98826 4.65568 8.70226 5.17189 8.21894 5.45093C7.73564 5.72996 7.14559 5.71954 6.65219 5.45876C6.31645 5.2813 6.07301 5.18262 5.83294 5.15102C5.30704 5.08178 4.77518 5.22429 4.35436 5.5472C4.03874 5.78938 3.80577 6.1929 3.33983 6.99993C2.87389 7.80697 2.64092 8.21048 2.58899 8.60491C2.51976 9.1308 2.66227 9.66266 2.98518 10.0835C3.13256 10.2756 3.3397 10.437 3.66119 10.639C4.1338 10.936 4.43789 11.4419 4.43786 12C4.43783 12.5581 4.13375 13.0639 3.66118 13.3608C3.33965 13.5629 3.13248 13.7244 2.98508 13.9165C2.66217 14.3373 2.51966 14.8691 2.5889 15.395C2.64082 15.7894 2.87379 16.193 3.33973 17C3.80568 17.807 4.03865 18.2106 4.35426 18.4527C4.77508 18.7756 5.30694 18.9181 5.83284 18.8489C6.07289 18.8173 6.31632 18.7186 6.65204 18.5412C7.14547 18.2804 7.73556 18.27 8.2189 18.549C8.70224 18.8281 8.98826 19.3443 9.00911 19.9021C9.02331 20.2815 9.05957 20.5417 9.15223 20.7654C9.35522 21.2554 9.74457 21.6448 10.2346 21.8478C10.6022 22 11.0681 22 12 22C12.9319 22 13.3978 22 13.7654 21.8478C14.2554 21.6448 14.6448 21.2554 14.8477 20.7654C14.9404 20.5417 14.9767 20.2815 14.9909 19.902C15.0117 19.3443 15.2977 18.8281 15.781 18.549C16.2643 18.2699 16.8544 18.2804 17.3479 18.5412C17.6836 18.7186 17.927 18.8172 18.167 18.8488C18.6929 18.9181 19.2248 18.7756 19.6456 18.4527C19.9612 18.2105 20.1942 17.807 20.6601 16.9999C21.1261 16.1929 21.3591 15.7894 21.411 15.395C21.4802 14.8691 21.3377 14.3372 21.0148 13.9164C20.8674 13.7243 20.6602 13.5628 20.3387 13.3608C19.8662 13.0639 19.5621 12.558 19.5621 11.9999C19.5621 11.4418 19.8662 10.9361 20.3387 10.6392C20.6603 10.4371 20.8675 10.2757 21.0149 10.0835C21.3378 9.66273 21.4803 9.13087 21.4111 8.60497C21.3592 8.21055 21.1262 7.80703 20.6602 7C20.1943 6.19297 19.9613 5.78945 19.6457 5.54727C19.2249 5.22436 18.693 5.08185 18.1671 5.15109C17.9271 5.18269 17.6837 5.28136 17.3479 5.4588C16.8545 5.71959 16.2644 5.73002 15.7811 5.45096C15.2977 5.17191 15.0117 4.65566 14.9909 4.09794C14.9767 3.71848 14.9404 3.45833 14.8477 3.23463C14.6448 2.74458 14.2554 2.35523 13.7654 2.15224Z"
+								stroke="#f6a437"
+								stroke-width="1.5"
+							></path>
+						</g></svg
+					>
+				</button>
+			{/if}
 		</div>
 		<!-- Event Header -->
 		<div class="bg-white rounded-lg shadow-md p-6 mb-8">
@@ -1740,11 +1963,8 @@
 							<div>
 								<span class="font-medium">Start:</span>
 								<span class="ml-1"
-									>{formatDate(
-										event.eventDate ||
-											event.startDate ||
-											"",
-									)}</span
+									>{event.eventDate ||
+										event.startDate}</span
 								>
 							</div>
 						{/if}
@@ -1756,26 +1976,26 @@
 							>
 						</div>
 					</div>
-					{#if canEdit && event.licenseType === "invited"}
+					
+					{#if event.licenseType === "invited" && (isCreator || isAdmin)}
 						<div class="flex space-x-3 mt-4 justify-center md:justify-start">
-							{#if isCreator || isAdmin}
-								<button
-									onclick={() =>
-										(showAddAdminModal = true)}
-									class="border border-secondary text-secondary px-4 py-2 rounded-lg hover:bg-secondary/10 transition-colors"
-								>
-									Invite Admins
-								</button>
-							{/if}
+							<button
+								onclick={() => (showInviteModal = true)}
+								class="border border-secondary text-secondary px-4 py-2 rounded-lg hover:bg-secondary/10 transition-colors"
+							>
+								Invite to Event
+							</button>
 						</div>
 					{/if}
 				</div>
 				<div class="flex space-x-2 mt-4 md:mt-0">
-					{#if event.status === "live"}
+					{#if eventStatus() === "live"}
 						<span
-							class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+							class="flex px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
 						>
-							🔴 Live
+							<div class='absolute animate-ping mr-2'>🔴</div>
+							<div class='mr-2'>🔴</div>
+							<div>Live</div>
 						</span>
 					{/if}
 					{#if event.visibility === "private"}
@@ -1783,6 +2003,13 @@
 							class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
 						>
 							Private
+						</span>
+					{/if}
+					{#if isPlaylistCollaborator && !isCreator && !isAdmin}
+						<span
+							class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
+						>
+							Collaborator Access
 						</span>
 					{/if}
 					{#if event.visibility !== "private" && event.licenseType === "invited"}
@@ -1799,6 +2026,33 @@
 							{event.locationName}
 						</span>
 					{/if}
+					{#if event.licenseType === "location_based"}
+						{#if locationStatus === 'checking'}
+							<span
+								class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800"
+							>
+								📍 Checking location...
+							</span>
+						{:else if locationStatus === 'allowed'}
+							<span
+								class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
+							>
+								📍 Location verified
+							</span>
+						{:else if locationStatus === 'denied'}
+							<span
+								class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+							>
+								📍 Location required
+							</span>
+						{:else if locationStatus === 'unavailable'}
+							<span
+								class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
+							>
+								📍 Location unavailable
+							</span>
+						{/if}
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -1808,6 +2062,37 @@
 				class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6"
 			>
 				{error}
+			</div>
+		{/if}
+
+		{#if event?.licenseType === "location_based" && locationError}
+			<div
+				class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-6"
+			>
+				<div class="flex items-center">
+					<svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+						<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+					</svg>
+					<div>
+						<h4 class="font-semibold">Location Required</h4>
+						<p class="text-sm">{locationError}</p>
+						{#if currentUserLocation && locationStatus === 'denied'}
+							<div class="mt-2 p-2 bg-yellow-50 rounded border text-xs">
+								<p class="font-medium">Your current location:</p>
+								<p>Latitude: {currentUserLocation.latitude.toFixed(4)}</p>
+								<p>Longitude: {currentUserLocation.longitude.toFixed(4)}</p>
+							</div>
+						{/if}
+						{#if locationStatus === 'unavailable'}
+							<button
+								onclick={() => checkLocationPermission(false)}
+								class="mt-2 bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700 transition-colors"
+							>
+								Try Again
+							</button>
+						{/if}
+					</div>
+				</div>
 			</div>
 		{/if}
 
@@ -1824,8 +2109,15 @@
 								.length !== 1
 								? "s"
 								: ""}
+							• 
 							{canVoteForTracks()
-								? "• Vote for upcoming tracks"
+								? numberOfVotesAvailable() > 0
+									? `You have ${numberOfVotesAvailable()} vote${
+											numberOfVotesAvailable() !== 1
+												? "s"
+												: ""
+									  } left`
+									: "No votes left"
 								: "• Voting available for participants"}
 						</p>
 					</div>
@@ -1835,38 +2127,12 @@
 								onclick={() => (showMusicSearchModal = true)}
 								class="bg-secondary text-white px-4 py-2 rounded-lg hover:bg-secondary/80 transition-colors flex items-center space-x-2"
 							>
-								<svg
-									class="w-4 h-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M12 4v16m8-8H4"
-									></path>
-								</svg>
 								<span>Search & Add Music</span>
 							</button>
 							<button
-								onclick={() => (showPlaylistModal = true)}
+								onclick={() => openPlaylistModal()}
 								class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors flex items-center space-x-2"
 							>
-								<svg
-									class="w-4 h-4"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
-									></path>
-								</svg>
 								<span>Add Playlist</span>
 							</button>
 						</div>
@@ -2111,7 +2377,7 @@
 				{/if}
 			</div>
 			<!-- Participants Sidebar -->
-			<div class="bg-white rounded-lg shadow-md p-6">
+			<div class="bg-white rounded-lg shadow-md p-6 w-full lg:max-w-xs">
 				<div class="flex items-center justify-between mb-4">
 					<h2 class="text-xl font-bold text-gray-800">
 						Participants
@@ -2187,186 +2453,10 @@
 		{#if showMusicSearchModal && eventId}
 			<EnhancedMusicSearchModal
 				{eventId}
-				onTrackAdded={() => {
-					showMusicSearchModal = false;
-					// Socket event will handle updating the track list
-				}}
+				eventTracks={event?.playlist || []}
+				onTrackAdded={() => {}}
 				onClose={() => (showMusicSearchModal = false)}
 			/>
-		{/if}
-
-		<!-- Invite Users Modal -->
-		{#if showInviteModal}
-			<div
-				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
-			>
-				<div
-					class="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto"
-				>
-					<div class="p-6">
-						<div class="flex justify-between items-center mb-6">
-							<h2 class="text-xl font-bold text-gray-800">
-								Invite Users
-							</h2>
-							<button
-								onclick={() => (showInviteModal = false)}
-								class="text-gray-400 hover:text-gray-600 transition-colors"
-								aria-label="Close modal"
-							>
-								<svg
-									class="w-6 h-6"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M6 18L18 6M6 6l12 12"
-									></path>
-								</svg>
-							</button>
-						</div>
-
-						<div class="space-y-6">
-							<!-- Invite Link -->
-							<div>
-								<label
-									for="invite-link"
-									class="block text-sm font-medium text-gray-700 mb-2"
-									>Share Event Link</label
-								>
-								<div class="flex space-x-2">
-									<input
-										id="invite-link"
-										type="text"
-										readonly
-										value={`${$page.url.origin}/events/${eventId}`}
-										class="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
-									/>
-									<button
-										onclick={() => {
-											navigator.clipboard.writeText(
-												`${$page.url.origin}/events/${eventId}`,
-											);
-											// Show toast notification
-										}}
-										class="bg-secondary text-white px-4 py-3 rounded-lg hover:bg-secondary/80 transition-colors"
-										title="Copy link"
-										aria-label="Copy invite link"
-									>
-										<svg
-											class="w-5 h-5"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-											></path>
-										</svg>
-									</button>
-								</div>
-								<p class="text-xs text-gray-500 mt-2">
-									Share this link to invite people to your
-									event
-								</p>
-							</div>
-
-							<!-- QR Code -->
-							<div class="text-center">
-								<div
-									class="bg-gray-100 p-4 rounded-lg inline-block"
-								>
-									<div
-										class="w-32 h-32 bg-white border-2 border-dashed border-gray-300 rounded flex items-center justify-center"
-									>
-										<span class="text-gray-500 text-sm"
-											>QR Code</span
-										>
-									</div>
-								</div>
-								<p class="text-xs text-gray-500 mt-2">
-									QR code for easy mobile sharing
-								</p>
-							</div>
-
-							<!-- Social Share Buttons -->
-							<div>
-								<h3
-									class="block text-sm font-medium text-gray-700 mb-3"
-								>
-									Share on Social Media
-								</h3>
-								<div class="grid grid-cols-2 gap-3">
-									<button
-										onclick={() => {
-											const text = `Join me at "${event?.title || event?.name}" music event!`;
-											const url = `${$page.url.origin}/events/${eventId}`;
-											window.open(
-												`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
-												"_blank",
-											);
-										}}
-										class="flex items-center justify-center space-x-2 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition-colors"
-										aria-label="Share on Twitter"
-									>
-										<svg
-											class="w-5 h-5"
-											fill="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"
-											/>
-										</svg>
-										<span>Twitter</span>
-									</button>
-
-									<button
-										onclick={() => {
-											const text = `Join me at "${event?.title || event?.name}" music event!`;
-											const url = `${$page.url.origin}/events/${eventId}`;
-											window.open(
-												`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(text)}`,
-												"_blank",
-											);
-										}}
-										class="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-										aria-label="Share on Facebook"
-									>
-										<svg
-											class="w-5 h-5"
-											fill="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path
-												d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
-											/>
-										</svg>
-										<span>Facebook</span>
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<div
-							class="flex justify-end pt-6 border-t border-gray-200 mt-6"
-						>
-							<button
-								onclick={() => (showInviteModal = false)}
-								class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-							>
-								Close
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
 		{/if}
 
 		<!-- Add Playlist Modal -->
@@ -2383,7 +2473,7 @@
 								Add Playlist to Event
 							</h2>
 							<button
-								onclick={() => (showPlaylistModal = false)}
+								onclick={() => closePlaylistModal()}
 								class="text-gray-400 hover:text-gray-600 transition-colors"
 								aria-label="Close modal"
 							>
@@ -2495,7 +2585,7 @@
 							class="flex justify-end pt-6 border-t border-gray-200 mt-6"
 						>
 							<button
-								onclick={() => (showPlaylistModal = false)}
+								onclick={() => closePlaylistModal()}
 								class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
 							>
 								Cancel
@@ -2940,87 +3030,20 @@
 			</div>
 		{/if}
 
-		<!-- Add Admin Modal -->
-		{#if showAddAdminModal}
-			<div
-				class="fixed inset-0 bg-black/50 z-51 flex items-center justify-center z-50 p-4"
-			>
-				<div class="bg-white rounded-lg max-w-md w-full">
-					<div class="p-6">
-						<div class="flex justify-between items-center mb-6">
-							<h2 class="text-xl font-bold text-gray-800">
-								Add Admin
-							</h2>
-							<button
-								onclick={() => (showAddAdminModal = false)}
-								class="text-gray-400 hover:text-gray-600 transition-colors"
-								aria-label="Close modal"
-							>
-								<svg
-									class="w-6 h-6"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M6 18L18 6M6 6l12 12"
-									></path>
-								</svg>
-							</button>
-						</div>
-
-						<form
-							onsubmit={handleAddAdminByEmail}
-							class="space-y-4"
-						>
-							<div>
-								<label
-									for="admin-email"
-									class="block text-sm font-medium text-gray-700 mb-2"
-								>
-									Email or Username
-								</label>
-								<input
-									id="admin-email"
-									type="text"
-									bind:value={addAdminEmail}
-									placeholder="Enter email address or username"
-									required
-									class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-								/>
-							</div>
-
-							{#if error}
-								<div class="text-red-600 text-sm">{error}</div>
-							{/if}
-
-							<div class="flex space-x-4 pt-4">
-								<button
-									type="button"
-									onclick={() => {
-										showAddAdminModal = false;
-										addAdminEmail = "";
-										error = "";
-									}}
-									class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
-								>
-									Cancel
-								</button>
-								<button
-									type="submit"
-									disabled={loading}
-									class="flex-1 bg-secondary text-white px-6 py-3 rounded-lg hover:bg-secondary/80 disabled:opacity-50 transition-colors font-medium"
-								>
-									{loading ? "Adding..." : "Add Admin"}
-								</button>
-							</div>
-						</form>
-					</div>
-				</div>
-			</div>
+		<!-- Add Participant Modal -->
+		{#if showInviteModal && eventId}
+			<AddCollaboratorModal
+				eventId={eventId}
+				onParticipantAdded={() => {
+					showInviteModal = false;
+				}}
+				onClose={() => (showInviteModal = false)}
+			/>
 		{/if}
 	</div>
+
+	<!-- Music Player Component -->
+	{#if isMusicPlayerInitialized}
+		<MusicPlayer />
+	{/if}
 {/if}

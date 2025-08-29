@@ -71,14 +71,22 @@ export class PlaylistController {
     description: 'Filter by specific user ID (owner)',
     required: false 
   })
+  @ApiQuery({ 
+    name: 'includeEventPlaylists', 
+    type: Boolean, 
+    description: 'Include playlists that belong to events',
+    required: false 
+  })
   async findAll(
     @Query() paginationDto: PaginationDto, 
     @Query('isPublic') isPublic?: string,
     @Query('userId') ownerId?: string,
+    @Query('includeEventPlaylists') includeEventPlaylists?: string,
     @CurrentUser() user?: User
   ) {
     const isPublicBool = isPublic !== undefined ? isPublic === 'true' : undefined;
-    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId);
+    const includeEventPlaylistsBool = includeEventPlaylists === 'true';
+    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId, includeEventPlaylistsBool);
   }
 
   @Get('search')
@@ -139,12 +147,11 @@ export class PlaylistController {
   @Get('my-playlists')
   @ApiOperation({
     summary: 'Get my playlists',
-    description: 'Returns all playlists owned by the current user',
+    description: 'Returns all playlists owned by the current user or where they are collaborators, including event playlists',
   })
   @ApiQuery({ type: PaginationDto })
   async getMyPlaylists(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
-    // This could be a separate method in the service for user's playlists only
-    return this.playlistService.findAll(paginationDto, user.id);
+    return this.playlistService.getMyPlaylists(user.id, paginationDto);
   }
 
   @Get(':id')

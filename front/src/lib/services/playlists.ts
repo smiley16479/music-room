@@ -57,7 +57,6 @@ export interface PlaylistTrack {
 
 export interface Collaborator {
   id: string;
-  userId: string;
   displayName: string;
   avatarUrl?: string;
   email?: string;
@@ -71,12 +70,13 @@ export interface CreatePlaylistData {
 }
 
 export const playlistsService = {
-  async getPlaylists(isPublic?: boolean, userId?: string, customFetch?: typeof fetch): Promise<Playlist[]> {
+  async getPlaylists(isPublic?: boolean, userId?: string, includeEventPlaylists?: boolean, customFetch?: typeof fetch): Promise<Playlist[]> {
     const token = authService.getAuthToken();
     const params = new URLSearchParams();
     
     if (isPublic !== undefined) params.append('isPublic', isPublic.toString());
     if (userId) params.append('userId', userId);
+    if (includeEventPlaylists !== undefined) params.append('includeEventPlaylists', includeEventPlaylists.toString());
     
     const queryString = params.toString() ? `?${params.toString()}` : '';
     
@@ -90,7 +90,24 @@ export const playlistsService = {
     }
 
     const result = await response.json();
-    return result.data;
+    return result.data || result; // Handle both paginated and non-paginated responses
+  },
+
+  async getMyPlaylists(customFetch?: typeof fetch): Promise<Playlist[]> {
+    const token = authService.getAuthToken();
+    if (!token) throw new Error('Authentication required');
+    
+    const fetchFn = customFetch || fetch;
+    const response = await fetchFn(`${config.apiUrl}/api/playlists/my-playlists`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch my playlists');
+    }
+
+    const result = await response.json();
+    return result.data || result; // Handle both paginated and non-paginated responses
   },
 
   async getPlaylist(playlistId: string, customFetch?: typeof fetch): Promise<Playlist> {
@@ -151,7 +168,7 @@ export const playlistsService = {
     if (!token) throw new Error('Authentication required');
 
     const response = await fetch(`${config.apiUrl}/api/playlists/${playlistId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
