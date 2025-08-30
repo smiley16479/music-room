@@ -41,8 +41,6 @@ export class EventController {
   @ApiBody({ type: CreateEventDto })
   async create(@Body() createEventDto: CreateEventDto, @CurrentUser() user: User) {
 
-    console.log('Creating event with DTO:', createEventDto);
-
     const event = await this.eventService.create(createEventDto, user.id);
     return {
       success: true,
@@ -96,8 +94,6 @@ export class EventController {
     const { page, limit, skip } = paginationDto;
     // Récupère les events avec les admins
     const events = await this.eventService.getEventsUserCanInviteWithAdmins(user.id);
-
-    console.log("events", events);
     
     return {
       success: true,
@@ -421,7 +417,7 @@ export class EventController {
     return {
       success: true,
       message: 'Vote submitted successfully',
-      data: results,
+      data: [],
       timestamp: new Date().toISOString(),
     };
   }
@@ -502,7 +498,7 @@ export class EventController {
     };
   }
 
-  @Post(':id/next-track')
+/*   @Post(':id/next-track')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Play next track',
@@ -522,7 +518,7 @@ export class EventController {
       data: { track },
       timestamp: new Date().toISOString(),
     };
-  }
+  } */
 
   // Location-based features
   @Post(':id/check-location')

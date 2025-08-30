@@ -16,15 +16,48 @@ class EventsSocketService: NamespaceSocketService {
     let manager: SocketManager
     let socket: SocketIOClient
 
+    private var isConnected = false
+    private var joinedRooms: Set<String> = []
+
     private init() {
         let url = URL(string: "http://localhost:3000/events")!
         let token = KeychainService.shared.getAccessToken() ?? ""
-        manager = SocketManager(socketURL: url, config: [.log(true), .compress, .extraHeaders(["Authorization": "Bearer \(token)"])])
+        print("🚀 Initializing EventsSocketService with token: \(token)")
+        manager = SocketManager(socketURL: url, config: [/* .log(true), */ .compress, .connectParams(["token": token]), .extraHeaders(["Authorization": "Bearer \(token)"])])
         socket = manager.socket(forNamespace: "/events")
+
+        connect()
+        setupConnectionListeners()
     }
 
-    func connect() { socket.connect() }
-    func disconnect() { socket.disconnect() }
+    private func setupConnectionListeners() {
+        socket.on("connect") { [weak self] data, ack in
+            print("✅ EventsSocket connected")
+            self?.isConnected = true
+        }
+        
+        socket.on("disconnect") { [weak self] data, ack in
+            print("❌ EventsSocket disconnected")
+            self?.isConnected = false
+            self?.joinedRooms.removeAll()
+        }
+    }
+
+    func connect() { 
+        guard !isConnected else {
+            print("🔌 EventsSocket already connected")
+            return
+        }
+        socket.connect()
+        print("✅ EventsSocket connection initiated")
+    }
+    
+    func disconnect() { 
+        socket.disconnect()
+        isConnected = false
+        joinedRooms.removeAll()
+    }
+    
     func on(_ event: String, callback: @escaping ([Any], SocketAckEmitter) -> Void) { socket.on(event, callback: callback) }
     func emit(_ event: String, with items: [Any]) { socket.emit(event, items) }
 }
@@ -69,12 +102,39 @@ class DevicesSocketService: NamespaceSocketService {
 
 // MARK: - EventsSocketService: Events Gateway Events
 extension EventsSocketService {
+
     func joinEvent(eventId: String) {
-        emit("join-event",  with: [["eventId": eventId]])
+        guard !joinedRooms.contains(eventId) else {
+            print("🏠 Already in event: \(eventId)")
+            return
+        }
+        print("🏠 Attempting to join event room: \(eventId)")
+        if !isConnected {
+            socket.once("connect") { [weak self] _, _ in
+                self?.emit("join-events-room", with: [["eventId": eventId]])
+                self?.joinedRooms.insert(eventId)
+            }
+            connect()
+        } else {
+            emit("join-events-room", with: [["eventId": eventId]])
+            joinedRooms.insert(eventId)
+        }
     }
+
     func leaveEvent(eventId: String) {
-        emit("leave-event",  with: [["eventId": eventId]])
+        guard joinedRooms.contains(eventId) else {
+            print("🚪 Not in event: \(eventId)")
+            return
+        }
+
+        emit("leave-event", with: [["eventId": eventId]])
+        joinedRooms.remove(eventId)
     }
+
+    func test() {
+        emit("test", with: [[ "message": "message"]])
+    }
+
     func sendMessage(eventId: String, message: String) {
         emit("send-message", with: [["eventId": eventId, "message": message]])
     }

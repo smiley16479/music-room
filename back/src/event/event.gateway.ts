@@ -17,7 +17,7 @@ import { Event } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User, VisibilityLevel } from 'src/user/entities/user.entity';
-import { VoteResult } from './event.service';
+import { TrackVoteSnapshot } from './event.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
 import { IsLatitude } from 'class-validator';
@@ -32,7 +32,7 @@ interface AuthenticatedSocket extends Socket {
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: '*', // process.env.FRONTEND_URL || 'http://localhost:5173',
     credentials: true,
   },
   namespace: '/events',
@@ -133,18 +133,31 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     @MessageBody() data?: any,
   ) {
     try {
+
+      const eventId = Array.isArray(data) && data.length > 0 ? data[0]?.eventId : data?.eventId;
+      console.log('join-events-room data:', data);
+      this.logger.debug(`User ${client.userId} is joining global & event room ${eventId}`);
+
       if (!client.userId) {
         client.emit('error', { message: 'Authentication required' });
         return;
       }
 
-      await client.join(SOCKET_ROOMS.EVENTS);
+      await client.join(SOCKET_ROOMS.EVENT(eventId));
       client.emit('joined-events-room', { room: SOCKET_ROOMS.EVENTS });
       this.logger.log(`User ${client.userId} joined global events room`);
     } catch (error) {
       client.emit('error', { message: 'Failed to join events room', details: error.message });
     }
   }
+
+   @SubscribeMessage('test')
+    async handleTest(
+      @ConnectedSocket() client: AuthenticatedSocket,
+      @MessageBody() data: any,
+    ) {
+      console.log('Test event received with data:', data);
+    }
 
   // Event Room Management
   @SubscribeMessage('join-event')
@@ -246,6 +259,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     @MessageBody() { eventId }: { eventId: string },
   ) {
     try {
+      this.logger.debug(`User ${client.userId} is leaving event room ${eventId}`);
       const room = SOCKET_ROOMS.EVENT(eventId);
       await client.leave(room);
 
@@ -458,8 +472,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
-  notifyVoteUpdated(eventId: string, vote: Vote, results: VoteResult[]) {
+  notifyVoteUpdated(eventId: string, vote: Vote/* , tracks: TrackVoteSnapshot[] */) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    this.logger.debug(`Notifying vote update in event ${eventId} for track ${vote.trackId} by user ${vote.userId}`);
     this.server.to(room).emit('vote-updated', {
       eventId,
       vote: {
@@ -468,12 +483,12 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         type: vote.type,
         weight: vote.weight,
       },
-      results: results.slice(0, 10), // Top 10 tracks only
-      timestamp: new Date().toISOString(),
+      // results: tracks.slice(0, 10), // Top 10 tracks only
+      // timestamp: new Date().toISOString(),
     });
   }
 
-  notifyVoteRemoved(eventId: string, vote: Vote, results: VoteResult[]) {
+  /* notifyVoteRemoved(eventId: string, vote: Vote, tracks: TrackVoteSnapshot[]) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('vote-removed', {
       eventId,
@@ -481,23 +496,17 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         trackId: vote.trackId,
         userId: vote.userId,
       },
-      results: results.slice(0, 10),
+      results: tracks.slice(0, 10),
       timestamp: new Date().toISOString(),
     });
-  }
+  } */
 
-  notifyNowPlaying(eventId: string, track: Track) {
+  notifyNowPlaying(eventId: string, track: TrackVoteSnapshot) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('now-playing', {
       eventId,
       track: {
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        duration: track.duration,
-        albumCoverUrl: track.albumCoverUrl,
-        previewUrl: track.previewUrl,
+        id: track.trackId,
       },
       startedAt: new Date().toISOString(),
     });

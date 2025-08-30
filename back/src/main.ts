@@ -30,6 +30,6 @@ async function bootstrap() {
   app.use(cors( corsOptions ));
   app.use(cookieParser());
   app.enableShutdownHooks();
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
 bootstrap();

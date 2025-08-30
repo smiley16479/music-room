@@ -24,6 +24,7 @@ struct MusicRoomApp: App {
                 .environmentObject(themeManager)
                 .environmentObject(localizationManager)
                 .environmentObject(authenticationManager)
+                .environmentObject(DebugManager.shared)
                 .preferredColorScheme(themeManager.colorScheme)
         }
     }

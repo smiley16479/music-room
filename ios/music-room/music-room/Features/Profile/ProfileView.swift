@@ -508,7 +508,9 @@ struct FriendProfileView: View {
 
 // MARK: - Help & Support 
 struct HelpSupportView: View {
+    @EnvironmentObject var debugManager: DebugManager
     @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationView {
             VStack(spacing: 24) {
@@ -518,6 +520,12 @@ struct HelpSupportView: View {
                 Text("For help, contact support@musicroom.app or visit our FAQ.")
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
+
+                #if DEBUG
+                    Toggle("Activer le debug print", isOn: $debugManager.isDebugEnabled)
+                        .padding()
+                #endif
+      
                 Spacer()
             }
             .navigationTitle("Help & Support")
