@@ -283,6 +283,7 @@ enum EventStatus: String, Codable, CaseIterable {
 // MARK: - Playlist Model
 struct Playlist: Codable, Identifiable {
     let id: String
+    let eventId: String?
     let name: String
     let description: String?
     let visibility: VisibilityLevel
@@ -312,6 +313,7 @@ struct Playlist: Codable, Identifiable {
     // Custom initializer for easier instantiation
     init(
         id: String,
+        eventId: String? = nil,
         name: String = "Untitled Playlist",
         description: String? = nil,
         visibility: VisibilityLevel = .public,
@@ -327,6 +329,7 @@ struct Playlist: Codable, Identifiable {
         tracks: [PlaylistTrack]? = nil
     ) {
         self.id = id
+        self.eventId = eventId
         self.name = name
         self.description = description
         self.visibility = visibility

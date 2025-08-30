@@ -332,7 +332,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
             } catch let DecodingError.typeMismatch(type, context) {
                 print("❌ Type incorrect: attendu \(type)")
                 print("❌ Contexte: \(context)")
-            } catch let DecodingError.valueNotFound(type, _context) {
+            } catch let DecodingError.valueNotFound(type, _) { //<- _context
                 print("❌ Valeur null inattendue pour: \(type)")
             } catch {
                 print("❌ Autre erreur: \(error)")

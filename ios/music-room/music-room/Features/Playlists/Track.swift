@@ -9,17 +9,29 @@ class PlaylistViewModel {
     var tracks: [Track] = []
     var currentTrackId: String?
     var proposedTracks: [Track] = [] // Tracks proposés par les utilisateurs
+    var users: [User] = [] // Utilisateurs connectés à l'événement/playlist
+    var messages: [EventMessage] = [] // Messages de l'event
+    var currentEvent: Event? // Event associé à la playlist
+    private let eventId: String?
     // @State private var errorMessage: String?
     // private let socketService = SocketService.shared
-    private let eventsSocketService = EventsSocketService.shared
+    let eventsSocket = EventsSocketService.shared
     
     init(playlist: Playlist) {
         self.playlist = playlist
+        self.eventId = playlist.eventId
         loadMockData()
-        eventsSocketService.connect()
+        guard let eventId = playlist.eventId else {
+            print("❌ Erreur: Aucun eventId associé à cette playlist")
+            return
+        }
+
+        setupSocketListeners()
     }
     
     deinit {
+      guard let eventId = self.eventId else { return }
+      self.eventsSocket.leaveEvent(eventId: eventId)
     }
 
     static var mockPlaylist: Playlist {
@@ -75,27 +87,99 @@ class PlaylistViewModel {
         }
     }
     
+    // MARK: - Voting
     func voteTrack(id: String, isLike: Bool) {
         guard let index = tracks.firstIndex(where: { $0.id == id }) else { return }
         
+        
+        guard let eventId = playlist.eventId else {
+            print("Erreur: Aucun eventId associé à cette playlist")
+            return
+        }
         print("Avant vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
-        // Only allow voting on upcoming tracks
-        if !(tracks[index].hasPlayed ?? false) && !(tracks[index].isCurrentlyPlaying ?? false) {
-            if isLike {
-                tracks[index].likes = (tracks[index].likes ?? 0) + 1
-            } else {
-                tracks[index].dislikes = (tracks[index].dislikes ?? 0) + 1
-            }
-            sortUpcomingTracks()
-            
-            // Send vote via socket
-            Task {[weak self] in
-                guard let self = self else { return }
-//                await socketService.voteTrack(trackId: id, isLike: isLike, playlistId: playlist.id)
+        
+        
+        
+        // Use new API service to vote
+        Task { [weak self] in
+            guard let self = self else { return }
+            do {
+                let voteType: VoteResult.VoteType = isLike ? .like : .dislike
+                let voteResult = try await APIService.shared.voteForTrack(eventId: eventId, trackId: id, voteType: voteType.rawValue)
+                print("Vote enregistré: \(voteResult)")
+                // Le socket mettra à jour automatiquement la vue
+            } catch {
+                print("Erreur lors du vote: \(error)")
             }
         }
-
-        print("Après vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
+    }
+    
+    // MARK: - Track Suggestions
+    func suggestTrack(trackData: SuggestedTrackData) async {
+        do {
+            guard let eventId = playlist.eventId else {
+                print("Erreur: Aucun eventId associé à cette playlist")
+                return
+            }
+            let suggestion = try await APIService.shared.suggestTrack(eventId: eventId, trackData: trackData)
+            print("Track suggérée: \(suggestion)")
+        } catch {
+            print("Erreur lors de la suggestion: \(error)")
+        }
+    }
+    
+    func approveTrackSuggestion(suggestionId: String) async {
+        do {
+            guard let eventId = playlist.eventId else {
+                print("Erreur: Aucun eventId associé à cette playlist")
+                return
+            }
+            let result = try await APIService.shared.approveTrackSuggestion(eventId: eventId, suggestionId: suggestionId)
+            print("Suggestion approuvée: \(result)")
+        } catch {
+            print("Erreur lors de l'approbation: \(error)")
+        }
+    }
+    
+    func rejectTrackSuggestion(suggestionId: String) async {
+        do {
+            guard let eventId = playlist.eventId else {
+                print("Erreur: Aucun eventId associé à cette playlist")
+                return
+            }
+            let result = try await APIService.shared.rejectTrackSuggestion(eventId: eventId, suggestionId: suggestionId)
+            print("Suggestion rejetée: \(result)")
+        } catch {
+            print("Erreur lors du rejet: \(error)")
+        }
+    }
+    
+    // MARK: - Playback Control
+    func updateNowPlaying(trackId: String?, position: Double? = nil) async {
+        do {
+            let result = try await APIService.shared.updateNowPlaying(eventId: playlist.id, trackId: trackId)
+            print("Now playing mis à jour: \(result)")
+        } catch {
+            print("Erreur lors de la mise à jour: \(error)")
+        }
+    }
+    
+    func skipTrack() async {
+        do {
+            let result = try await APIService.shared.skipTrack(eventId: playlist.id)
+            print("Track skippée: \(result)")
+        } catch {
+            print("Erreur lors du skip: \(error)")
+        }
+    }
+    
+    func updatePlaybackState(isPlaying: Bool, position: Double? = nil) async {
+        do {
+            let result = try await APIService.shared.updatePlaybackState(eventId: playlist.id, isPlaying: isPlaying, position: position)
+            print("État de lecture mis à jour: \(result)")
+        } catch {
+            print("Erreur lors de la mise à jour: \(error)")
+        }
     }
     
     func addTrackToPlaylist(_ track: Track) async {
@@ -158,28 +242,294 @@ class PlaylistViewModel {
     
     private func sortUpcomingTracks() {
         // Find the index of the current track
-        guard let currentIndex = tracks.firstIndex(where: { ($0.isCurrentlyPlaying ?? false) }) else { return }
+        if let currentIndex = tracks.firstIndex(where: { ($0.isCurrentlyPlaying ?? false) }) {
+            // Sort only upcoming tracks by vote score
+            let playedTracks = tracks[0...currentIndex]
+            var upcomingTracks = Array(tracks[(currentIndex + 1)...])
 
-        // Sort only upcoming tracks by vote score
-        let playedTracks = tracks[0...currentIndex]
-        var upcomingTracks = Array(tracks[(currentIndex + 1)...])
+            print("playedTracks:", playedTracks.map { $0.title })
+            print("upcomingTracks before sort:", upcomingTracks.map { $0.title })
 
-print("playedTracks:", playedTracks.map { $0.title })
-print("upcomingTracks before sort:", upcomingTracks.map { $0.title })
+            upcomingTracks.sort { $0.voteScore > $1.voteScore }
+            
+            // Reconstruct the playlist
+            tracks = Array(playedTracks) + upcomingTracks
 
-        upcomingTracks.sort { $0.voteScore > $1.voteScore }
-        
-        // Reconstruct the playlist
-        tracks = Array(playedTracks) + upcomingTracks
-
-        print("tracks after sorting: \(tracks.map { $0.voteScore })")
+            print("tracks after sorting: \(tracks.map { $0.voteScore })")
+        } else {
+          tracks.sort { $0.voteScore > $1.voteScore }
+          return 
+        }
     }
     
     var currentTrack: Track? {
         tracks.first(where: { $0.id == currentTrackId })
     }
+
+
+    // MARK: - Socket Setup
+    private func setupSocketListeners() {
+        // REJOINDRE LA ROOM DE L'EVENT
+        guard let eventId = playlist.eventId else {
+            print("❌ Erreur: Aucun eventId associé à cette playlist")
+            return
+        }
+
+        self.eventsSocket.joinEvent(eventId: eventId)
+
+        eventsSocket.on("joined-events-room") { data, ack in
+            print("✅ Successfully joined event room: \(data)")
+        }
+        
+        // Écoute les utilisateurs qui rejoignent
+        /* eventsSocket.onUserJoined { [weak self] data, ack in
+            guard let self = self,
+                  let userData = data.first as? [String: Any],
+                  let user = self.parseUser(from: userData) else { return }
+            
+            DispatchQueue.main.async {
+                self.users.append(user)
+            }
+        } */
+
+        // Écoute les utilisateurs qui quittent
+        eventsSocket.onUserLeft { [weak self] data, ack in
+            guard let self = self,
+                  let userData = data.first as? [String: Any],
+                  let userId = userData["userId"] as? String else { return }
+            
+            DispatchQueue.main.async {
+                self.users.removeAll { $0.id == userId }
+            }
+        }
+        
+        // Écoute les votes sur les tracks
+        eventsSocket.on("vote-updated") { [weak self] data, ack in
+
+            print("Vote update received via socket: \(data)")
+            guard let self = self,
+                  let voteData = data.first as? [String: Any],
+                  let eventId = voteData["eventId"] as? String,
+                  let vote = voteData["vote"] as? [String: Any],
+                  let trackId = vote["trackId"] as? String,
+                  let type = vote["type"] as? String else { return }
+            
+            DispatchQueue.main.async {
+                  if let index = self.tracks.firstIndex(where: { $0.id == trackId }) {
+                      if type == "upvote" {
+                          self.tracks[index].likes = (self.tracks[index].likes ?? 0) + 1
+                      } else if type == "downvote" {
+                          self.tracks[index].dislikes = (self.tracks[index].dislikes ?? 0) + 1
+                      }
+                      self.sortUpcomingTracks()
+                }
+            }
+        }
+
+        eventsSocket.on("track-removed") { [weak self] data, ack in
+            print("Vote update received via socket: \(data)")
+            guard let self = self,
+                  let voteData = data.first as? [String: Any],
+                  let eventId = voteData["eventId"] as? String,
+                  let vote = voteData["vote"] as? [String: Any],
+                  let trackId = vote["trackId"] as? String,
+                  let type = vote["type"] as? String else { return }
+            
+            DispatchQueue.main.async {
+                  if let index = self.tracks.firstIndex(where: { $0.id == trackId }) {
+                      if type == "upvote" {
+                          self.tracks[index].likes = (self.tracks[index].likes ?? 0) + 1
+                      } else if type == "downvote" {
+                          self.tracks[index].dislikes = (self.tracks[index].dislikes ?? 0) + 1
+                      }
+                      self.sortUpcomingTracks()
+                }
+            }
+        }
+        
+        // Écoute les suggestions de tracks
+        eventsSocket.on("trackSuggested") { [weak self] data, ack in
+            guard let self = self,
+                  let suggestionData = data.first as? [String: Any] else { return }
+            
+            DispatchQueue.main.async {
+                // Traiter la nouvelle suggestion
+                print("Nouvelle suggestion reçue: \(suggestionData)")
+            }
+        }
+        
+        // Écoute les changements de track
+        eventsSocket.on("trackChanged") { [weak self] data, ack in
+            guard let self = self,
+                  let trackData = data.first as? [String: Any],
+                  let currentTrackId = trackData["currentTrackId"] as? String? else { return }
+            
+            DispatchQueue.main.async {
+                // Mettre à jour la track actuelle
+                if let oldCurrentIndex = self.tracks.firstIndex(where: { $0.isCurrentlyPlaying == true }) {
+                    self.tracks[oldCurrentIndex].isCurrentlyPlaying = false
+                    self.tracks[oldCurrentIndex].hasPlayed = true
+                }
+                
+                if let currentTrackId = currentTrackId,
+                   let newCurrentIndex = self.tracks.firstIndex(where: { $0.id == currentTrackId }) {
+                    self.tracks[newCurrentIndex].isCurrentlyPlaying = true
+                    self.currentTrackId = currentTrackId
+                }
+            }
+        }
+        
+        // Écoute les changements d'état de lecture
+        eventsSocket.on("playbackStateChanged") { [weak self] data, ack in
+            guard let self = self,
+                  let playbackData = data.first as? [String: Any],
+                  let isPlaying = playbackData["isPlaying"] as? Bool else { return }
+            
+            DispatchQueue.main.async {
+                // Mettre à jour l'état de lecture
+                if let currentTrackId = self.currentTrackId,
+                   let index = self.tracks.firstIndex(where: { $0.id == currentTrackId }) {
+                    // Mise à jour de l'état de lecture si nécessaire
+                    print("État de lecture mis à jour: \(isPlaying)")
+                }
+            }
+        }
+        /*
+        // Écoute les nouveaux messages
+        eventsSocket.onNewMessage { [weak self] data, ack in
+            guard let self = self,
+                  let messageData = data.first as? [String: Any],
+                  let message = self.parseMessage(from: messageData) else { return }
+            
+            DispatchQueue.main.async {
+                self.messages.append(message)
+            }
+        }
+        
+        // Écoute la musique en cours
+        eventsSocket.onNowPlaying { [weak self] data, ack in
+            guard let self = self,
+                  let trackData = data.first as? [String: Any],
+                  let track = self.parseTrack(from: trackData) else { return }
+            
+            DispatchQueue.main.async {
+                self.currentTrackId = track.id
+            }
+        }
+        
+        // Écoute les mises à jour d'événement
+        eventsSocket.onEventUpdated { [weak self] data, ack in
+            guard let self = self,
+                  let eventData = data.first as? [String: Any] else { return }
+            
+            DispatchQueue.main.async {
+                self.updateEvent(from: eventData)
+            }
+        }*/
+    }
+
+
+    /*
+    // MARK: - Actions
+    func joinEvent() async {
+        guard let eventId = currentEvent?.id else { return }
+        do {
+            let result = try await APIService.shared.joinEvent(eventId: eventId)
+            print("Event rejoint: \(result)")
+        } catch {
+            print("Erreur lors de la jointure: \(error)")
+        }
+    }
     
-/*     // MARK: - Socket Management
+    func leaveEvent() async {
+        guard let eventId = currentEvent?.id else { return }
+        do {
+            let result = try await APIService.shared.leaveEvent(eventId: eventId)
+            print("Event quitté: \(result)")
+        } catch {
+            print("Erreur lors de la sortie: \(error)")
+        }
+    }
+
+    func sendMessage(_ text: String) async {
+        guard let eventId = currentEvent?.id else { return }
+        do {
+            let message = try await APIService.shared.sendEventMessage(eventId: eventId, content: text, type: .text)
+            print("Message envoyé: \(message)")
+        } catch {
+            print("Erreur lors de l'envoi: \(error)")
+        }
+    }
+
+    // MARK: - Parsing Helpers
+    private func parseUser(from data: [String: Any]) -> User? {
+        guard let id = data["id"] as? String,
+              let name = data["name"] as? String else { return nil }
+        
+        let email = data["email"] as? String
+        return User(id: id, name: name, email: email ?? "")
+    }
+    
+    private func parseMessage(from data: [String: Any]) -> EventMessage? {
+        guard let id = data["id"] as? String,
+              let eventId = data["eventId"] as? String,
+              let content = data["content"] as? String,
+              let typeString = data["type"] as? String,
+              let type = EventMessage.MessageType(rawValue: typeString),
+              let authorData = data["author"] as? [String: Any],
+              let author = parseUser(from: authorData),
+              let createdAt = data["createdAt"] as? String else { return nil }
+        
+        let metadata: EventMessage.MessageMetadata? = nil // Parse metadata if needed
+        
+        return EventMessage(
+            id: id,
+            eventId: eventId,
+            content: content,
+            type: type,
+            author: author,
+            createdAt: createdAt,
+            metadata: metadata
+        )
+    }
+    
+    private func parseTrack(from data: [String: Any]) -> Track? {
+        guard let id = data["id"] as? String,
+              let title = data["title"] as? String,
+              let artist = data["artist"] as? String else { return nil }
+        
+        let album = data["album"] as? String
+        let duration = data["duration"] as? Int
+        let albumCoverUrl = data["albumCoverUrl"] as? String
+        let previewUrl = data["previewUrl"] as? String
+        let deezerId = data["deezerId"] as? String
+        let likes = data["likes"] as? Int
+        let dislikes = data["dislikes"] as? Int
+        let hasPlayed = data["hasPlayed"] as? Bool
+        let isCurrentlyPlaying = data["isCurrentlyPlaying"] as? Bool
+        
+        return Track(
+            id: id,
+            title: title,
+            artist: artist,
+            album: album,
+            duration: duration,
+            albumCoverUrl: albumCoverUrl,
+            previewUrl: previewUrl,
+            deezerId: deezerId,
+            likes: likes,
+            dislikes: dislikes,
+            hasPlayed: hasPlayed,
+            isCurrentlyPlaying: isCurrentlyPlaying
+        )
+    }*/
+    
+    private func updateEvent(from data: [String: Any]) {
+        // Met à jour l'événement avec les nouvelles données
+        print("Event mis à jour: \(data)")
+    }
+
+/*     // MARK: - ANCIEN Socket Management
     private func setupSocketListeners() {
         Task { @MainActor in
             socketService.setupTrackListeners(
@@ -464,8 +814,8 @@ struct PlaylistDetailsView: View {
 
     // Simule si l'utilisateur est admin sur l'event (à remplacer par ta logique réelle)
     var isAdmin: Bool {
-        // Remplace par ta logique d'authentification/permission
-        true
+        guard let currentUser = authManager.currentUser else { return false }
+        return playlist.collaborators?.contains(where: { $0.id == currentUser.id }) == true || playlist.creatorId == currentUser.id
     }
 
     var body: some View {
@@ -509,6 +859,14 @@ struct PlaylistDetailsView: View {
                AudioPlayerView(viewModel: viewModel)
             }
 
+        Button("Test Socket") {
+            viewModel.eventsSocket.test()
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(8)
+        .foregroundColor(.blue)
+
             // Content
             if displayMode == .list {
                 listView
@@ -543,50 +901,57 @@ struct PlaylistDetailsView: View {
     //     }
     // }
 
+    @ViewBuilder
     private var listView: some View {
+        if isAdmin {
+            adminListView
+        } else {
+            userScrollView
+        }
+    }
+
+    private var adminListView: some View {
         List {
-            if isAdmin {
-                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
-                    TrackRowView(
-                        track: track,
-                        onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
-                        onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
-                        canVote: !(track.hasPlayed ?? false)
-                              && !(track.isCurrentlyPlaying ?? false)
-                              && (playlist.name.hasPrefix("[Event]"))
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        // Action pour jouer la musique
-                        viewModel.currentTrackId = track.id
-                    }
+            ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+                TrackRowView(
+                    track: track,
+                    onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+                    onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+                    canVote: !(track.hasPlayed ?? false)
+                          && !(track.isCurrentlyPlaying ?? false)
+                          && (playlist.name.hasPrefix("[Event]"))
+                )
+                .listRowInsets(EdgeInsets())
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    viewModel.currentTrackId = track.id
                 }
-                .onDelete { indexSet in
-                    for index in indexSet {
-                        let track = viewModel.tracks[index]
-                        viewModel.tracks.remove(at: index)
-                        // Optionnel : appel API pour supprimer côté serveur
-                    }
-                }
-            } else {
-                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
-                    TrackRowView(
-                        track: track,
-                        onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
-                        onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
-                        canVote: !(track.hasPlayed ?? false)
-                              && !(track.isCurrentlyPlaying ?? false)
-                              && (playlist.name.hasPrefix("[Event]"))
-                    )
-                    .listRowInsets(EdgeInsets())
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        // Action pour jouer la musique
-                        viewModel.currentTrackId = track.id
+            }
+            .onDelete { indexSet in
+                for index in indexSet {
+                    let track = viewModel.tracks[index]
+                    viewModel.tracks.remove(at: index)
+                    Task {
+                      try await APIService.shared.removeMusicFromPlaylist(playlist.id, trackId: track.id)
                     }
                 }
             }
+        }
+    }
+
+    private var userScrollView: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+                    TrackRowView(
+                        track: track,
+                        onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
+                        onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
+                        canVote: !(track.hasPlayed ?? false) && !(track.isCurrentlyPlaying ?? false)
+                    )
+                }
+            }
+            .padding(.horizontal)
         }
     }
     
@@ -673,20 +1038,6 @@ struct AudioPlayerView: View {
           }
       }
    }
-
-  //  private func togglePlayPause(for track: Track) {
-  //      guard let previewUrl = track.preview ?? track.previewUrl, let url = URL(string: previewUrl) else { return }
-  //      if audioPlayer == nil || audioPlayer?.currentItem?.asset as? AVURLAsset != AVURLAsset(url: url) {
-  //          audioPlayer = AVPlayer(url: url)
-  //      }
-  //      if isPlaying {
-  //          audioPlayer?.pause()
-  //          isPlaying = false
-  //      } else {
-  //          audioPlayer?.play()
-  //          isPlaying = true
-  //      }
-  //  }
 
    private func togglePlayPause(for track: Track) {
     guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }

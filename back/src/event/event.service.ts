@@ -43,6 +43,14 @@ export interface VoteResult {
   position: number;
 }
 
+// Snapshot (Short version VoteResult) of track votes for response
+export interface TrackVoteSnapshot {
+  trackId: string;
+  upvotes: number;
+  downvotes: number;
+  position: number;
+}
+
 @Injectable()
 export class EventService {
   constructor(
@@ -356,24 +364,15 @@ export class EventService {
 
 
   // Voting System
-  async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto): Promise<VoteResult[]> {
+  async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto)/* : Promise<TrackVoteSnapshot[]> */ {
+    console.log('Voting for track', voteDto, 'in event', eventId, 'by user', userId);
+
     const event = await this.findById(eventId, userId);
 
     // Check if user can vote
     await this.checkVotingPermissions(event, userId);
 
-    // Check if user has reached vote limit (0 means unlimited)
-    if (event.maxVotesPerUser > 0) {
-      const userVoteCount = await this.voteRepository.count({
-        where: { eventId, userId },
-      });
-
-      if (userVoteCount >= event.maxVotesPerUser) {
-        throw new BadRequestException(`Maximum ${event.maxVotesPerUser} votes allowed per user`);
-      }
-    }
-
-    // Get or create track
+    // Get track
     const track = await this.trackRepository.findOne({
       where: { id: voteDto.trackId },
     });
@@ -402,19 +401,19 @@ export class EventService {
 
     await this.voteRepository.save(vote);
 
-    // Get updated voting results
+    /* // Get updated voting results
     const results = await this.getVotingResults(eventId, userId);
 
     // Reorder playlist tracks based on votes
-    await this.reorderPlaylistByVotes(eventId);
+    await this.reorderPlaylistByVotes(eventId); */
 
     // Notify participants
-    this.eventGateway.notifyVoteUpdated(eventId, vote, results);
+    this.eventGateway.notifyVoteUpdated(eventId, vote/* , results */);
 
-    return results;
+    return;
   }
 
-  async removeVote(eventId: string, userId: string, trackId: string): Promise<VoteResult[]> {
+  async removeVote(eventId: string, userId: string, trackId: string)/* : Promise<TrackVoteSnapshot[]> */ {
     const event = await this.findById(eventId, userId);
 
     const vote = await this.voteRepository.findOne({
@@ -430,19 +429,19 @@ export class EventService {
     // Get updated voting results
     const results = await this.getVotingResults(eventId, userId);
 
-    // Reorder playlist tracks based on votes
+    /*  // Reorder playlist tracks based on votes
     await this.reorderPlaylistByVotes(eventId);
 
     // Notify participants
     this.eventGateway.notifyVoteRemoved(eventId, vote, results);
 
-    return results;
+    return results; */
   }
 
   /**
    * Reorders the playlist tracks based on their vote counts
    * Tracks with higher vote counts move up in the playlist
-   */
+  */
   private async reorderPlaylistByVotes(eventId: string): Promise<void> {
     try {
       // Get the event with its playlist
@@ -455,23 +454,10 @@ export class EventService {
         return;
       }
 
-      // Get voting results for this event
+      /* // Get voting results for this event
       const voteResults = await this.getVotingResults(eventId);
-      const voteMap = new Map(voteResults.map(result => [result.track.id, result.voteCount]));
-
-      // Get playlist tracks and sort them by votes (descending), then by original position
-      const playlistTracks = event.playlist.playlistTracks.sort((a, b) => {
-        const aVotes = voteMap.get(a.trackId) || 0;
-        const bVotes = voteMap.get(b.trackId) || 0;
-        
-        // First sort by votes (higher votes first)
-        if (aVotes !== bVotes) {
-          return bVotes - aVotes;
-        }
-        
-        // If votes are equal, maintain original order (earlier position first)
-        return a.position - b.position;
-      });
+      return;
+      const playlistTracks = voteResults.sort((a, b) => a.position - b.position)
 
       // Update positions based on new order using the playlist service reorder method
       const trackOrder = playlistTracks.map(pt => pt.trackId);
@@ -485,14 +471,14 @@ export class EventService {
 
       // Notify participants about the reordering
       this.eventGateway.notifyTracksReordered(eventId, trackOrder, 'voting-system');
-
+ */
     } catch (error) {
       console.error('Failed to reorder playlist by votes:', error);
       // Don't throw the error to avoid disrupting the voting process
     }
   }
 
-  async getVotingResults(eventId: string, userId?: string): Promise<VoteResult[]> {
+  /* async getVotingResults(eventId: string, userId?: string): Promise<VoteResult[]> {
     const votes = await this.voteRepository
       .createQueryBuilder('vote')
       .leftJoinAndSelect('vote.track', 'track')
@@ -535,6 +521,46 @@ export class EventService {
     });
 
     return results;
+  } */
+
+  async getVotingResults(eventId: string, userId?: string)/* : Promise<TrackVoteSnapshot[]>  */{
+    const votes = await this.voteRepository
+      .createQueryBuilder('vote')
+      .leftJoinAndSelect('vote.track', 'track')
+      .where('vote.eventId = :eventId', { eventId })
+      .getMany();
+
+      console.log('Votes fetched for event', votes);
+      return votes;
+
+    // Grouper par track
+    const trackVotes = new Map<string, Vote[]>();
+    votes.forEach(vote => {
+      if (!trackVotes.has(vote.trackId)) {
+        trackVotes.set(vote.trackId, []);
+      }
+      trackVotes.get(vote.trackId)!.push(vote);
+    });
+
+    // Créer les snapshots
+    const tracks: TrackVoteSnapshot[] = [];
+    for (const [trackId, voteList] of trackVotes) {
+      const upvotes = voteList.filter(v => v.type === VoteType.UPVOTE).length;
+      const downvotes = voteList.filter(v => v.type === VoteType.DOWNVOTE).length;
+      
+      tracks.push({
+        trackId,
+        upvotes,
+        downvotes,
+        position: 0 // Sera mis à jour après tri
+      });
+    }
+
+    // Trier et mettre à jour positions
+    tracks.sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes));
+    tracks.forEach((track, index) => track.position = index + 1);
+
+    return tracks;
   }
 
   // Location-based features
@@ -639,7 +665,7 @@ export class EventService {
     return updatedEvent;
   }
 
-  async playNextTrack(eventId: string, userId: string): Promise<Track | null> {
+/*   async playNextTrack(eventId: string, userId: string): Promise<TrackVoteSnapshot | null> {
     const event = await this.findById(eventId, userId);
 
     if (event.creatorId !== userId) {
@@ -647,11 +673,11 @@ export class EventService {
     }
 
     // Get top voted track
-    const results = await this.getVotingResults(eventId);
-    const nextTrack = results.length > 0 ? results[0].track : null;
+    const tracks = await this.getVotingResults(eventId);
+    const nextTrack = tracks.length > 0 ? tracks[0] : null;
 
     if (nextTrack) {
-      event.currentTrackId = nextTrack.id;
+      event.currentTrackId = nextTrack.trackId;
       event.currentTrackStartedAt = new Date();
       await this.eventRepository.save(event);
 
@@ -659,11 +685,11 @@ export class EventService {
       this.eventGateway.notifyNowPlaying(eventId, nextTrack);
 
       // Remove votes for the played track to avoid replay
-      await this.voteRepository.delete({ eventId, trackId: nextTrack.id });
+      await this.voteRepository.delete({ eventId, trackId: nextTrack.trackId });
     }
 
     return nextTrack;
-  }
+  } */
 
   /** Récupère tous les events où l'utilisateur est créateur ou participant, avec les admins */
   async getEventsUserCanInviteWithAdmins(userId: string): Promise<Event[]> {
@@ -793,7 +819,7 @@ export class EventService {
       }
     }
 
-    if (effectiveStatus !== EventStatus.LIVE) {
+    if (effectiveStatus === EventStatus.ENDED) {
       throw new BadRequestException('Voting is only allowed during live events');
     }
 

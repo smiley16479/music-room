@@ -417,7 +417,7 @@ export class EventController {
     return {
       success: true,
       message: 'Vote submitted successfully',
-      data: results,
+      data: [],
       timestamp: new Date().toISOString(),
     };
   }
@@ -498,7 +498,7 @@ export class EventController {
     };
   }
 
-  @Post(':id/next-track')
+/*   @Post(':id/next-track')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Play next track',
@@ -518,7 +518,7 @@ export class EventController {
       data: { track },
       timestamp: new Date().toISOString(),
     };
-  }
+  } */
 
   // Location-based features
   @Post(':id/check-location')

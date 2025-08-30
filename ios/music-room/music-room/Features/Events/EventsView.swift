@@ -323,6 +323,7 @@ struct CreateEventView: View {
     @State private var description: String = ""
     @State private var location: String = ""
     @State private var date: Date = Date()
+    @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -331,6 +332,11 @@ struct CreateEventView: View {
     @State private var showPlaylistPicker = false
     @State private var createNewPlaylist = false
 
+    // Computed property pour valider les dates
+    private var isDateValid: Bool {
+        DateValidation.isValid(startDate: date, endDate: endDate)
+    }
+
     var body: some View {
         NavigationView {
             Form {
@@ -338,10 +344,14 @@ struct CreateEventView: View {
                     TextField("Name", text: $name)
                     TextField("Description", text: $description)
                 }
-                Section(header: Text("Location & Date")) {
-                    TextField("Location", text: $location)
-                    DatePicker("Date", selection: $date, displayedComponents: [.date, .hourAndMinute])
-                }
+                
+                EventDateSection(
+                    startDate: $date,
+                    endDate: $endDate,
+                    location: $location,
+                    showPastDateValidation: true,
+                    minimumDurationHours: 1
+                )
                 Section(header: Text("Visibility")) {
                     Toggle(isOn: $isPublic) {
                         Text("Public Event")
@@ -374,8 +384,7 @@ struct CreateEventView: View {
                     Button("Save") {
                         saveEvent()
                     }
-                    .disabled(isSaving
-                          || name.isEmpty
+                    .disabled(isSaving || name.isEmpty || !isDateValid
                           || (createNewPlaylist && playlistName.isEmpty)
                           || (!createNewPlaylist && selectedPlaylist == nil)
                     )
@@ -388,6 +397,12 @@ struct CreateEventView: View {
     }
 
     private func saveEvent() {
+        // Validation des dates avant de sauvegarder
+        guard isDateValid else {
+            errorMessage = DateValidation.validationMessage(startDate: date, endDate: endDate)
+            return
+        }
+        
         isSaving = true
         errorMessage = nil
         let eventData: [String: Any] = [
@@ -395,6 +410,7 @@ struct CreateEventView: View {
             "description": description,
             "locationName": location,
             "eventDate": ISO8601DateFormatter().string(from: date),
+            "eventEndDate": ISO8601DateFormatter().string(from: endDate),
             "visibility": isPublic ? "public" : "private",
             "selectedPlaylistId": selectedPlaylist?.id ?? "",
             "playlistName": createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
@@ -509,10 +525,16 @@ struct EventEditView: View {
     @State private var description: String = ""
     @State private var location: String = ""
     @State private var date: Date = Date()
+    @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
     @State private var isSaving = false
     @State private var isDeleting = false
     @State private var errorMessage: String?
+    
+    // Computed property pour valider les dates
+    private var isDateValid: Bool {
+        DateValidation.isValid(startDate: date, endDate: endDate)
+    }
 
     @State private var invitedUsers: [User] = []
     @State private var allUsers: [User] = []
@@ -548,10 +570,14 @@ struct EventEditView: View {
                     TextField("Name", text: $name)
                     TextField("Description", text: $description)
                 }
-                Section(header: Text("Location & Date")) {
-                    TextField("Location", text: $location)
-                    DatePicker("Date", selection: $date, displayedComponents: [.date, .hourAndMinute])
-                }
+                
+                EventDateSection(
+                    startDate: $date,
+                    endDate: $endDate,
+                    location: $location,
+                    showPastDateValidation: false,
+                    minimumDurationHours: 1
+                )
 
                 if let playlist = event.playlist {
                     Button(action: {
@@ -681,13 +707,16 @@ struct EventEditView: View {
     }
 
     private func setup() {
-
-        if let data = try? JSONEncoder().encode(event),
+        // 🔍 LOGS DE DEBUG : //
+        if DebugManager.shared.isDebugEnabled,
+          let data = try? JSONEncoder().encode(event),
           let json = try? JSONSerialization.jsonObject(with: data),
           let prettyData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]),
           let prettyString = String(data: prettyData, encoding: .utf8) {
             print("🔄 EventEditView setup called\n\(prettyString)")
         }
+        // 🔍 LOGS DE DEBUG : \\
+
 
         name = event.name
         description = event.description ?? ""
@@ -695,6 +724,7 @@ struct EventEditView: View {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         date = formatter.date(from: event.eventDate ?? "") ?? Date()
+        endDate = formatter.date(from: event.eventEndDate ?? "") ?? Date()
         isPublic = event.visibility == .public
         invitedUsers = event.participants ?? []
         admins = event.admins ?? []
@@ -702,6 +732,12 @@ struct EventEditView: View {
     }
 
     private func saveEvent() {
+        // Validation des dates avant de sauvegarder
+        guard isDateValid else {
+            errorMessage = DateValidation.validationMessage(startDate: date, endDate: endDate)
+            return
+        }
+        
         isSaving = true
         errorMessage = nil
         let eventData: [String: Any] = [
@@ -709,6 +745,7 @@ struct EventEditView: View {
             "description": description,
             "locationName": location,
             "eventDate": ISO8601DateFormatter().string(from: date),
+            "eventEndDate": ISO8601DateFormatter().string(from: endDate),
             "visibility": isPublic ? "public" : "private",
             "admins": admins.map { $0.id }, // il n'y a pas en db
             "participants": invitedUsers.map { $0.id } // il n'y a pas en db

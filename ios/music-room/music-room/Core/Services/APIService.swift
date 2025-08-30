@@ -199,6 +199,120 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: playlistData)
     }
     
+    func removeMusicFromPlaylist(_ playlistId: String, trackId: String) async throws {
+        let endpoint = "/playlists/\(playlistId)/tracks/\(trackId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
+    
+    // MARK: - Event Voting & Music Management
+    func voteForTrack(eventId: String, trackId: String, voteType: String) async throws {
+        let endpoint = "/events/\(eventId)/vote"
+        let body: [String: Any] = [
+            "trackId": trackId,
+            "type": voteType // "like" ou "dislike"
+        ]
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    func removeVote(eventId: String, trackId: String) async throws {
+        let endpoint = "/events/\(eventId)/vote/\(trackId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
+    
+    func suggestTrack(eventId: String, trackData: SuggestedTrackData) async throws -> Track {
+        let endpoint = "/events/\(eventId)/suggest-track"
+        // Convertir SuggestedTrackData en [String: Any]
+        let body: [String: Any] = [
+            "title": trackData.title,
+            "artist": trackData.artist,
+            "album": trackData.album ?? "",
+            "duration": trackData.duration,
+            "albumCoverUrl": trackData.albumCoverUrl ?? "",
+            "previewUrl": trackData.previewUrl ?? "",
+            "deezerId": trackData.deezerId ?? ""
+        ]
+        
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    func approveTrackSuggestion(eventId: String, suggestionId: String) async throws -> Track {
+        let endpoint = "/events/\(eventId)/suggestions/\(suggestionId)/approve"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func rejectTrackSuggestion(eventId: String, suggestionId: String) async throws {
+        let endpoint = "/events/\(eventId)/suggestions/\(suggestionId)/reject"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func getTrackSuggestions(eventId: String) async throws -> [TrackSuggestion] {
+        let endpoint = "/events/\(eventId)/suggestions"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
+    func getEventPlaylist(eventId: String) async throws -> EventPlaylist {
+        let endpoint = "/events/\(eventId)/playlist"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
+    func updateNowPlaying(eventId: String, trackId: String?) async throws -> NowPlayingResponse {
+        let endpoint = "/events/\(eventId)/now-playing"
+        let body: [String: Any] = [
+            "trackId": trackId ?? NSNull()
+        ]
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
+    }
+    
+    func skipTrack(eventId: String) async throws -> NowPlayingResponse {
+        let endpoint = "/events/\(eventId)/skip"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func updatePlaybackState(eventId: String, isPlaying: Bool, position: Double? = nil) async throws -> PlaybackStateResponse {
+        let endpoint = "/events/\(eventId)/playback"
+        var body: [String: Any] = [
+            "isPlaying": isPlaying
+        ]
+        if let position = position {
+            body["position"] = position
+        }
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
+    }
+    
+    func getEventVotes(eventId: String) async throws -> [VoteResult] {
+        let endpoint = "/events/\(eventId)/votes"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
+    func joinEvent(eventId: String) async throws -> EventParticipation {
+        let endpoint = "/events/\(eventId)/join"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func leaveEvent(eventId: String) async throws {
+        let endpoint = "/events/\(eventId)/leave"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func getEventParticipants(eventId: String) async throws -> [User] {
+        let endpoint = "/events/\(eventId)/participants"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
+    // MARK: - Event Chat
+    func sendEventMessage(eventId: String, message: String) async throws -> EventMessage {
+        let endpoint = "/events/\(eventId)/messages"
+        let body: [String: Any] = [
+            "content": message
+        ]
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    func getEventMessages(eventId: String, limit: Int = 50, offset: Int = 0) async throws -> [EventMessage] {
+        let endpoint = "/events/\(eventId)/messages?limit=\(limit)&offset=\(offset)"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
     // MARK: - Devices Endpoints
     func getDevices() async throws -> [Device] {
         let endpoint = "/devices/my-devices"
@@ -243,13 +357,14 @@ class APIService {
             let (data, response) = try await session.data(for: request)
             
             // 🔍 LOGS DE DEBUG : //
-            
-            if let jsonObject = try? JSONSerialization.jsonObject(with: data, options: []),
-               let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted]),
-               let prettyString = String(data: prettyData, encoding: .utf8) {
-                print("✅ Response body:\n\(prettyString)")
-            } else {
-                print("⚠️ Response body: No data")
+            if DebugManager.shared.isDebugEnabled {
+                if let jsonObject = try? JSONSerialization.jsonObject(with: data, options: []),
+                  let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted]),
+                  let prettyString = String(data: prettyData, encoding: .utf8) {
+                    print("✅ Response body:\n\(prettyString)")
+                } else {
+                    print("⚠️ Response body: No data")
+                }
             }
             // 🔍 LOGS DE DEBUG : \\
 
