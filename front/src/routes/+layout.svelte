@@ -4,6 +4,8 @@
 	import MusicPlayer from '$lib/components/MusicPlayer.svelte';
 	import { musicPlayerStore } from '$lib/stores/musicPlayer';
 	import { authStore } from '$lib/stores/auth';
+	import { globalAudioManager } from '$lib/stores/globalAudio';
+	import { page } from '$app/stores';
 	import '../app.css';
 	
 	let { children } = $props();
@@ -12,6 +14,21 @@
 	onMount(() => {
 		// Initialize the auth store at the app level
 		authStore.init();
+	});
+
+	// Watch for page changes and pause audio if navigating away from music pages
+	let currentRoute = $derived($page.route?.id || '');
+	$effect(() => {
+		const isLeavingMusicPage = !currentRoute.includes('/events/[id]') && !currentRoute.includes('/playlists/[id]');
+		if (isLeavingMusicPage) {
+			// Small delay to allow the new page to take control if it's also a music page
+			setTimeout(() => {
+				const currentAudio = globalAudioManager.getCurrentAudio();
+				if (currentAudio.element && !currentRoute.includes('/events/[id]') && !currentRoute.includes('/playlists/[id]')) {
+					globalAudioManager.pauseAll();
+				}
+			}, 100);
+		}
 	});
 </script>
 

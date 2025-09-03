@@ -181,18 +181,12 @@
 
 			isSocketConnected = true;
 			socketRetryAttempts = 0;
-			console.log(
-				"Socket connected for events page - listening for global event updates",
-			);
 		} catch (err) {
 			console.error("Failed to set up socket connection:", err);
 			isSocketConnected = false;
 
 			if (socketRetryAttempts < maxSocketRetries) {
 				socketRetryAttempts++;
-				console.log(
-					`Retrying socket connection (${socketRetryAttempts}/${maxSocketRetries}) in 3 seconds...`,
-				);
 				setTimeout(() => {
 					setupSocketConnection();
 				}, 3000);
@@ -215,31 +209,24 @@
 
 	function cleanupSocketConnection() {
 		if (isSocketConnected) {
-			// Leave the general events room
-			eventSocketService.emit("leave-events-room", {});
-
 			// Remove listeners
 			eventSocketService.off("event-created", handleEventCreated);
 			eventSocketService.off("event-updated", handleEventUpdated);
 			eventSocketService.off("event-deleted", handleEventDeleted);
 			isSocketConnected = false;
-			console.log("Cleaned up socket connection for events page");
 		}
 	}
 
 	// Socket event handlers for real-time updates
 	function handleEventCreated(data: { event: Event }) {
-		console.log("Event created:", data.event);
 		events = [...events, data.event];
 	}
 
 	function handleEventUpdated(data: { event: Event }) {
-		console.log("Event updated:", data.event);
 		events = events.map((e) => (e.id === data.event.id ? data.event : e));
 	}
 
 	function handleEventDeleted(data: { eventId: string }) {
-		console.log("Event deleted:", data.eventId);
 		events = events.filter((e) => e.id !== data.eventId);
 	}
 

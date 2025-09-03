@@ -282,10 +282,10 @@ export class EventService {
   async removeParticipant(eventId: string, userId: string): Promise<void> {
     const event = await this.findById(eventId, userId);
 
-    // Can't remove creator
+    /*// Can't remove creator
     if (event.creatorId === userId) {
       throw new BadRequestException('Event creator cannot leave the event');
-    }
+    }*/
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -411,7 +411,6 @@ export class EventService {
 
   // Voting System
   async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto)/* : Promise<TrackVoteSnapshot[]> */ {
-    console.log('Voting for track', voteDto, 'in event', eventId, 'by user', userId);
 
     const event = await this.findById(eventId, userId);
 
@@ -459,6 +458,36 @@ export class EventService {
     return;
   }
 
+  async removeVotesOfTrack(eventId: string, trackId: string): Promise<void> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    const votesToRemove = await this.voteRepository.find({
+      where: { eventId, trackId },
+      relations: ['user'],
+    });
+
+    // Remove all votes for the specified track
+    await this.voteRepository.delete({
+      eventId,
+      trackId,
+    });
+
+    // Get updated voting results after removal
+    // const results = await this.getVotingResults(eventId);
+
+    // Reorder playlist tracks based on updated votes
+    // await this.reorderPlaylistByVotes(eventId);
+
+    // Notify all participants about each removed vote (users regain their vote capacity)
+    for (const vote of votesToRemove) {
+      this.eventGateway.notifyVoteRemoved(eventId, vote);
+    }
+  }
+
   async removeVote(eventId: string, userId: string, trackId: string)/* : Promise<TrackVoteSnapshot[]> */ {
     const event = await this.findById(eventId, userId);
 
@@ -473,15 +502,15 @@ export class EventService {
     await this.voteRepository.remove(vote);
 
     // Get updated voting results
-    const results = await this.getVotingResults(eventId);
+    // const results = await this.getVotingResults(eventId);
 
-    /*  // Reorder playlist tracks based on votes
-    await this.reorderPlaylistByVotes(eventId);
+    // Reorder playlist tracks based on votes
+    // await this.reorderPlaylistByVotes(eventId);
 
     // Notify participants (without user-specific vote data)
-    this.eventGateway.notifyVoteRemoved(eventId, vote, results);
+    this.eventGateway.notifyVoteRemoved(eventId, vote);
 
-    return results; */
+    // return results;
   }
 
   /**
@@ -582,7 +611,6 @@ export class EventService {
       .where('vote.eventId = :eventId', { eventId })
       .getMany();
 
-      console.log('Votes fetched for event', votes);
       return votes;
 
     // Grouper par track
@@ -745,6 +773,25 @@ export class EventService {
 
     return nextTrack;
   } */
+
+  // Update current track for an event (for music synchronization)
+  async updateCurrentTrack(eventId: string, trackId: string): Promise<void> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    // Verify the track exists
+    const track = await this.trackRepository.findOne({ where: { id: trackId } });
+    if (!track) {
+      throw new NotFoundException('Track not found');
+    }
+
+    // Update current track and timestamp
+    event.currentTrackId = trackId;
+    event.currentTrackStartedAt = new Date();
+    await this.eventRepository.save(event);
+  }
 
   /** Récupère tous les events où l'utilisateur est créateur, participant, ou collaborateur de playlist, avec les admins */
   async getEventsUserCanInviteWithAdmins(userId: string): Promise<Event[]> {

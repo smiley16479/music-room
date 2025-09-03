@@ -13,6 +13,7 @@ export interface RoomContext {
   participants: string[];
   licenseType: 'open' | 'invited' | 'location-time';
   visibility: 'public' | 'private';
+  adminIds?: string[]; // For events, list of admin user IDs
 }
 
 export interface MusicPermissions {
@@ -32,14 +33,14 @@ class MusicPlayerService {
   async initializeForRoom(roomContext: RoomContext, playlist: PlaylistTrack[] = []): Promise<void> {
     this.currentRoom = roomContext;
     
-    console.log('MusicPlayerService: Initializing for room with playlist:', playlist.length, 'tracks');
+    // Set event context based on room type
+    musicPlayerStore.setInEvent(roomContext.type === 'event');
     
-    // Set initial playlist
+    // Set initial playlist (can be empty for live events)
+    musicPlayerStore.setPlaylist(playlist, playlist.length > 0 ? 0 : -1);
+    
+    // Only set the first track as current if there are tracks
     if (playlist.length > 0) {
-      musicPlayerStore.setPlaylist(playlist, 0);
-      console.log('MusicPlayerService: Playlist set in store');
-      
-      // Also set the first track as current but don't start playing
       const firstTrack = playlist[0];
       musicPlayerStore.setCurrentTrack({
         id: firstTrack.track.id,
@@ -50,19 +51,15 @@ class MusicPlayerService {
         albumCoverUrl: firstTrack.track.albumCoverUrl,
         previewUrl: firstTrack.track.previewUrl
       }, playlist, 0);
-      console.log('MusicPlayerService: First track set as current');
     }
 
     // Calculate permissions
     const permissions = await this.calculatePermissions(roomContext);
     musicPlayerStore.setCanControl(permissions.canControl);
     
-    console.log('MusicPlayerService: Permissions set - canControl:', permissions.canControl);
 
     // Connect to room socket
     await this.connectToRoom(roomContext);
-    
-    console.log('MusicPlayerService: Initialization complete');
   }
 
   /**
@@ -79,6 +76,11 @@ class MusicPlayerService {
       return { canControl: true, canVote: true, canAddTracks: true };
     }
 
+    // For events, check if user is an admin
+    if (roomContext.type === 'event' && roomContext.adminIds?.includes(user.id)) {
+      return { canControl: true, canVote: true, canAddTracks: true };
+    }
+
     // Check if user is in participants list for private rooms
     if (roomContext.visibility === 'private' && !roomContext.participants.includes(user.id)) {
       return { 
@@ -92,12 +94,16 @@ class MusicPlayerService {
     // Apply license restrictions
     switch (roomContext.licenseType) {
       case 'open':
+        // For events, only admins/owners can control music, but everyone can view
+        if (roomContext.type === 'event') {
+          return { canControl: false, canVote: true, canAddTracks: false };
+        }
         return { canControl: true, canVote: true, canAddTracks: true };
       
       case 'invited':
         const hasInvite = roomContext.participants.includes(user.id);
         return { 
-          canControl: hasInvite, 
+          canControl: roomContext.type === 'playlist' ? hasInvite : false, // Events restrict control to admins only
           canVote: hasInvite, 
           canAddTracks: hasInvite,
           reason: hasInvite ? undefined : 'Invitation required'
@@ -188,7 +194,6 @@ class MusicPlayerService {
       userId: string;
     }) => {
       // Handle track voting and reordering
-      console.log('Track voted:', data);
     });
 
     // Permission changes
@@ -209,13 +214,6 @@ class MusicPlayerService {
   async playTrack(trackIndex: number): Promise<void> {
     const playerState = get(musicPlayerStore);
     
-    console.log('MusicPlayerService playTrack called with index:', trackIndex);
-    console.log('Player state:', {
-      canControl: playerState.canControl,
-      playlistLength: playerState.playlist.length,
-      currentTrackIndex: playerState.currentTrackIndex
-    });
-    
     if (!playerState.canControl) {
       throw new Error('No permission to control music');
     }
@@ -226,12 +224,6 @@ class MusicPlayerService {
     }
 
     const track = playerState.playlist[trackIndex];
-    
-    console.log('Track data being played:', {
-      track: track.track,
-      hasPreviewUrl: !!track.track.previewUrl,
-      previewUrl: track.track.previewUrl
-    });
     
     // Set loading state when starting track selection
     musicPlayerStore.setLoading(true);
@@ -245,8 +237,6 @@ class MusicPlayerService {
       albumCoverUrl: track.track.albumCoverUrl,
       previewUrl: track.track.previewUrl
     }, playerState.playlist, trackIndex);
-
-    console.log('Current track set in store:', get(musicPlayerStore).currentTrack);
 
     // Notify other participants
     if (this.socketConnected && socketService.isConnected()) {

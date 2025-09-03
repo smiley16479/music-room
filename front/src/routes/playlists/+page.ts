@@ -8,7 +8,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
     // Only fetch public data during SSR for the "all" tab
     // For "mine" tab, we'll load the data client-side since we need user authentication
     if (tab === 'all') {
-      const playlists = await playlistsService.getPlaylists(undefined, undefined, fetch);
+      const playlists = await playlistsService.getPlaylists(undefined, undefined, undefined, fetch);
       return {
         playlists
       };

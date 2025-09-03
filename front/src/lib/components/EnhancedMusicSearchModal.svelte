@@ -34,16 +34,6 @@
 		currentEventTracks = eventTracks || [];
 	});
 
-	// Debug effect to log when data changes (can be removed in production)
-	$effect(() => {
-		if (playlist?.tracks) {
-			console.log('🎵 Modal playlist updated - track count:', playlist.tracks.length);
-		}
-		if (currentEventTracks.length > 0) {
-			console.log('🎵 Modal event tracks updated - track count:', currentEventTracks.length);
-		}
-	});
-
 	// Ensure we have either playlistId or eventId, but not both
 	if (!playlistId && !eventId) {
 		throw new Error('Either playlistId or eventId must be provided');

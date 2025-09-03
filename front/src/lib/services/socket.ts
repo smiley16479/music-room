@@ -65,8 +65,6 @@ class SocketService {
         return;
       }
 
-      console.log('🔐 Auth token found, connecting to socket...');
-
       // Connect to the playlists namespace
       this.socket = io(`${config.apiUrl}/playlists`, {
         auth: {
@@ -76,13 +74,7 @@ class SocketService {
       });
 
       this.socket.on('connect', () => {
-        console.log('✅ Connected to playlist socket');
         this.reconnectAttempts = 0;
-        
-        // Add a catch-all listener for debugging
-        this.socket!.onAny((event, ...args) => {
-          console.log(`🔍 Socket event received: ${event}`, args);
-        });
         
         resolve(this.socket!);
       });
@@ -115,7 +107,6 @@ class SocketService {
     }
 
     this.reconnectAttempts++;
-    console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
     
     setTimeout(() => {
       this.connect().catch(console.error);
@@ -134,14 +125,13 @@ class SocketService {
       throw new Error('Socket not connected');
     }
     
-    console.log(`🏠 Joining playlist room: ${playlistId}`);
     this.socket.emit('join-playlist', { playlistId });
     
     // Listen for join confirmation
     this.socket.once('joined-playlist', (data) => {
       console.log('✅ Successfully joined playlist room:', data);
     });
-    
+
     this.socket.once('error', (error) => {
       console.error('❌ Error joining playlist:', error);
     });
@@ -216,9 +206,7 @@ class SocketService {
       throw new Error('Socket not connected');
     }
     
-    console.log(`🎧 Setting up listener for event: ${event}`);
     this.socket.on(event, (...args) => {
-      console.log(`📨 Received socket event: ${event}`, args);
       callback(...args);
     });
   }

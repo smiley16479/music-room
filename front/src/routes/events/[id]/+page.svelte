@@ -7,6 +7,7 @@
 	import { config } from "$lib/config";
 	import {
 		getEvent,
+		joinEvent,
 		leaveEvent as leaveEventAPI,
 		voteForTrackInEvent,
 		removeVote,
@@ -34,10 +35,11 @@
 	import { deezerService, type DeezerTrack } from "$lib/services/deezer";
 	import { musicPlayerService } from "$lib/services/musicPlayer";
 	import { musicPlayerStore } from "$lib/stores/musicPlayer";
-	import MusicPlayer from "$lib/components/MusicPlayer.svelte";
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
 	import AddCollaboratorModal from "$lib/components/AddCollaboratorModal.svelte";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
+	import MusicPlayer from "$lib/components/MusicPlayer.svelte";
+	import { getAvatarColor, getAvatarLetter } from "$lib/utils/avatar";
 	import { flip } from 'svelte/animate';
 
 	interface PageData {
@@ -61,6 +63,7 @@
 	let isSocketConnected = $state(false);
 	let isPlaylistCollaborator = $state(false);
 	let hasEventAccess = $state(true); // Assume access initially, check when data loads
+	let isMusicPlayerInitialized = $state(false); // Track music player initialization
 
 	// Location-based voting state
 	let hasLocationPermission = $state(false);
@@ -80,10 +83,6 @@
 	let activeTab = $state<"search" | "top">("search");
 
 	// Music player state
-	let isPlaying = $state(false);
-	let currentPlayingTrack: string | null = $state(null);
-	let audioElement: HTMLAudioElement | null = null;
-	let isMusicPlayerInitialized = $state(false);
 	let showMusicSearchModal = $state(false);
 	let hasAttemptedPlaylistLoad = $state(false);
 
@@ -104,18 +103,23 @@
 		votingEndTime: undefined as string | undefined,
 		maxVotesPerUser: 1
 	});
-
+	// Vote button animation state tracking - local to this user only
+	let voteAnimations = $state(new Map<string, { upvote: string, downvote: string, remove: string }>());
+	// Local user vote state tracking - independent of WebSocket updates
+	let localUserVotes = $state(new Map<string, 'upvote' | 'downvote' | null>());
+	// Track original insertion order for consistent sorting when vote counts are equal
+	let originalTrackOrder = $state(new Map<string, number>());
 	let eventId = $derived($page.params.id);
+
 	// Remove isParticipating check since all users on the page are participants
 	let isCreator = $derived(user && event && event.creatorId === user.id);
 	let isAdmin = $derived(
 		user &&
-			event &&
-			(event.creatorId === user.id ||
-				event.admins?.some((admin: User) => admin.id === user.id)),
+		event &&
+		(event.creatorId === user.id ||
+		event.admins?.some((admin: User) => admin.id === user.id)),
 	);
-
-	// Event status and permissions
+	const canEdit = $derived(isAdmin);
 	let eventStatus = $derived(() => {
 		if (!event?.eventDate || !event?.eventEndDate) return "upcoming";
 		const now = new Date();
@@ -126,27 +130,19 @@
 		if (now < start) return "upcoming";
 		return "ended";
 	});
-
 	let numberOfVotesAvailable = $derived(() => {
 		if (!event) return 0;
+		// If maxVotesPerUser is 0, it means unlimited votes
+		if (event.maxVotesPerUser === 0) return Infinity;
 		// Count only votes that are not null (actual votes)
 		const activeVotes = Array.from(localUserVotes.values()).filter(vote => vote !== null).length;
 		return event.maxVotesPerUser - activeVotes;
 	});
-
 	let canVoteForTracks = $derived(() => {
 		if (!user || !event) return false;
 
 		// Can't vote on ended events
 		if (eventStatus() === "ended") return false;
-
-		// Can't vote on currently playing track
-		if (
-			currentPlayingTrack &&
-			event.playlist?.find((t) => t.id === currentPlayingTrack)
-		) {
-			return false;
-		}
 
 		// Check license restrictions
 		switch (event.licenseType) {
@@ -162,43 +158,6 @@
 				return false;
 		}
 	});
-
-	// Display playlist tracks sorted by vote count with currently playing track protection
-	function sortedPlaylistTracks() {
-		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
-
-		// Sort all tracks by vote count (highest first)
-		const sortedTracks = [...event.playlist].sort((a, b) => {
-			const aVotes = a.voteCount || a.votes || 0;
-			const bVotes = b.voteCount || b.votes || 0;
-			return bVotes - aVotes;
-		});
-
-		// If there's no current playing track, return sorted playlist
-		if (!currentPlayingTrack) {
-			return sortedTracks;
-		}
-
-		// Find the currently playing track
-		const currentTrackIndex = sortedTracks.findIndex(t => t.id === currentPlayingTrack);
-		
-		// If currently playing track is not found, return sorted playlist as-is
-		if (currentTrackIndex === -1) {
-			return sortedTracks;
-		}
-
-		// If currently playing track is already at position 0, return as-is
-		if (currentTrackIndex === 0) {
-			return sortedTracks;
-		}
-
-		// Move currently playing track to position 0, preserve vote-based order for the rest
-		const reorderedPlaylist = [...sortedTracks];
-		const [currentTrack] = reorderedPlaylist.splice(currentTrackIndex, 1);
-		return [currentTrack, ...reorderedPlaylist];
-	}
-
-	// Participants sorted by role
 	let sortedParticipants = $derived(() => {
 		if (!event?.participants) return [];
 
@@ -223,43 +182,266 @@
 			);
 		});
 	});
-
-	// Real-time connection status
 	let socketConnected = $state(false);
+	let hasLoadedVotingData = $state(false);
+	// Debounced search
+	let searchTimeout: NodeJS.Timeout;
+
+	// Reactive effect to load voting data when user becomes available
+	$effect(() => {
+		if (user && eventId && event && !hasLoadedVotingData && !votingResults.length) {
+			// Only load if we haven't loaded voting results yet
+			loadVotingDataForUser();
+		}
+	});
+
+	// Check playlist collaborator status when user or event changes
+	$effect(() => {
+		if (user && event?.playlistId) {
+			checkPlaylistCollaboratorStatus();
+		}
+	});
+
+	// Check event access when user or event changes
+	$effect(() => {
+		if (event) {
+			checkEventAccess();
+		}
+	});
+
+	// Check location permission when event becomes location-based
+	$effect(() => {
+		if (event && event.licenseType === 'location_based' && user) {
+			checkLocationPermission(false); // Fresh location check initially
+			startLocationWatching();
+		} else if (event && event.licenseType !== 'location_based') {
+			stopLocationWatching();
+			hasLocationPermission = true;
+			locationStatus = 'allowed';
+		}
+	});
+
+	// Load top tracks when modal opens
+	$effect(() => {
+		if (showAddTrackModal && topTracks.length === 0) {
+			loadTopTracks();
+		}
+	});
+
+	// Initialize page data when component loads or event ID changes
+	$effect(() => {
+		if (eventId && user) {
+			if (!event || event.id !== eventId) {
+				loadEvent();
+			}
+		}
+	});
+
+	$effect(() => {
+		if (searchQuery) {
+			clearTimeout(searchTimeout);
+			searchTimeout = setTimeout(searchTracks, 300);
+		} else {
+			searchResults = [];
+		}
+	});
+
+	// Handle page unload - leave event when user navigates away or closes tab
+	function handlePageUnload() {
+		if (user && eventId && event) {
+			const isParticipant = event.participants?.some(p => p.id === user.id);
+			if (isParticipant) {
+				// Use navigator.sendBeacon for reliable cleanup on page unload
+				const data = JSON.stringify({});
+				const url = `${config.apiUrl}/api/events/${eventId}/leave`;
+				const token = authService.getAuthToken();
+				
+				// Check if sendBeacon is available and working
+				if (typeof navigator !== 'undefined' && 'sendBeacon' in navigator) {
+					// Create a blob with the request data
+					const blob = new Blob([data], { type: 'application/json' });
+					
+					// Unfortunately, sendBeacon doesn't support custom headers, so we'll try fetch with keepalive
+					fetch(url, {
+						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${token}`,
+							'Content-Type': 'application/json',
+						},
+						body: data,
+						keepalive: true, // This ensures the request continues even if page is closing
+					}).catch(error => {
+						console.warn('Failed to leave event during page unload:', error);
+					});
+				}
+			}
+		}
+	}
+
+	// Initialize music player for the event
+	async function initializeMusicPlayer() {
+		if (!event || !user || isMusicPlayerInitialized) return;
+
+		try {
+			// Create local reference to satisfy TypeScript null checks
+			const currentEvent = event;
+			
+			// Set up music player store for event mode - always initialize, even with empty playlist
+			musicPlayerStore.setInEvent(true, currentEvent.id);
+			
+			// Set user permissions based on event role
+			const canControl = isCreator || isAdmin;
+			musicPlayerStore.setCanControl(!!canControl);
+
+			let playlistTracks = [] as any[];
+
+			// Convert event playlist to music player format if available
+			if (currentEvent.playlist && Array.isArray(currentEvent.playlist)) {
+				playlistTracks = currentEvent.playlist.map((track, index) => ({
+					id: track.id,
+					position: index,
+					addedAt: new Date().toISOString(),
+					createdAt: new Date().toISOString(),
+					playlistId: currentEvent.id,
+					trackId: track.id,
+					addedById: track.addedBy || currentEvent.creatorId || "",
+					track: {
+						id: track.id,
+						deezerId: track.deezerId || "",
+						title: track.title,
+						artist: track.artist,
+						album: track.album || "",
+						duration: track.duration || 30,
+						previewUrl: track.previewUrl || "",
+						albumCoverUrl: track.thumbnailUrl || "",
+						albumCoverSmallUrl: track.thumbnailUrl || "",
+						albumCoverMediumUrl: track.thumbnailUrl || "",
+						albumCoverBigUrl: track.thumbnailUrl || "",
+						deezerUrl: "",
+						genres: "",
+						releaseDate: "",
+						available: true,
+						createdAt: track.createdAt || new Date().toISOString(),
+						updatedAt: track.updatedAt || new Date().toISOString()
+					},
+					addedBy: {
+						id: track.addedBy || currentEvent.creatorId || "",
+						displayName: "User",
+						email: "",
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString()
+					}
+				}));
+			}
+
+			// Always set the playlist in the music player (even if empty)
+			musicPlayerStore.setPlaylist(playlistTracks, playlistTracks.length > 0 ? 0 : -1);
+
+			// If there's a current track, set it
+			if (currentEvent.currentTrack && playlistTracks.length > 0) {
+				const currentIndex = playlistTracks.findIndex(pt => pt.track.id === currentEvent.currentTrack?.id);
+				if (currentIndex >= 0) {
+					const currentTrack = currentEvent.currentTrack;
+					musicPlayerStore.setCurrentTrack(
+						{
+							id: currentTrack.id,
+							title: currentTrack.title,
+							artist: currentTrack.artist,
+							album: currentTrack.album || "",
+							duration: currentTrack.duration || 30,
+							albumCoverUrl: currentTrack.thumbnailUrl || "",
+							previewUrl: currentTrack.previewUrl || ""
+						},
+						playlistTracks,
+						currentIndex
+					);
+				}
+			} else if (playlistTracks.length > 0) {
+				// No current track but we have tracks - set the first track as current
+				// This ensures the music player shows track info instead of "waiting for tracks"
+				const firstTrack = playlistTracks[0];
+				musicPlayerStore.setCurrentTrack(
+					{
+						id: firstTrack.track.id,
+						title: firstTrack.track.title,
+						artist: firstTrack.track.artist,
+						album: firstTrack.track.album || "",
+						duration: firstTrack.track.duration || 30,
+						albumCoverUrl: firstTrack.track.albumCoverUrl || "",
+						previewUrl: firstTrack.track.previewUrl || ""
+					},
+					playlistTracks,
+					0
+				);
+			}
+
+			// Connect to event socket if not already connected
+			if (eventId) {
+				try {
+					await eventSocketService.connect();
+					eventSocketService.joinEvent(eventId);
+				} catch (error) {
+					console.error('Failed to connect to event socket:', error);
+				}
+			}
+
+			isMusicPlayerInitialized = true;
+			console.log('Music player initialized for event:', event.id);
+		} catch (error) {
+			console.error('Failed to initialize music player:', error);
+		}
+	}
+
 
 	// Initialize event data and socket connections
 	onMount(async () => {
 		// Load initial event data from props or fetch it
 		if (data?.event) {
+			// Deduplicate participants from initial load to prevent issues
+			const uniqueParticipants = new Map();
+			(data.event.participants || []).forEach((participant: any) => {
+				const userId = participant.id || participant.userId;
+				if (userId) {
+					uniqueParticipants.set(userId, participant);
+				}
+			});
+			
 			event = {
 				...data.event,
 				// Ensure playlist is always an array
 				playlist: Array.isArray(data.event.playlist) ? data.event.playlist : [],
-				// Preserve participants from initial data - socket events will update them
-				participants: Array.isArray(data.event.participants) ? data.event.participants : [],
+				// Use deduplicated participants
+				participants: Array.from(uniqueParticipants.values()),
 				// Ensure allowsVoting defaults to true
 				allowsVoting: data.event.allowsVoting !== false,
 			};
+			
+			// Initialize original track order mapping when playlist is first loaded
+			if (event.playlist && Array.isArray(event.playlist)) {
+				event.playlist.forEach((track, index) => {
+					originalTrackOrder.set(track.id, index);
+				});
+			}
+			
 			initializeEditForm();
 			
 			// Always try to load voting results if we have an eventId and user
 			if (eventId && user) {
 				try {
-					votingResults = await getVotingResults(eventId);
+					const rawVotingResults = await getVotingResults(eventId);
 					hasLoadedVotingData = true; // Mark as loaded to prevent reactive effect from triggering
 					
-					// Initialize local user votes from voting results
-					localUserVotes = new Map();
-					votingResults.forEach(result => {
-						if (result.userVote) {
-							localUserVotes.set(result.track.id, result.userVote.type);
-						}
-					});
+					// Process raw voting results to calculate vote counts per track
+					const { processedResults, userVotesMap } = processRawVotingResults(rawVotingResults);
+					votingResults = processedResults;
+					
+					// Initialize local user votes from processed results
+					localUserVotes = userVotesMap;
 					
 					// Update playlist tracks with vote counts from voting results
 					if (event.playlist && Array.isArray(event.playlist)) {
 						event.playlist = event.playlist.map((track) => {
-							const result = votingResults.find((r) => r.track.id === track.id);
+							const result = votingResults.find((r) => r.track?.id === track.id);
 							const newVoteCount = result ? result.voteCount : 0;
 							return {
 								...track,
@@ -305,10 +487,458 @@
 			await checkLocationPermission();
 			startLocationWatching();
 		}
+
+		// Add page unload event listeners to automatically leave event
+		window.addEventListener('beforeunload', handlePageUnload);
+		document.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'hidden') {
+				handlePageUnload();
+			}
+		});
 	});
 
-	// Track if we've already loaded voting data to prevent infinite loops
-	let hasLoadedVotingData = $state(false);
+	onDestroy(() => {
+		// Remove page unload event listeners
+		window.removeEventListener('beforeunload', handlePageUnload);
+		document.removeEventListener('visibilitychange', handlePageUnload);
+
+		// Cleanup refreshVotingResults timeout
+		if (refreshVotingResultsTimeout) {
+			clearTimeout(refreshVotingResultsTimeout);
+			refreshVotingResultsTimeout = null;
+		}
+
+		// Attempt to leave event (will be handled by page unload if user is navigating away)
+		if (user && eventId && event) {
+			const isParticipant = event.participants?.some(p => p.id === user.id);
+			if (isParticipant) {
+				// Try to leave gracefully, but don't wait for it
+				leaveEventAPI(eventId).catch(error => {
+					console.warn('Failed to leave event during component destroy:', error);
+				});
+			}
+		}
+
+		// Cleanup WebSocket connection
+		if (eventId && isSocketConnected) {
+			cleanupSocketConnection(eventId);
+		}
+
+		// Cleanup music player
+		if (isMusicPlayerInitialized) {
+			musicPlayerStore.setInEvent(false);
+			musicPlayerStore.setCanControl(false);
+			musicPlayerService.leaveRoom();
+			isMusicPlayerInitialized = false;
+		}
+
+		// Cleanup location watching
+		stopLocationWatching();
+	});
+
+	// Display playlist tracks sorted by vote count with currently playing track protection
+	function sortedPlaylistTracks() {
+		if (!event?.playlist || !Array.isArray(event.playlist)) return [];
+
+		// Separate tracks into different categories
+		const { currentTrack, votableTracks } = categorizeEventTracks();
+
+		// Sort votable tracks by vote count (highest first), then by creation time for consistent tiebreaker
+		const sortedVotableTracks = votableTracks.sort((a, b) => {
+			const aVotes = a.voteCount || a.votes || 0;
+			const bVotes = b.voteCount || b.votes || 0;
+			
+			// Primary sort: by vote count (descending)
+			if (bVotes !== aVotes) {
+				return bVotes - aVotes;
+			}
+			
+			// Secondary sort: by creation time (ascending) - earlier tracks appear first when vote counts are equal
+			// Fall back to original insertion order if no creation time available
+			const aCreatedAt = new Date(a.createdAt || 0).getTime();
+			const bCreatedAt = new Date(b.createdAt || 0).getTime();
+			
+			if (aCreatedAt && bCreatedAt && aCreatedAt !== bCreatedAt) {
+				return aCreatedAt - bCreatedAt;
+			}
+			
+			// Final fallback: use original insertion order
+			const aOriginalIndex = originalTrackOrder.get(a.id) ?? 999999;
+			const bOriginalIndex = originalTrackOrder.get(b.id) ?? 999999;
+			return aOriginalIndex - bOriginalIndex;
+		});
+
+		const orderedTracks = [];
+		
+		if (currentTrack) {
+			orderedTracks.push(currentTrack);
+		}
+		
+		orderedTracks.push(...sortedVotableTracks);
+
+		return orderedTracks;
+	}
+
+	// Helper function to categorize tracks based on their status
+	function categorizeEventTracks() {
+		if (!event?.playlist || !Array.isArray(event.playlist)) {
+			return { currentTrack: null as Track | null, votableTracks: [] as Track[] };
+		}
+
+		let currentTrack: Track | null = null;
+		const votableTracks: Track[] = [];
+
+		// Find current playing track from music player store
+		const playerState = $musicPlayerStore;
+		const currentTrackId = playerState.currentTrack?.id;
+
+		event.playlist.forEach((track) => {
+			if (track.id === currentTrackId) {
+				currentTrack = track;
+			} else {
+				votableTracks.push(track);
+			}
+		});
+
+		return { currentTrack, votableTracks };
+	}
+
+	// Helper function to check if a track can be voted on
+	function canVoteOnTrack(trackId: string): boolean {
+		const { currentTrack } = categorizeEventTracks();
+		
+		// Can't vote on currently playing track
+		if (currentTrack && currentTrack.id === trackId) {
+			return false;
+		}
+
+		return canVoteForTracks();
+	}
+
+	// Helper function to get track status for UI styling
+	function getTrackStatus(track: any, index: number): 'current' | 'votable' {
+		const { currentTrack } = categorizeEventTracks();
+		if (currentTrack && currentTrack.id === track.id) {
+			return 'current';
+		}
+		
+		return 'votable';
+	}
+
+	// Helper function to get track container classes based on status
+	function getTrackContainerClass(track: any, index: number): string {
+		const status = getTrackStatus(track, index);
+		
+		switch (status) {
+			case 'current':
+				return 'border-secondary bg-secondary/5 ring-2 ring-secondary/20';
+			case 'votable':
+			default:
+				return 'border-gray-200 hover:bg-gray-50';
+		}
+	}
+
+	// Helper function to get vote count badge classes
+	function getVoteCountBadgeClass(track: any, index: number): string {
+		const status = getTrackStatus(track, index);
+		
+		switch (status) {
+			case 'current':
+				return 'bg-secondary text-white';
+			case 'votable':
+			default:
+				return 'bg-gray-200 text-gray-600';
+		}
+	}
+
+
+	// Helper function to process raw voting results from backend
+	function processRawVotingResults(rawVotes: any[]) {
+		
+		if (!rawVotes || !Array.isArray(rawVotes)) {
+			return { processedResults: [], userVotesMap: new Map() };
+		}
+
+		// Group votes by track ID
+		const trackVotesMap = new Map<string, { track: any, votes: any[], upvotes: number, downvotes: number }>();
+		const userVotesMap = new Map<string, 'upvote' | 'downvote' | null>();
+		
+		rawVotes.forEach(vote => {
+			if (!vote.trackId || !vote.track) return;
+			
+			// Track user's votes for this track
+			if (vote.userId === user?.id) {
+				userVotesMap.set(vote.trackId, vote.type);
+			}
+			
+			// Group votes by track
+			if (!trackVotesMap.has(vote.trackId)) {
+				trackVotesMap.set(vote.trackId, {
+					track: vote.track,
+					votes: [],
+					upvotes: 0,
+					downvotes: 0
+				});
+			}
+			
+			const trackData = trackVotesMap.get(vote.trackId)!;
+			trackData.votes.push(vote);
+			
+			if (vote.type === 'upvote') {
+				trackData.upvotes++;
+			} else if (vote.type === 'downvote') {
+				trackData.downvotes++;
+			}
+		});
+		
+		// Convert to VoteResult format
+		const processedResults: VoteResult[] = [];
+		trackVotesMap.forEach((trackData, trackId) => {
+			const userVote = rawVotes.find(vote => vote.trackId === trackId && vote.userId === user?.id);
+			
+			processedResults.push({
+				track: trackData.track,
+				voteCount: trackData.upvotes - trackData.downvotes, // Net vote count
+				userVote: userVote as Vote | undefined, // Cast to proper type
+				position: 0 // Will be set later when sorting
+			});
+		});
+		
+		// Sort by vote count and assign positions with consistent secondary sorting
+		processedResults.sort((a, b) => {
+			// Primary sort: by vote count (descending)
+			if (b.voteCount !== a.voteCount) {
+				return b.voteCount - a.voteCount;
+			}
+			// Secondary sort: by creation time (ascending) - earlier tracks appear first when vote counts are equal
+			const aCreatedAt = new Date(a.track?.createdAt || 0).getTime();
+			const bCreatedAt = new Date(b.track?.createdAt || 0).getTime();
+			
+			if (aCreatedAt && bCreatedAt && aCreatedAt !== bCreatedAt) {
+				return aCreatedAt - bCreatedAt;
+			}
+			
+			// Final fallback: by original insertion order (ascending) - first added tracks appear first when vote counts are equal
+			const aOriginalIndex = originalTrackOrder.get(a.track?.id || '') ?? 999999;
+			const bOriginalIndex = originalTrackOrder.get(b.track?.id || '') ?? 999999;
+			return aOriginalIndex - bOriginalIndex;
+		});
+		processedResults.forEach((result, index) => {
+			result.position = index + 1;
+		});
+		
+		return { processedResults, userVotesMap };
+	}
+
+	// Helper function to update local vote counts and reorder tracks
+	function updateLocalVoteCount(trackId: string, voteType: 'upvote' | 'downvote' | null, previousVoteType: 'upvote' | 'downvote' | null = null) {
+		if (!event?.playlist || !Array.isArray(event.playlist)) return;
+
+		// Update the specific track's vote count
+		event.playlist = event.playlist.map((track) => {
+			if (track.id === trackId) {
+				let currentVoteCount = track.voteCount || 0;
+
+				// Remove previous vote if exists
+				if (previousVoteType === 'upvote') {
+					currentVoteCount--;
+				} else if (previousVoteType === 'downvote') {
+					currentVoteCount++;
+				}
+
+				// Add new vote
+				if (voteType === 'upvote') {
+					currentVoteCount++;
+				} else if (voteType === 'downvote') {
+					currentVoteCount--;
+				}
+
+				return {
+					...track,
+					voteCount: currentVoteCount,
+					votes: currentVoteCount,
+				};
+			}
+			return track;
+		});
+
+		// Force reactivity update
+		event = { ...event };
+
+		// Update music player playlist with vote-based ordering for live events
+		if (eventStatus() === "live" && isMusicPlayerInitialized) {
+			updateMusicPlayerPlaylistOrder();
+		}
+
+		// Update votingResults as well for consistency
+		if (votingResults && Array.isArray(votingResults)) {
+			votingResults = votingResults.map((result) => {
+				if (result.track?.id === trackId) {
+					let currentVoteCount = result.voteCount;
+
+					// Remove previous vote if exists
+					if (previousVoteType === 'upvote') {
+						currentVoteCount--;
+					} else if (previousVoteType === 'downvote') {
+						currentVoteCount++;
+					}
+
+					// Add new vote
+					if (voteType === 'upvote') {
+						currentVoteCount++;
+					} else if (voteType === 'downvote') {
+						currentVoteCount--;
+					}
+
+					return {
+						...result,
+						voteCount: currentVoteCount,
+						userVote: voteType ? { 
+							id: `temp-${trackId}-${user?.id}`,
+							eventId: eventId || '',
+							userId: user?.id || '',
+							trackId: trackId,
+							type: voteType,
+							weight: 1,
+							createdAt: new Date().toISOString()
+						} as Vote : undefined,
+					};
+				}
+				return result;
+			});
+
+			// Re-sort votingResults by vote count with consistent secondary sorting
+			votingResults.sort((a, b) => {
+				// Primary sort: by vote count (descending)
+				if (b.voteCount !== a.voteCount) {
+					return b.voteCount - a.voteCount;
+				}
+				// Secondary sort: by creation time (ascending) - first added tracks appear first when vote counts are equal
+				const aCreatedAt = new Date(a.track?.createdAt || 0).getTime();
+				const bCreatedAt = new Date(b.track?.createdAt || 0).getTime();
+				return aCreatedAt - bCreatedAt;
+			});
+			
+			// Update positions
+			votingResults.forEach((result, index) => {
+				result.position = index + 1;
+			});
+		}
+	}
+
+	// Helper function to update track vote count from socket events (votes from other users)
+	function updateTrackVoteCountFromSocket(trackId: string, voteType: 'upvote' | 'downvote' | null, weight: number) {
+		if (!event?.playlist || !Array.isArray(event.playlist)) return;
+
+		// Update the specific track's vote count
+		event.playlist = event.playlist.map((track) => {
+			if (track.id === trackId) {
+				let currentVoteCount = track.voteCount || 0;
+
+				// Apply vote change based on type and weight
+				if (voteType === 'upvote') {
+					currentVoteCount += weight;
+				} else if (voteType === 'downvote') {
+					currentVoteCount -= weight;
+				} else {
+					// For vote removal (voteType is null), weight is negative
+					currentVoteCount += weight;
+				}
+
+				return {
+					...track,
+					voteCount: currentVoteCount,
+					votes: currentVoteCount,
+				};
+			}
+			return track;
+		});
+
+		// Force reactivity update
+		event = { ...event };
+
+		// Update votingResults as well for consistency
+		if (votingResults && Array.isArray(votingResults)) {
+			votingResults = votingResults.map((result) => {
+				if (result.track?.id === trackId) {
+					let currentVoteCount = result.voteCount;
+
+					// Apply vote change based on type and weight
+					if (voteType === 'upvote') {
+						currentVoteCount += weight;
+					} else if (voteType === 'downvote') {
+						currentVoteCount -= weight;
+					} else {
+						// For vote removal (voteType is null), weight is negative
+						currentVoteCount += weight;
+					}
+
+					return {
+						...result,
+						voteCount: currentVoteCount,
+					};
+				}
+				return result;
+			});
+
+			// Re-sort votingResults by vote count with consistent secondary sorting
+			votingResults.sort((a, b) => {
+				// Primary sort: by vote count (descending)
+				if (b.voteCount !== a.voteCount) {
+					return b.voteCount - a.voteCount;
+				}
+				// Secondary sort: by creation time (ascending) - earlier tracks appear first when vote counts are equal
+				const aCreatedAt = new Date(a.track?.createdAt || 0).getTime();
+				const bCreatedAt = new Date(b.track?.createdAt || 0).getTime();
+				
+				if (aCreatedAt && bCreatedAt && aCreatedAt !== bCreatedAt) {
+					return aCreatedAt - bCreatedAt;
+				}
+				
+				// Final fallback: by original insertion order (ascending) - first added tracks appear first when vote counts are equal
+				const aOriginalIndex = originalTrackOrder.get(a.track?.id || '') ?? 999999;
+				const bOriginalIndex = originalTrackOrder.get(b.track?.id || '') ?? 999999;
+				return aOriginalIndex - bOriginalIndex;
+			});
+			
+			// Update positions
+			votingResults.forEach((result, index) => {
+				result.position = index + 1;
+			});
+		}
+	}
+
+	// Helper function to reorder tracks based on current vote counts
+	function reorderTracksBasedOnVotes() {
+		if (!event?.playlist || !Array.isArray(event.playlist)) return;
+
+		// Sort playlist tracks by vote count (highest first), then by creation time for consistent ordering
+		event.playlist.sort((a, b) => {
+			const aVotes = a.voteCount || 0;
+			const bVotes = b.voteCount || 0;
+			
+			// Primary sort: by vote count (descending)
+			if (bVotes !== aVotes) {
+				return bVotes - aVotes;
+			}
+			
+			// Secondary sort: by creation time (ascending) - earlier tracks appear first when vote counts are equal
+			const aCreatedAt = new Date(a.createdAt || 0).getTime();
+			const bCreatedAt = new Date(b.createdAt || 0).getTime();
+			
+			if (aCreatedAt && bCreatedAt && aCreatedAt !== bCreatedAt) {
+				return aCreatedAt - bCreatedAt;
+			}
+			
+			// Final fallback: by original insertion order (ascending) - first added tracks appear first when vote counts are equal
+			const aOriginalIndex = originalTrackOrder.get(a.id) ?? 999999;
+			const bOriginalIndex = originalTrackOrder.get(b.id) ?? 999999;
+			return aOriginalIndex - bOriginalIndex;
+		});
+		// Force reactivity update
+		event = { ...event };
+	}
+
 
 	// Check if user is a playlist collaborator
 	async function checkPlaylistCollaboratorStatus() {
@@ -359,59 +989,81 @@
 		}
 	}
 
-	// Reactive effect to load voting data when user becomes available
-	$effect(() => {
-		if (user && eventId && event && !hasLoadedVotingData && !votingResults.length) {
-			// Only load if we haven't loaded voting results yet
-			loadVotingDataForUser();
-		}
-	});
+	// Debounce variable to prevent multiple rapid calls to refreshVotingResults
+	let refreshVotingResultsTimeout: NodeJS.Timeout | null = null;
 
-	// Check playlist collaborator status when user or event changes
-	$effect(() => {
-		if (user && event?.playlistId) {
-			checkPlaylistCollaboratorStatus();
+	// Function to refresh voting results and update UI (used when participant leaves and votes are removed)
+	async function refreshVotingResults() {
+		if (!user || !eventId) return;
+		
+		// Debounce the function to prevent multiple rapid calls from duplicate socket events
+		if (refreshVotingResultsTimeout) {
+			clearTimeout(refreshVotingResultsTimeout);
 		}
-	});
-
-	// Check event access when user or event changes
-	$effect(() => {
-		if (event) {
-			checkEventAccess();
-		}
-	});
-
-	// Check location permission when event becomes location-based
-	$effect(() => {
-		if (event && event.licenseType === 'location_based' && user) {
-			checkLocationPermission(false); // Fresh location check initially
-			startLocationWatching();
-		} else if (event && event.licenseType !== 'location_based') {
-			stopLocationWatching();
-			hasLocationPermission = true;
-			locationStatus = 'allowed';
-		}
-	});
+		
+		refreshVotingResultsTimeout = setTimeout(async () => {
+			try {
+				console.log('Refreshing voting results after participant left...');
+				const rawVotingResults = await getVotingResults(eventId);
+				
+				// Process raw voting results to calculate vote counts per track
+				const { processedResults, userVotesMap } = processRawVotingResults(rawVotingResults);
+				votingResults = processedResults;
+				
+				// Update local user votes from processed results
+				localUserVotes = userVotesMap;
+				
+				// Update playlist tracks with vote counts from voting results
+				if (event?.playlist && Array.isArray(event.playlist)) {
+					event.playlist = event.playlist.map((track) => {
+						const result = votingResults.find((r) => r.track?.id === track.id);
+						const newVoteCount = result ? result.voteCount : 0;
+						return {
+							...track,
+							voteCount: newVoteCount,
+							votes: newVoteCount,
+						};
+					});
+					
+					// Reorder tracks based on updated vote counts after participant left
+					reorderTracksBasedOnVotes();
+					
+					// Force reactivity update
+					event = { ...event };
+					
+					// Update music player playlist with vote-based ordering for live events
+					if (eventStatus() === "live" && isMusicPlayerInitialized) {
+						updateMusicPlayerPlaylistOrder();
+					}
+				}
+				
+				console.log('Voting results refreshed successfully');
+			} catch (err) {
+				console.error('Failed to refresh voting results after participant left:', err);
+			} finally {
+				refreshVotingResultsTimeout = null;
+			}
+		}, 100); // 100ms debounce delay
+	}
 
 	async function loadVotingDataForUser() {
 		if (!user || !eventId || hasLoadedVotingData) return;
 		
 		try {
-			votingResults = await getVotingResults(eventId);
+			const rawVotingResults = await getVotingResults(eventId);
 			hasLoadedVotingData = true; // Mark as loaded to prevent re-triggering
 			
-			// Initialize local user votes from voting results
-			localUserVotes = new Map();
-			votingResults.forEach(result => {
-				if (result.userVote) {
-					localUserVotes.set(result.track.id, result.userVote.type);
-				}
-			});
+			// Process raw voting results to calculate vote counts per track
+			const { processedResults, userVotesMap } = processRawVotingResults(rawVotingResults);
+			votingResults = processedResults;
+			
+			// Initialize local user votes from processed results
+			localUserVotes = userVotesMap;
 			
 			// Update playlist tracks with vote counts from voting results
 			if (event?.playlist && Array.isArray(event.playlist)) {
 				event.playlist = event.playlist.map((track) => {
-					const result = votingResults.find((r) => r.track.id === track.id);
+					const result = votingResults.find((r) => r.track?.id === track.id);
 					const newVoteCount = result ? result.voteCount : 0;
 					return {
 						...track,
@@ -428,29 +1080,23 @@
 		}
 	}
 
-	onDestroy(() => {
-		if (eventId && isSocketConnected) {
-			cleanupSocketConnection(eventId);
-		}
 
-		// Clean up audio
-		if (audioElement) {
-			audioElement.pause();
-			audioElement = null;
-		}
-
-		// Cleanup music player
-		if (isMusicPlayerInitialized) {
-			musicPlayerService.leaveRoom();
-			isMusicPlayerInitialized = false;
-		}
-
-		// Cleanup location watching
-		stopLocationWatching();
-	});
-
-	async function setupSocketConnection(playlistId: string) {
+	async function setupSocketConnection(eventId: string) {
 		try {
+			// First, join the event via HTTP API to ensure user is a participant in the database
+			if (user && event) {
+				try {
+					// Only join if user is not already a participant
+					const isParticipant = event.participants?.some(p => p.id === user.id);
+					if (!isParticipant) {
+						await joinEvent(eventId);
+					}
+				} catch (error) {
+					// If joining fails, still try to connect to socket for read-only access
+					console.warn(`Failed to join event as participant: ${error}`);
+				}
+			}
+
 			if (!eventSocketService.isConnected()) {
 				await eventSocketService.connect();
 			}
@@ -480,12 +1126,14 @@
 		// Fix: Backend sends 'vote-updated' not 'vote-added'
 		eventSocketService.on("vote-updated", handleVoteUpdated);
 		eventSocketService.on("vote-removed", handleVoteRemoved);
+		eventSocketService.on("vote-optimistic-update", handleVoteOptimisticUpdate);
 		eventSocketService.on("user-joined", handleParticipantAdded);
 		eventSocketService.on("user-left", handleParticipantRemoved);
 		eventSocketService.on("joined-event", handleJoinedEvent);
 		eventSocketService.on("left-event", handleLeavedEvent);
 		eventSocketService.on("admin-added", handleAdminAdded);
 		eventSocketService.on("admin-removed", handleAdminRemoved);
+		eventSocketService.on("music-track-changed", handleMusicTrackChanged);
 		eventSocketService.on(
 			"current-participants",
 			handleCurrentParticipants,
@@ -509,12 +1157,14 @@
 			// Fix: Clean up vote-updated listener
 			eventSocketService.off("vote-updated", handleVoteUpdated);
 			eventSocketService.off("vote-removed", handleVoteRemoved);
+			eventSocketService.off("vote-optimistic-update", handleVoteOptimisticUpdate);
 			eventSocketService.off("user-joined", handleParticipantAdded);
 			eventSocketService.off("user-left", handleParticipantRemoved);
 			eventSocketService.off("joined-event", handleJoinedEvent);
 			eventSocketService.off("left-event", handleLeavedEvent);
 			eventSocketService.off("admin-added", handleAdminAdded);
 			eventSocketService.off("admin-removed", handleAdminRemoved);
+			eventSocketService.off("music-track-changed", handleMusicTrackChanged);
 			eventSocketService.off(
 				"current-participants",
 				handleCurrentParticipants,
@@ -606,6 +1256,9 @@
 				event.playlist = [];
 			}
 			
+			// Check if this is the first track being added to an empty playlist
+			const wasPlaylistEmpty = event.playlist.length === 0;
+			
 			// Ensure the track has proper vote count properties initialized
 			const trackWithVotes = {
 				...data.track,
@@ -613,9 +1266,14 @@
 				votes: data.track.voteCount || data.track.votes || 0,
 			};
 			
-			event.playlist.push(trackWithVotes);
-			
-			// Clear any persisting visual states for this track when it's re-added
+		event.playlist.push(trackWithVotes);
+		
+		// Add new track to original order tracking only if it doesn't already exist
+		// This prevents re-added tracks from getting a new position and messing up the sort order
+		if (!originalTrackOrder.has(data.track.id)) {
+			const nextIndex = originalTrackOrder.size;
+			originalTrackOrder.set(data.track.id, nextIndex);
+		}			// Clear any persisting visual states for this track when it's re-added
 			if (data.track.id) {
 				voteAnimations.delete(data.track.id);
 				voteAnimations = new Map(voteAnimations);
@@ -624,13 +1282,110 @@
 				localUserVotes.delete(data.track.id);
 				localUserVotes = new Map(localUserVotes);
 			}
+			
+			// Always update the music player playlist when tracks are added, regardless of event status
+			if (isMusicPlayerInitialized) {
+				// Convert all event tracks to the format expected by music player
+				const playlistTracks = event.playlist.map((track: any, index: number) => ({
+					id: track.id || '',
+					trackId: track.id || '',
+					position: index + 1,
+					addedAt: track.createdAt || new Date().toISOString(),
+					createdAt: track.createdAt || new Date().toISOString(),
+					playlistId: event?.playlistId || '',
+					addedById: track.addedBy || event?.creatorId || "",
+					track: {
+						id: track.id || '',
+						deezerId: track.deezerId || '',
+						title: track.title || '',
+						artist: track.artist || '',
+						album: track.album || '',
+						albumCoverUrl: track.thumbnailUrl || "",
+						albumCoverSmallUrl: track.thumbnailUrl || "",
+						albumCoverMediumUrl: track.thumbnailUrl || "",
+						albumCoverBigUrl: track.thumbnailUrl || "",
+						previewUrl: track.previewUrl || "",
+						deezerUrl: "",
+						available: true,
+						duration: track.duration || 30,
+						createdAt: track.createdAt || new Date().toISOString(),
+						updatedAt: track.updatedAt || new Date().toISOString(),
+					},
+					addedBy: {
+						id: track.addedBy || event?.creatorId || "",
+						displayName: "Event Admin"
+					},
+				}));
+				
+				// Update the music player store with the current playlist
+				// For live events, use vote-based ordering; otherwise use regular order
+				if (eventStatus() === "live") {
+					updateMusicPlayerPlaylistOrder();
+				} else {
+					// For non-live events, just update with current track order
+					musicPlayerStore.setPlaylist(playlistTracks, playerState.currentTrackIndex);
+				}
+				
+				// Auto-start playback in several scenarios:
+				// 1. Playlist was empty before this track was added
+				// 2. Player has no current track but has tracks available (recovery scenario)
+				// 3. Player is not currently playing
+				if ((wasPlaylistEmpty || !playerState.currentTrack) && 
+					!playerState.isPlaying &&
+					playlistTracks.length > 0) {
+					
+					// Start playing the first available track
+					setTimeout(async () => {
+						try {
+							// Use the first track with a valid preview URL
+							let trackToPlay = playlistTracks[0];
+							let trackIndex = 0;
+							
+							// Try to find a track with a preview URL
+							for (let i = 0; i < playlistTracks.length; i++) {
+								if (playlistTracks[i].track.previewUrl) {
+									trackToPlay = playlistTracks[i];
+									trackIndex = i;
+									break;
+								}
+							}
+							
+							// Set and start playing the track
+							musicPlayerStore.setCurrentTrack({
+								id: trackToPlay.track.id,
+								title: trackToPlay.track.title,
+								artist: trackToPlay.track.artist,
+								album: trackToPlay.track.album,
+								duration: trackToPlay.track.duration,
+								albumCoverUrl: trackToPlay.track.albumCoverUrl,
+								previewUrl: trackToPlay.track.previewUrl
+							}, playlistTracks, trackIndex);
+							
+							// Start playback if the track has a preview URL
+							if (trackToPlay.track.previewUrl) {
+								musicPlayerStore.play();
+							}
+							
+						} catch (error) {
+							console.error('Failed to auto-start playback for track:', error);
+						}
+					}, 100); // Small delay to ensure DOM updates
+				}
+			}
 		}
 	}
+
 	function handleTrackRemoved(data: { trackId: string }) {
 		if (event && event.playlist && Array.isArray(event.playlist)) {
+			// Check if the removed track was the currently playing track
+			const wasCurrentTrack = playerState.currentTrack?.id === data.trackId;
+			
 			event.playlist = event.playlist.filter(
 				(t) => t.id !== data.trackId,
 			);
+			
+			// Remove from original track order mapping
+			originalTrackOrder.delete(data.trackId);
 			
 			// Remove the user's vote for this track if they had voted for it
 			// This ensures the vote counter updates correctly when tracks are removed
@@ -638,137 +1393,277 @@
 				localUserVotes.delete(data.trackId);
 				localUserVotes = new Map(localUserVotes);
 			}
+			
+			// Always update the music player playlist when in a live event
+			if (eventStatus() === "live" && isMusicPlayerInitialized) {
+				if (event.playlist.length === 0) {
+					// No more tracks, stop playback and clear playlist
+					musicPlayerStore.pause();
+					musicPlayerStore.setPlaylist([], -1);
+				} else {
+					// Update the music player playlist with remaining tracks
+					const playlistTracks = event.playlist.map((track: any, index: number) => ({
+						id: track.id || '',
+						trackId: track.id || '',
+						position: index + 1,
+						addedAt: track.createdAt || new Date().toISOString(),
+						createdAt: track.createdAt || new Date().toISOString(),
+						playlistId: event?.playlistId || '',
+						addedById: track.addedBy || event?.creatorId || "",
+						track: {
+							id: track.id || '',
+							deezerId: track.deezerId || '',
+							title: track.title || '',
+							artist: track.artist || '',
+							album: track.album || '',
+							albumCoverUrl: track.thumbnailUrl || track.albumCoverUrl || "",
+							albumCoverSmallUrl: track.thumbnailUrl || track.albumCoverUrl || "",
+							albumCoverMediumUrl: track.thumbnailUrl || track.albumCoverUrl || "",
+							albumCoverBigUrl: track.thumbnailUrl || track.albumCoverUrl || "",
+							previewUrl: track.previewUrl || "",
+							deezerUrl: "",
+							available: true,
+							duration: track.duration || 30,
+							createdAt: track.createdAt || new Date().toISOString(),
+							updatedAt: track.updatedAt || new Date().toISOString(),
+						},
+						addedBy: {
+							id: track.addedBy || event?.creatorId || "",
+							displayName: "Event Admin"
+						},
+					}));
+					
+					// Update the playlist with vote-based ordering
+					updateMusicPlayerPlaylistOrder();
+					
+					// If the current track was removed and we were playing, start the next track
+					if (wasCurrentTrack && playerState.isPlaying && playlistTracks.length > 0) {
+						setTimeout(() => {
+							try {
+								// Start playing the first available track
+								musicPlayerStore.setCurrentTrack({
+									id: playlistTracks[0].track.id,
+									title: playlistTracks[0].track.title,
+									artist: playlistTracks[0].track.artist,
+									album: playlistTracks[0].track.album,
+									duration: playlistTracks[0].track.duration,
+									albumCoverUrl: playlistTracks[0].track.albumCoverUrl,
+									previewUrl: playlistTracks[0].track.previewUrl
+								}, playlistTracks, 0);
+								
+								// Continue playback
+								musicPlayerStore.play();
+							} catch (error) {
+								console.error('Failed to continue playback after track removal:', error);
+							}
+						}, 100);
+					}
+				}
+			}
 		}
 	}
+
 	function handleCurrentTrackChanged(data: {
 		track: Track | null;
 		startedAt: string | null;
 	}) {
-		currentPlayingTrack = data.track ? data.track.id : null;
-		if (data.track && data.startedAt) {
-			// If a new track started, set up audio element
-			if (audioElement) {
-				audioElement.pause();
-				audioElement = null;
+
+	}
+
+	function handleMusicTrackChanged(data: {
+		eventId: string;
+		trackId: string;
+		trackIndex?: number;
+		controlledBy: string;
+		timestamp: string;
+		playlistOrder?: string[]; // Add playlist order from server for synchronization
+	}) {
+		if (event && data.eventId === event.id && isMusicPlayerInitialized) {
+			console.log(`Track changed to ${data.trackId} by ${data.controlledBy}`);
+			
+			// If server provides playlist order, use it to ensure all clients have same order
+			if (data.playlistOrder && event.playlist && Array.isArray(event.playlist)) {
+				const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
+				const reorderedPlaylist = data.playlistOrder
+					.map((id) => trackMap.get(id))
+					.filter((t): t is Track => t !== undefined);
+				
+				// Add any tracks that weren't in the server order (shouldn't happen but safety)
+				const reorderedIds = new Set(data.playlistOrder);
+				const remainingTracks = event.playlist.filter(t => !reorderedIds.has(t.id));
+				
+				// Update event playlist with server-synchronized order
+				event.playlist = [...reorderedPlaylist, ...remainingTracks];
+				event = { ...event };
 			}
-			audioElement = new Audio(data.track.streamUrl);
-			audioElement.currentTime =
-				(Date.now() - new Date(data.startedAt).getTime()) / 1000;
 			
-			// Add event listener for when this track ends to handle automatic progression
-			audioElement.addEventListener('ended', async () => {
-				console.log('Event track ended, triggering automatic progression...');
-				if (isAdmin) {
-					// Only admins can trigger automatic track progression in events
-					await playNextTrack();
-				}
-			});
+			// Find the track in our (now synchronized) playlist and update the music player
+			const playlist = event.playlist || [];
+			const trackIndex = data.trackIndex !== undefined ? data.trackIndex : 
+				playlist.findIndex(t => t.id === data.trackId);
 			
-			// Add error handler for unplayable tracks
-			audioElement.addEventListener('error', async (error) => {
-				console.warn('Event track failed to load:', error, 'Track:', data.track?.title);
-				if (isAdmin && isPlaying) {
-					console.log('Automatically skipping unplayable track in event...');
-					// Wait a moment and then try the next track
-					setTimeout(async () => {
-						await playNextTrack();
-					}, 1000);
-				}
-			});
-			
-			if (isPlaying) {
-				audioElement.play().catch((err) => {
-					console.error("Failed to play audio:", err);
-					// If this track fails to play and we're an admin, try to skip to next
-					if (isAdmin) {
-						console.log('Automatically skipping failed track...');
-						setTimeout(async () => {
-							await playNextTrack();
-						}, 1000);
+			if (trackIndex >= 0 && trackIndex < playlist.length) {
+				const track = playlist[trackIndex];
+				
+				// Update the music player to the new track using current playlist order
+				const musicPlayerPlaylist = playlist.map((t: any, i: number) => ({
+					id: t.id,
+					position: i,
+					addedAt: new Date().toISOString(),
+					createdAt: new Date().toISOString(),
+					playlistId: event?.id || "",
+					trackId: t.id,
+					addedById: t.addedBy || event?.creatorId || "",
+					track: {
+						id: t.id,
+						deezerId: t.deezerId || "",
+						title: t.title,
+						artist: t.artist,
+						album: t.album || "",
+						duration: t.duration || 30,
+						previewUrl: t.previewUrl || "",
+						albumCoverUrl: t.thumbnailUrl || "",
+						albumCoverSmallUrl: t.thumbnailUrl || "",
+						albumCoverMediumUrl: t.thumbnailUrl || "",
+						albumCoverBigUrl: t.thumbnailUrl || "",
+						deezerUrl: "",
+						genres: "",
+						releaseDate: "",
+						available: true,
+						createdAt: t.createdAt || new Date().toISOString(),
+						updatedAt: t.updatedAt || new Date().toISOString()
+					},
+					addedBy: {
+						id: t.addedBy || event?.creatorId || "",
+						displayName: "User",
+						email: "",
+						createdAt: new Date().toISOString(),
+						updatedAt: new Date().toISOString()
 					}
-				});
-			}
-		} else {
-			// No track is playing
-			if (audioElement) {
-				audioElement.pause();
-				audioElement = null;
+				}));
+				
+				musicPlayerStore.setCurrentTrack({
+					id: track.id,
+					title: track.title,
+					artist: track.artist,
+					album: track.album || "",
+					duration: track.duration || 30,
+					albumCoverUrl: track.thumbnailUrl || "",
+					previewUrl: track.previewUrl || ""
+				}, musicPlayerPlaylist, trackIndex);
+				
+				// Auto-play the new track if it has a valid preview URL
+				if (track.previewUrl) {
+					musicPlayerStore.play();
+				}
 			}
 		}
 	}
+
 	function handleVoteUpdated(data: {
 		eventId: string;
-		vote: Vote;
-		results: VoteResult[];
+		vote: {
+			trackId: string;
+			userId: string;
+			type: 'upvote' | 'downvote';
+			weight: number;
+		};
 	}) {
 		if (event && data.eventId === event.id) {
-			votingResults = data.results;
+			// Don't process our own votes - they're already handled locally for instant feedback
+			if (data.vote.userId === user?.id) {
+				return;
+			}
+
+			// Update vote count for the specific track
+			updateTrackVoteCountFromSocket(data.vote.trackId, data.vote.type, data.vote.weight);
 			
-			// Update vote counts in playlist 
-			if (event.playlist && Array.isArray(event.playlist)) {
-				event.playlist = event.playlist.map((track) => {
-					const result = votingResults.find(
-						(r) => r.track.id === track.id,
-					);
-					const newVoteCount = result ? result.voteCount : 0;
-					return {
-						...track,
-						voteCount: newVoteCount,
-						votes: newVoteCount,
-					};
-				});
-				
-				// Force reactivity update
-				event = { ...event };
+			// Reorder tracks based on updated vote counts
+			reorderTracksBasedOnVotes();
+
+			// Update music player playlist with vote-based ordering for live events
+			if (eventStatus() === "live" && isMusicPlayerInitialized) {
+				updateMusicPlayerPlaylistOrder();
 			}
 		}
 	}
 	
 	function handleVoteRemoved(data: {
 		eventId: string;
-		trackId: string;
-		results: VoteResult[];
+		vote: {
+			trackId: string;
+			userId: string;
+			type: 'upvote' | 'downvote';
+			weight: number;
+		};
 	}) {
 		if (event && data.eventId === event.id) {
-			votingResults = data.results;
+			// Don't process our own vote removals - they're already handled locally for instant feedback
+			if (data.vote.userId === user?.id) {
+				return;
+			}
+
+			// Update vote count for the specific track (remove the vote)
+			// When removing a vote, we need to reverse its effect
+			const weightToRemove = data.vote.type === 'upvote' ? -data.vote.weight : data.vote.weight;
+			updateTrackVoteCountFromSocket(data.vote.trackId, null, weightToRemove);
 			
-			// Don't update localUserVotes from WebSocket data
-			// since it doesn't contain user-specific vote information.
-			// Local state is managed by user actions and HTTP responses.
+			// Reorder tracks based on updated vote counts
+			reorderTracksBasedOnVotes();
 			
-			// Update vote counts in playlist
-			if (event.playlist && Array.isArray(event.playlist)) {
-				event.playlist = event.playlist.map((track) => {
-					const result = votingResults.find(
-						(r) => r.track.id === track.id,
-					);
-					return {
-						...track,
-						voteCount: result ? result.voteCount : 0,
-						votes: result ? result.voteCount : 0,
-					};
-				});
-				
-				// Force reactivity update
-				event = { ...event };
-				
+			// Update music player playlist with vote-based ordering for live events
+			if (eventStatus() === "live" && isMusicPlayerInitialized) {
+				updateMusicPlayerPlaylistOrder();
+			}
+		}
+	}
+
+	function handleVoteOptimisticUpdate(data: {
+		eventId: string;
+		vote: {
+			trackId: string;
+			userId: string;
+			type: 'upvote' | 'downvote';
+		};
+		timestamp: string;
+	}) {
+		if (event && data.eventId === event.id) {
+			// Don't process our own votes - they're already handled locally for instant feedback
+			if (data.vote.userId === user?.id) {
+				return;
+			}
+
+			// Update vote count for the specific track with weight of 1 (standard vote)
+			updateTrackVoteCountFromSocket(data.vote.trackId, data.vote.type, 1);
+			
+			// Reorder tracks based on updated vote counts
+			reorderTracksBasedOnVotes();
+			
+			// Update music player playlist with vote-based ordering for live events
+			if (eventStatus() === "live" && isMusicPlayerInitialized) {
+				updateMusicPlayerPlaylistOrder();
 			}
 		}
 	}
 	
-	function handleTracksReordered(data: { eventId: string; trackOrder: string[] }) {
+	function handleTracksReordered(data: { eventId: string; trackOrder: string[]; playlistOrder?: string[] }) {
 		if (event && data.eventId === event.id && event.playlist && Array.isArray(event.playlist)) {
+			console.log('Tracks reordered by server:', data.trackOrder);
+			
+			// Use server-provided playlist order if available, otherwise use trackOrder
+			const serverOrder = data.playlistOrder || data.trackOrder;
+			
 			// Store the currently playing track info
 			const currentlyPlayingTrack = event.playlist.length > 0 ? event.playlist[0] : null;
 			
-			// Reorder the playlist based on the new track order
+			// Reorder the playlist based on the server's authoritative order
 			const trackMap = new Map(event.playlist.map((t) => [t.id, t]));
-			const reorderedPlaylist = data.trackOrder
+			const reorderedPlaylist = serverOrder
 				.map((id) => trackMap.get(id))
 				.filter((t): t is Track => t !== undefined);
 			
 			// Add any tracks that weren't in the reorder list (shouldn't happen but safety)
-			const reorderedIds = new Set(data.trackOrder);
+			const reorderedIds = new Set(serverOrder);
 			const remainingTracks = event.playlist.filter(t => !reorderedIds.has(t.id));
 			
 			// If there was a currently playing track, ensure it stays at the top
@@ -780,211 +1675,112 @@
 				event.playlist = [...reorderedPlaylist, ...remainingTracks];
 			}
 			
+			// Update original track order mapping with server order only for tracks that don't have an original order yet
+			// This preserves the true insertion order for tracks that were added earlier
+			serverOrder.forEach((trackId, index) => {
+				if (!originalTrackOrder.has(trackId)) {
+					originalTrackOrder.set(trackId, index);
+				}
+			});
+			
 			// Note: Vote counts are preserved during reordering, no need to refresh
 			// WebSocket events handle any necessary vote count updates
 			
 			// Force reactivity update
 			event = { ...event };
+			
+			// Update music player playlist order for live events
+			if (eventStatus() === "live" && isMusicPlayerInitialized) {
+				updateMusicPlayerPlaylistOrder();
+			}
 		}
 	}
 	
 	function handleParticipantAdded(data: any) {
 		if (event) {
-			if (
-				!event.participants.some(
-					(p) => p.id === data.userId || p.userId === data.userId,
-				)
-			) {
+			// Handle both 'user-joined' and 'participant-joined' event structures
+			const userId = data.userId || data.user?.id;
+			const displayName = data.displayName || data.user?.displayName || "Unknown User";
+			const avatarUrl = data.avatarUrl || data.user?.avatarUrl;
+			const email = data.email || "";
+
+			// Only add participant if they don't already exist (prevent duplicates)
+			if (userId && !event.participants.some((p) => p.id === userId || p.userId === userId)) {
 				event.participants.push({
-					id: data.userId, // Use id as primary property
-					userId: data.userId, // Keep userId for compatibility
-					displayName: data.displayName || "Unknown User",
-					avatarUrl: data.avatarUrl || undefined,
-					email: data.email || "",
+					id: userId, // Use id as primary property
+					userId: userId, // Keep userId for compatibility
+					displayName: displayName,
+					avatarUrl: avatarUrl || undefined,
+					email: email,
 					createdAt: data.createdAt || new Date().toISOString(),
 					updatedAt: data.updatedAt || new Date().toISOString(),
 				});
 				// Force reactivity update
 				event = { ...event };
+			} else if (userId) {
+				// If participant already exists, update their information instead of adding duplicate
+				const existingIndex = event.participants.findIndex((p) => p.id === userId || p.userId === userId);
+				if (existingIndex !== -1) {
+					event.participants[existingIndex] = {
+						...event.participants[existingIndex],
+						displayName: displayName,
+						avatarUrl: avatarUrl || event.participants[existingIndex].avatarUrl,
+						email: email || event.participants[existingIndex].email,
+						updatedAt: data.updatedAt || new Date().toISOString(),
+					};
+					// Force reactivity update
+					event = { ...event };
+				}
 			}
 		}
 	}
+
 	function handleParticipantRemoved(data: any) {
 		if (event) {
-			const remainingParticipants = event.participants.filter(
-				(p) => p.id !== data.userId && p.userId !== data.userId,
-			);
-			event.participants = remainingParticipants;
-			// Force reactivity update
-			event = { ...event };
+			// Handle both 'user-left' and 'participant-left' event structures
+			const userId = data.userId || data.user?.id;
+			
+			if (userId) {
+				const remainingParticipants = event.participants.filter(
+					(p) => p.id !== userId && p.userId !== userId,
+				);
+				event.participants = remainingParticipants;
+				
+				if (user && eventId) {
+					// Refresh voting results to get updated vote counts after user left
+					refreshVotingResults();
+				}
+				
+				// Force reactivity update
+				event = { ...event };
+			}
 		}
 	}
+
 	function handleJoinedEvent(data: any) {
 		if (event) {
 		}
 	}
+
 	function handleLeavedEvent(data: any) {
 		if (event) {
 			// This is when we ourselves leave an event
-			event.participants = event.participants.filter(
-				(p) => p.id !== data.userId,
-			);
-			// Force reactivity update
-			event = { ...event };
-		}
-	}
-
-	function handleCurrentParticipants(data: any) {
-		if (event && data.eventId === event.id) {
-			// Set the current participants list to only include currently connected users
-			// Ensure consistent property naming (both id and userId)
-			event.participants = (data.participants || []).map(
-				(participant: any) => ({
-					id: participant.userId || participant.id,
-					userId: participant.userId || participant.id,
-					displayName: participant.displayName || "Unknown User",
-					avatarUrl: participant.avatarUrl || undefined,
-					email: participant.email || "",
-					createdAt:
-						participant.createdAt || new Date().toISOString(),
-					updatedAt:
-						participant.updatedAt || new Date().toISOString(),
-				}),
-			);
-			// Force reactivity update
-			event = { ...event };
-		}
-	}
-
-	function initializeEditForm() {
-		if (event) {
-			editEventData = {
-				name: event.name,
-				description: event.description || "",
-				licenseType: event.licenseType,
-				visibility: event.visibility,
-				locationName: event.locationName || "",
-				latitude: event.latitude || undefined,
-				longitude: event.longitude || undefined,
-				locationRadius: event.locationRadius || undefined,
-				votingStartTime: event.votingStartTime || undefined,
-				votingEndTime: event.votingEndTime || undefined,
-				maxVotesPerUser: event.maxVotesPerUser || 1
-			};
-		}
-	}
-
-	// Load event data
-	async function loadEvent() {
-		if (!eventId) return;
-
-		loading = true;
-		error = "";
-
-		try {
-			const loadedEvent = await getEvent(eventId);
-
-			// Transform event data to ensure compatibility
-			const preservedParticipants = event?.participants || [];
-			event = {
-				...loadedEvent,
-				title: loadedEvent.title || loadedEvent.name,
-				isPublic: loadedEvent.visibility === "public",
-				hostId: loadedEvent.hostId || loadedEvent.creatorId,
-				hostName: loadedEvent.creator?.displayName || "Unknown Host",
-				startDate: loadedEvent.startDate || loadedEvent.eventDate,
-				location: loadedEvent.location || loadedEvent.locationName,
-				allowsVoting: loadedEvent.allowsVoting !== false, // Default to true
-				playlist: (loadedEvent.playlist || []).map((track) => ({
-					...track,
-					voteCount: track.voteCount || track.votes || 0,
-					votes: track.voteCount || track.votes || 0,
-				})),
-				// Preserve admins from backend
-				admins: loadedEvent.admins || [],
-				// Preserve existing participants - they are managed via socket events
-				participants: preservedParticipants,
-			};
-
-			hasEventAccess = true;
-			initializeEditForm();
-
-			// Load voting results if user can vote
-			if (user && event.allowsVoting) {
-				try {
-					votingResults = await getVotingResults(eventId);
-					hasLoadedVotingData = true; // Mark as loaded to prevent reactive effect from triggering
-					
-					// Initialize local user votes from voting results
-					localUserVotes = new Map();
-					votingResults.forEach(result => {
-						if (result.userVote) {
-							localUserVotes.set(result.track.id, result.userVote.type);
-						}
-					});
-					
-					// Update playlist tracks with vote counts from voting results
-					if (event.playlist && Array.isArray(event.playlist)) {
-						event.playlist = event.playlist.map((track) => {
-							const result = votingResults.find((r) => r.track.id === track.id);
-							const newVoteCount = result ? result.voteCount : 0;
-							return {
-								...track,
-								voteCount: newVoteCount,
-								votes: newVoteCount,
-							};
-						});
-						
-						// Don't sort here - let sortedPlaylistTracks() handle display order
-						// Force reactivity update
-						event = { ...event };
-					}
-				} catch (err) {
-					console.error('Failed to load voting results in loadEvent:', err);
-				}
-			}
-
-			// Initialize music player for this event
-			await initializeMusicPlayer();
-		} catch (err) {
-			// With the backend now supporting playlist collaborator access,
-			// most access denied errors should be legitimate
-			error = err instanceof Error ? err.message : "Failed to load event";
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function leaveEvent() {
-		if (!user || !eventId) return;
-
-		try {
-			await leaveEventAPI(eventId);
-			// Socket events will handle updating the participant list
-		} catch (err) {
-			error =
-				err instanceof Error ? err.message : "Failed to leave event";
-		}
-	}
-
-	async function addPlaylistToEvent(playlistId: string) {
-		if (!user || !eventId) return;
-
-		try {
-			loading = true;
+			const userId = data.userId;
 			
-			// Use the optimized batch function to add all tracks at once
-			await addPlaylistTracksToEvent(eventId, playlistId);
-
-			closePlaylistModal();
-			// Socket events will handle updating the track list
-		} catch (err) {
-			error =
-				err instanceof Error
-					? err.message
-					: "Failed to add playlist to event";
-		} finally {
-			loading = false;
+			event.participants = event.participants.filter(
+				(p) => p.id !== userId,
+			);
+			
+			// If the current user is leaving, clear all local vote state
+			if (userId === user?.id) {
+				localUserVotes.clear();
+				localUserVotes = new Map(localUserVotes);
+				voteAnimations.clear();
+				voteAnimations = new Map(voteAnimations);
+			}
+			
+			// Force reactivity update
+			event = { ...event };
 		}
 	}
 
@@ -1031,6 +1827,179 @@
 		}
 	}
 
+	async function handleLeaveEvent() {
+		if (!user || !eventId) return;
+
+		try {
+			await leaveEventAPI(eventId);
+			goto("/events");
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Failed to leave event";
+			console.error("Failed to leave event:", err);
+		}
+	}
+
+	function handleCurrentParticipants(data: any) {
+		if (event && data.eventId === event.id) {
+			// Replace the entire participants list with the authoritative list from the server
+			// This prevents duplicates by completely resetting the participants
+			const uniqueParticipants = new Map();
+			
+			(data.participants || []).forEach((participant: any) => {
+				const userId = participant.userId || participant.id;
+				if (userId) {
+					uniqueParticipants.set(userId, {
+						id: userId,
+						userId: userId,
+						displayName: participant.displayName || "Unknown User",
+						avatarUrl: participant.avatarUrl || undefined,
+						email: participant.email || "",
+						createdAt: participant.createdAt || new Date().toISOString(),
+						updatedAt: participant.updatedAt || new Date().toISOString(),
+					});
+				}
+			});
+			
+			event.participants = Array.from(uniqueParticipants.values());
+			// Force reactivity update
+			event = { ...event };
+		}
+	}
+
+	async function addPlaylistToEvent(playlistId: string) {
+		if (!user || !eventId) return;
+
+		try {
+			loading = true;
+			
+			// Use the optimized batch function to add all tracks at once
+			await addPlaylistTracksToEvent(eventId, playlistId);
+
+			closePlaylistModal();
+			// Socket events will handle updating the track list
+		} catch (err) {
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to add playlist to event";
+		} finally {
+			loading = false;
+		}
+	}
+
+	function initializeEditForm() {
+		if (event) {
+			editEventData = {
+				name: event.name,
+				description: event.description || "",
+				licenseType: event.licenseType,
+				visibility: event.visibility,
+				locationName: event.locationName || "",
+				latitude: event.latitude || undefined,
+				longitude: event.longitude || undefined,
+				locationRadius: event.locationRadius || undefined,
+				votingStartTime: event.votingStartTime || undefined,
+				votingEndTime: event.votingEndTime || undefined,
+				maxVotesPerUser: event.maxVotesPerUser || 1
+			};
+		}
+	}
+
+	// Load event data
+	async function loadEvent() {
+		if (!eventId) return;
+
+		loading = true;
+		error = "";
+
+		try {
+			const loadedEvent = await getEvent(eventId);
+
+			// Deduplicate participants from the loaded event
+			const uniqueParticipants = new Map();
+			(loadedEvent.participants || []).forEach((participant: any) => {
+				const userId = participant.id || participant.userId;
+				if (userId) {
+					uniqueParticipants.set(userId, participant);
+				}
+			});
+
+			// Transform event data to ensure compatibility
+			event = {
+				...loadedEvent,
+				title: loadedEvent.title || loadedEvent.name,
+				isPublic: loadedEvent.visibility === "public",
+				hostId: loadedEvent.hostId || loadedEvent.creatorId,
+				hostName: loadedEvent.creator?.displayName || "Unknown Host",
+				startDate: loadedEvent.startDate || loadedEvent.eventDate,
+				location: loadedEvent.location || loadedEvent.locationName,
+				allowsVoting: loadedEvent.allowsVoting !== false, // Default to true
+				playlist: (loadedEvent.playlist || []).map((track) => ({
+					...track,
+					voteCount: track.voteCount || track.votes || 0,
+					votes: track.voteCount || track.votes || 0,
+				})),
+				// Preserve admins from backend
+				admins: loadedEvent.admins || [],
+				// Use deduplicated participants from the fresh load
+				participants: Array.from(uniqueParticipants.values()),
+			};
+
+			hasEventAccess = true;
+			initializeEditForm();
+
+			// Initialize original track order mapping for tracks loaded from server
+			if (event.playlist && Array.isArray(event.playlist)) {
+				event.playlist.forEach((track, index) => {
+					originalTrackOrder.set(track.id, index);
+				});
+			}
+
+			// Load voting results if user can vote
+			if (user && event.allowsVoting) {
+				try {
+					const rawVotingResults = await getVotingResults(eventId);
+					hasLoadedVotingData = true; // Mark as loaded to prevent reactive effect from triggering
+					
+					// Process raw voting results to calculate vote counts per track
+					const { processedResults, userVotesMap } = processRawVotingResults(rawVotingResults);
+					votingResults = processedResults;
+					
+					// Initialize local user votes from processed results
+					localUserVotes = userVotesMap;
+					
+					// Update playlist tracks with vote counts from voting results
+					if (event.playlist && Array.isArray(event.playlist)) {
+						event.playlist = event.playlist.map((track) => {
+							const result = votingResults.find((r) => r.track?.id === track.id);
+							const newVoteCount = result ? result.voteCount : 0;
+							return {
+								...track,
+								voteCount: newVoteCount,
+								votes: newVoteCount,
+							};
+						});
+						
+						// Don't sort here - let sortedPlaylistTracks() handle display order
+						// Force reactivity update
+						event = { ...event };
+					}
+				} catch (err) {
+					console.error('Failed to load voting results in loadEvent:', err);
+				}
+			}
+
+			// Initialize music player for this event
+			await initializeMusicPlayer();
+		} catch (err) {
+			// With the backend now supporting playlist collaborator access,
+			// most access denied errors should be legitimate
+			error = err instanceof Error ? err.message : "Failed to load event";
+		} finally {
+			loading = false;
+		}
+	}
+
 	// Music search functions
 	async function searchTracks() {
 		if (!searchQuery.trim()) {
@@ -1066,22 +2035,6 @@
 			isLoadingTop = false;
 		}
 	}
-
-	// Load top tracks when modal opens
-	$effect(() => {
-		if (showAddTrackModal && topTracks.length === 0) {
-			loadTopTracks();
-		}
-	});
-
-	// Initialize page data when component loads or event ID changes
-	$effect(() => {
-		if (eventId && user) {
-			if (!event || event.id !== eventId) {
-				loadEvent();
-			}
-		}
-	});
 
 	// Load playlists manually when needed (no reactive effects to prevent loops)
 	async function openPlaylistModal() {
@@ -1127,17 +2080,6 @@
 		}
 	}
 
-	// Debounced search
-	let searchTimeout: NodeJS.Timeout;
-	$effect(() => {
-		if (searchQuery) {
-			clearTimeout(searchTimeout);
-			searchTimeout = setTimeout(searchTracks, 300);
-		} else {
-			searchResults = [];
-		}
-	});
-
 	async function removeAdmin(userId: string) {
 		if (!user || !eventId || !isCreator || !isAdmin) return;
 
@@ -1149,158 +2091,10 @@
 		}
 	}
 
-
-	async function pauseMusic() {
-		if (!isAdmin || !eventId) return;
-
-		try {
-			isPlaying = false;
-			eventSocketService.pauseTrack(eventId);
-
-			if (audioElement) {
-				audioElement.pause();
-			}
-		} catch (err) {
-			error =
-				err instanceof Error ? err.message : "Failed to pause music";
-		}
-	}
-
-	async function resumeMusic() {
-		if (!isAdmin || !eventId) return;
-
-		try {
-			isPlaying = true;
-			eventSocketService.emit("music-resume", { eventId });
-
-			if (audioElement) {
-				await audioElement.play();
-			}
-		} catch (err) {
-			error =
-				err instanceof Error ? err.message : "Failed to resume music";
-		}
-	}
-
-	async function playNextTrack() {
-		if (!isAdmin || !eventId || !event?.playlist) return;
-
-		try {
-			// Find next track in sorted order
-			const sortedTracks = sortedPlaylistTracks();
-			const currentIndex = sortedTracks.findIndex(
-				(t) => t.id === currentPlayingTrack,
-			);
-			
-			let nextIndex = currentIndex + 1;
-			
-			// If we've reached the end of the playlist, loop back to the beginning
-			if (nextIndex >= sortedTracks.length) {
-				nextIndex = 0;
-			}
-			
-			const nextTrack = sortedTracks[nextIndex];
-
-			if (nextTrack) {
-				// Try to play the next track
-				await playTrack(nextIndex);
-			} else if (sortedTracks.length > 0) {
-				// If for some reason we don't have a next track but have tracks, try the first one
-				await playTrack(0);
-			} else {
-				// No tracks at all, stop playing
-				currentPlayingTrack = null;
-				isPlaying = false;
-				if (audioElement) {
-					audioElement.pause();
-					audioElement = null;
-				}
-			}
-		} catch (err) {
-			console.error("Error in playNextTrack:", err);
-			
-			// If the next track fails to play, try to skip to a different one
-			try {
-				const sortedTracks = sortedPlaylistTracks();
-				if (sortedTracks.length > 1) {
-					console.log("Attempting to skip problematic track and try next one...");
-					
-					const currentIndex = sortedTracks.findIndex(
-						(t) => t.id === currentPlayingTrack,
-					);
-					
-					// Try a few different tracks to find one that works
-					for (let attempt = 0; attempt < Math.min(3, sortedTracks.length); attempt++) {
-						let skipIndex = (currentIndex + 1 + attempt) % sortedTracks.length;
-						
-						try {
-							await playTrack(skipIndex);
-							console.log(`Successfully played track at index ${skipIndex} after ${attempt + 1} attempts`);
-							return; // Success, exit
-						} catch (skipError) {
-							console.log(`Attempt ${attempt + 1} failed:`, skipError);
-						}
-					}
-					
-					// If all attempts failed, stop playing gracefully
-					console.warn("All tracks failed to play, stopping playback");
-					currentPlayingTrack = null;
-					isPlaying = false;
-					if (audioElement) {
-						audioElement.pause();
-						audioElement = null;
-					}
-				}
-			} catch (fallbackError) {
-				console.error("Fallback track selection also failed:", fallbackError);
-			}
-			
-			error =
-				err instanceof Error
-					? err.message
-					: "Failed to play next track";
-		}
-	}
-
-	// Helper functions for UI
-	function formatDate(dateString: string) {
-		return new Date(dateString).toLocaleDateString("en-US", {
-			year: "numeric",
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-		});
-	}
-
 	function formatDuration(seconds: number) {
 		const minutes = Math.floor(seconds / 60);
 		const remainingSeconds = seconds % 60;
 		return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-	}
-
-	function getAvatarColor(name: string): string {
-		const colors = [
-			"#FF6B6B",
-			"#4ECDC4",
-			"#45B7D1",
-			"#96CEB4",
-			"#FFEAA7",
-			"#DDA0DD",
-			"#98D8C8",
-			"#F7DC6F",
-			"#BB8FCE",
-			"#85C1E9",
-		];
-		let hash = 0;
-		for (let i = 0; i < name.length; i++) {
-			hash = name.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		return colors[Math.abs(hash) % colors.length];
-	}
-
-	function getAvatarLetter(name: string): string {
-		return name.charAt(0).toUpperCase();
 	}
 
 	function getUserRole(userId: string): string {
@@ -1310,7 +2104,82 @@
 		return "Participant";
 	}
 
-	const canEdit = $derived(isAdmin);
+	// Function to request playlist synchronization from server when there might be conflicts
+	async function requestPlaylistSynchronization() {
+		if (!eventId || !isSocketConnected) return;
+		
+		try {
+			console.log('Requesting playlist synchronization from server...');
+			eventSocketService.requestPlaylistSync(eventId);
+		} catch (error) {
+			console.error('Failed to request playlist synchronization:', error);
+		}
+	}
+
+	// Helper function to update music player playlist order based on votes
+	function updateMusicPlayerPlaylistOrder() {
+		if (!event?.playlist || !Array.isArray(event.playlist) || !isMusicPlayerInitialized) {
+			return;
+		}
+
+		const playerState = $musicPlayerStore;
+		const currentTrackId = playerState.currentTrack?.id;
+
+		// Get the sorted tracks using the same logic as the UI
+		const sortedTracks = sortedPlaylistTracks();
+		
+		// Convert to the format expected by music player
+		const playlistTracks = sortedTracks.map((track: any, index: number) => ({
+			id: track.id || '',
+			trackId: track.id || '',
+			position: index + 1,
+			addedAt: track.createdAt || new Date().toISOString(),
+			createdAt: track.createdAt || new Date().toISOString(),
+			playlistId: event?.playlistId || '',
+			addedBy: track.addedBy || null,
+			addedById: track.addedBy?.id || track.addedById || '',
+			track: {
+				id: track.id || '',
+				title: track.title || '',
+				artist: track.artist || '',
+				album: track.album || '',
+				duration: track.duration || 30,
+				albumCoverUrl: track.albumCoverUrl || '',
+				albumCoverSmallUrl: track.albumCoverSmallUrl || '',
+				albumCoverMediumUrl: track.albumCoverMediumUrl || '',
+				albumCoverBigUrl: track.albumCoverBigUrl || '',
+				previewUrl: track.previewUrl || '',
+				deezerId: track.deezerId || '',
+				deezerUrl: track.deezerUrl || '',
+				spotifyId: track.spotifyId || null,
+				youtubeId: track.youtubeId || null,
+				available: track.available !== undefined ? track.available : true,
+				createdAt: track.createdAt || new Date().toISOString(),
+				updatedAt: track.updatedAt || new Date().toISOString()
+			}
+		}));
+
+		// Find the new index of the currently playing track
+		let newCurrentIndex = 0;
+		if (currentTrackId) {
+			const foundIndex = playlistTracks.findIndex(t => t.track.id === currentTrackId);
+			if (foundIndex !== -1) {
+				newCurrentIndex = foundIndex;
+			}
+		}
+		
+		// Only update if track order has actually changed to avoid unnecessary updates
+		const currentPlaylist = playerState.playlist;
+		const hasOrderChanged = playlistTracks.length !== currentPlaylist.length ||
+			playlistTracks.some((track, index) => 
+				currentPlaylist[index]?.track.id !== track.track.id
+			);
+		
+		if (hasOrderChanged) {
+			// Update the music player playlist
+			musicPlayerStore.setPlaylist(playlistTracks, newCurrentIndex);
+		}
+	}
 
 	// Filter tracks based on search query - uses vote-sorted tracks
 	function filteredTracks() {
@@ -1332,82 +2201,8 @@
 	}
 
 	// Music player initialization and control
-	async function initializeMusicPlayer() {
-		if (!event || !user || isMusicPlayerInitialized) return;
-
-		try {
-			if (!event.playlist || !Array.isArray(event.playlist) || event.playlist.length === 0) {
-				console.warn(
-					"Cannot initialize music player: event has no tracks or playlist is not an array",
-					{ playlist: event.playlist }
-				);
-				return;
-			}
-
-			// Create room context for the music player
-			const roomContext = {
-				type: "event" as const,
-				id: event.id,
-				ownerId: event.creatorId || "",
-				participants: event.participants.map((p) => p.id),
-				licenseType: (event.licenseType === "location_based"
-					? "location-time"
-					: event.licenseType) as
-					| "open"
-					| "invited"
-					| "location-time",
-				visibility: event.visibility,
-			};
-
-			// Convert event tracks to playlist track format
-			const playlistTracks = event.playlist.map((track, index) => ({
-				id: track.id,
-				position: index + 1,
-				addedAt: track.createdAt || new Date().toISOString(),
-				createdAt: track.createdAt || new Date().toISOString(),
-				playlistId: event!.id,
-				trackId: track.id,
-				addedById: track.addedBy || event!.creatorId || "",
-				track: {
-					id: track.id,
-					deezerId: track.deezerId || "",
-					title: track.title,
-					artist: track.artist,
-					album: track.album || "",
-					duration: track.duration || 0,
-					previewUrl: track.streamUrl || track.previewUrl || "",
-					albumCoverUrl: track.thumbnailUrl || "",
-					albumCoverSmallUrl: track.thumbnailUrl || "",
-					albumCoverMediumUrl: track.thumbnailUrl || "",
-					albumCoverBigUrl: track.thumbnailUrl || "",
-					deezerUrl: "",
-					available: true,
-					createdAt: track.createdAt || new Date().toISOString(),
-					updatedAt: track.updatedAt || new Date().toISOString(),
-				},
-				addedBy: {
-					id: track.addedBy || event!.creatorId || "",
-					displayName:
-						event!.participants.find((p) => p.id === track.addedBy)
-							?.displayName || "Unknown",
-				},
-			}));
-
-			// Initialize music player with event tracks
-			await musicPlayerService.initializeForRoom(
-				roomContext,
-				playlistTracks || [],
-			);
-			isMusicPlayerInitialized = true;
-
-		} catch (err) {
-			console.error("Failed to initialize music player:", err);
-		}
-	}
-
 	async function playTrack(trackIndex: number) {
 		try {
-			// Don't try to play if music player isn't initialized
 			if (!isMusicPlayerInitialized) {
 				console.warn(
 					"Music player not initialized, attempting to initialize first...",
@@ -1493,12 +2288,6 @@
 		}
 	}
 
-	// Vote button animation state tracking - local to this user only
-	let voteAnimations = $state(new Map<string, { upvote: string, downvote: string, remove: string }>());
-	
-	// Local user vote state tracking - independent of WebSocket updates
-	let localUserVotes = $state(new Map<string, 'upvote' | 'downvote' | null>());
-
 	// Helper function to get current user vote for a track (uses local state first, then WebSocket data)
 	function getUserVoteForTrack(trackId: string): 'upvote' | 'downvote' | null {
 		// Check local state first (for immediate UI updates)
@@ -1506,8 +2295,12 @@
 			return localUserVotes.get(trackId) || null;
 		}
 		
-		// Fall back to WebSocket data
-		const result = votingResults.find(r => r.track.id === trackId);
+		// Fall back to WebSocket data - ensure votingResults is properly initialized
+		if (!votingResults || !Array.isArray(votingResults)) {
+			return null;
+		}
+		
+		const result = votingResults.find(r => r.track?.id === trackId);
 		return result?.userVote?.type || null;
 	}
 
@@ -1516,8 +2309,9 @@
 		const userVote = getUserVoteForTrack(trackId);
 		const animation = voteAnimations.get(trackId);
 
-		// if no votes left, hide vote and downvote buttons
-		if (numberOfVotesAvailable() <= 0 && (buttonType === 'upvote' || buttonType === 'downvote') && !userVote) {
+		// if no votes left, hide vote and downvote buttons (but not for unlimited votes)
+		const votesRemaining = numberOfVotesAvailable();
+		if (votesRemaining <= 0 && votesRemaining !== Infinity && (buttonType === 'upvote' || buttonType === 'downvote') && !userVote) {
 			return 'w-0 overflow-hidden';
 		}
 
@@ -1550,26 +2344,28 @@
 
 	// Voting functionality
 	async function voteForTrackSimple(trackId: string, voteType: 'upvote' | 'downvote' = 'upvote') {
-		if (!user || !eventId || !canVoteForTracks()) {
-			error = "You don't have permission to vote";
+		if (!user || !eventId) {
+			error = "You must be logged in to vote";
 			setTimeout(() => (error = ""), 3000);
 			return;
 		}
 
-		// Prevent voting on the currently playing track (first in the sorted list)
-		const sortedTracks = sortedPlaylistTracks();
-		const isCurrentlyPlaying = sortedTracks.length > 0 && sortedTracks[0].id === trackId;
-		
-		if (isCurrentlyPlaying) {
-			error = "Cannot vote on the currently playing track";
+		if (!canVoteOnTrack(trackId)) {
+			error = "You can't vote on this track (it may be currently playing or already played)";
 			setTimeout(() => (error = ""), 3000);
 			return;
 		}
+
+		// Get previous vote type for this track (moved outside try block for error handling)
+		const previousVoteType = localUserVotes.get(trackId) || null;
 
 		try {
 			// Update local user vote state immediately for instant UI feedback
 			localUserVotes.set(trackId, voteType);
 			localUserVotes = new Map(localUserVotes);
+			
+			// Update local vote counts and reorder tracks
+			updateLocalVoteCount(trackId, voteType, previousVoteType);
 			
 			// Start animation - shrink the opposite buttons
 			if (voteType === 'upvote') {
@@ -1589,33 +2385,32 @@
 			// Force reactive update
 			voteAnimations = new Map(voteAnimations);
 			
-			// Send vote via WebSocket for real-time feedback
+			// Send vote via WebSocket for real-time feedback to other users
 			if (eventSocketService.isConnected()) {
 				eventSocketService.vote(eventId, trackId, voteType, 1);
 			}
 
-			// Call HTTP API for persistence and automatic reordering
+			// Call HTTP API for persistence
 			const httpResults = await voteForTrackInEvent(eventId, trackId, voteType);
-
-			// Note: WebSocket events will handle updating vote counts automatically
-			// No need to manually refresh results as it creates redundant requests
 
 			// Clear animation state and reset to default
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			
-			// The localUserVotes state is already correctly set from the optimistic update
-			// No need to sync from server since the local state is accurate
 
 		} catch (err) {
-			// Reset animation state and local vote state on error
+			// Reset animation state and revert local changes on error
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			localUserVotes.delete(trackId);
+			
+			// Revert local vote state
+			localUserVotes.set(trackId, previousVoteType);
 			localUserVotes = new Map(localUserVotes);
 			
-			console.error('Error voting for track:', err);
+			// Revert local vote count
+			updateLocalVoteCount(trackId, previousVoteType, voteType);
 			
+			console.error('Error voting for track:', err);
+			error = err instanceof Error ? err.message : 'Failed to vote for track';
 			setTimeout(() => (error = ""), 3000);
 		}
 	}
@@ -1623,21 +2418,22 @@
 	async function removeVoteForTrack(trackId: string) {
 		if (!user || !eventId) return;
 
-		// Prevent removing votes from the currently playing track (first in the sorted list)
-		const sortedTracks = sortedPlaylistTracks();
-		const isCurrentlyPlaying = sortedTracks.length > 0 && sortedTracks[0].id === trackId;
-		
-		if (isCurrentlyPlaying) {
-			error = "Cannot remove vote from the currently playing track";
+		if (!canVoteOnTrack(trackId)) {
+			error = "You can't modify votes on this track (it may be currently playing or already played)";
 			setTimeout(() => (error = ""), 3000);
 			return;
 		}
 
-		try {
+		// Get previous vote type for this track outside try block
+		const previousVoteType = localUserVotes.get(trackId) || null;
 
+		try {
 			// Update local user vote state immediately for instant UI feedback
 			localUserVotes.set(trackId, null);
 			localUserVotes = new Map(localUserVotes);
+
+			// Update local vote counts and reorder tracks
+			updateLocalVoteCount(trackId, null, previousVoteType);
 
 			// Start animation - expand all buttons back to full width
 			voteAnimations.set(trackId, {
@@ -1647,30 +2443,24 @@
 			});
 			voteAnimations = new Map(voteAnimations);
 
-			// Send via WebSocket
-			if (eventSocketService.isConnected()) {
-				eventSocketService.removeVote(eventId, trackId);
-			}
-
-			// Call HTTP API for persistence
+			// Call HTTP API for persistence (which will handle socket notification)
 			const httpResults = await removeVote(eventId, trackId);
-
-			// Note: WebSocket events will handle updating vote counts automatically
-			// No need to manually refresh results as it creates redundant requests
 
 			// Clear animation state after successful vote removal
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			
-			// The localUserVotes state is already correctly set from the optimistic update
-			// No need to sync from server since the local state is accurate
 
 		} catch (err) {
-			// Reset animation state and local vote state on error
+			// Reset animation state and revert local changes on error
 			voteAnimations.delete(trackId);
 			voteAnimations = new Map(voteAnimations);
-			localUserVotes.delete(trackId);
+			
+			// Revert local vote state
+			localUserVotes.set(trackId, previousVoteType);
 			localUserVotes = new Map(localUserVotes);
+			
+			// Revert local vote count
+			updateLocalVoteCount(trackId, previousVoteType, null);
 			
 			// Only show user-friendly error message for actual vote not found errors
 			if (err instanceof Error && err.message.includes('Vote not found')) {
@@ -1815,6 +2605,7 @@
 			locationWatchId = null;
 		}
 	}
+
 </script>
 
 <svelte:head>
@@ -2096,6 +2887,13 @@
 			</div>
 		{/if}
 
+		<!-- Music Player -->
+		{#if isMusicPlayerInitialized && event?.playlist && event.playlist.length > 0}
+			<div class="w-full bg-white rounded-lg shadow-md p-6 mb-6">
+				<MusicPlayer />
+			</div>
+		{/if}
+
 		<!-- Playlist -->
 		<div class="flex flex-col lg:flex-row gap-8">
 			<div class="w-full bg-white rounded-lg shadow-md p-6">
@@ -2193,21 +2991,18 @@
 				{:else}
 					<div class="space-y-2">
 						{#each filteredTracks() as track, index (track.id)}
+							{@const trackStatus = getTrackStatus(track, index)}
 							<div class="relative" animate:flip={{ duration: 700 }}>
 								<div
-									class="flex relative group items-center overflow-hidden space-x-4 p-3 border rounded-lg transition-colors {index === 0
-										? 'border-secondary bg-secondary/5'
-										: 'border-gray-200 hover:bg-gray-50'}"
+									class="flex relative group items-center overflow-hidden space-x-4 p-3 border rounded-lg transition-colors {getTrackContainerClass(track, index)}"
 									role={canEdit ? "listitem" : "none"}
 								>
 									<div
-										class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {index === 0
-											? 'bg-secondary text-white'
-											: 'bg-gray-200 text-gray-600'}"
+										class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold {getVoteCountBadgeClass(track, index)}"
 									>
-										{#if index === 0}
+										{#if trackStatus === 'current'}
 											<!-- Now playing indicator -->
-											<svg version="1.0" class="w-4 h-4" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64" enable-background="new 0 0 64 64" xml:space="preserve" fill="#ffffff"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path fill="#ffffff" d="M62.799,23.737c-0.47-1.399-1.681-2.419-3.139-2.642l-16.969-2.593L35.069,2.265 C34.419,0.881,33.03,0,31.504,0c-1.527,0-2.915,0.881-3.565,2.265l-7.623,16.238L3.347,21.096c-1.458,0.223-2.669,1.242-3.138,2.642 c-0.469,1.4-0.115,2.942,0.916,4l12.392,12.707l-2.935,17.977c-0.242,1.488,0.389,2.984,1.62,3.854 c1.23,0.87,2.854,0.958,4.177,0.228l15.126-8.365l15.126,8.365c0.597,0.33,1.254,0.492,1.908,0.492c0.796,0,1.592-0.242,2.269-0.72 c1.231-0.869,1.861-2.365,1.619-3.854l-2.935-17.977l12.393-12.707C62.914,26.68,63.268,25.138,62.799,23.737z"></path> </g></svg>
+											<svg version="1.0" class="w-4 h-4" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64" enable-background="new 0 0 64 64" xml:space="preserve" fill="currentColor"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path fill="currentColor" d="M62.799,23.737c-0.47-1.399-1.681-2.419-3.139-2.642l-16.969-2.593L35.069,2.265 C34.419,0.881,33.03,0,31.504,0c-1.527,0-2.915,0.881-3.565,2.265l-7.623,16.238L3.347,21.096c-1.458,0.223-2.669,1.242-3.138,2.642 c-0.469,1.4-0.115,2.942,0.916,4l12.392,12.707l-2.935,17.977c-0.242,1.488,0.389,2.984,1.62,3.854 c1.23,0.87,2.854,0.958,4.177,0.228l15.126-8.365l15.126,8.365c0.597,0.33,1.254,0.492,1.908,0.492c0.796,0,1.592-0.242,2.269-0.72 c1.231-0.869,1.861-2.365,1.619-3.854l-2.935-17.977l12.393-12.707C62.914,26.68,63.268,25.138,62.799,23.737z"></path> </g></svg>
 										{:else}
 											{track.voteCount ?? track.votes ?? 0}
 										{/if}
@@ -2271,21 +3066,7 @@
 																		track,
 																	) ?? index)
 																: index;
-														// If this track is currently playing, toggle play/pause
-														if (
-															playerState.currentTrackIndex ===
-																actualIndex &&
-															playerState.currentTrack
-														) {
-															if (playerState.isPlaying) {
-																musicPlayerStore.pause();
-															} else {
-																musicPlayerStore.play();
-															}
-														} else {
-															// Play this track
 															playTrack(actualIndex);
-														}
 													}}
 													disabled={!playerState.canControl}
 													class="p-1.5 rounded-full {playerState.currentTrackIndex ===
@@ -2339,8 +3120,9 @@
 										{/if}
 
 									</div>
-									<!-- Vote Hover - Only show for tracks that are NOT the first one (currently playing) -->
-									{#if index !== 0 && canVoteForTracks()}
+									<!-- Hover overlays based on track status -->
+									{#if getTrackStatus(track, index) === 'votable' && canVoteForTracks()}
+										<!-- Vote Hover - Only show for votable tracks -->
 										<div class="absolute top-0 left-[-4%] w-[108%] h-full rounded-lg flex justify-center {getUserVoteForTrack(track.id) ? '' : 'opacity-0'} group-hover:opacity-100 transition-opacity">
 											<!-- UpVote Button -->
 											<button disabled={getUserVoteForTrack(track.id) === 'upvote'} class="clickable bg-gradient-to-r from-orange-400/20 to-orange-400/80 {getButtonWidthClass(track.id, 'upvote')} flex items-center justify-center opacity-20 -skew-x-19 {getUserVoteForTrack(track.id) === 'upvote' ? '' : 'hover:opacity-80'} cursor-pointer rounded-l-lg transition-all duration-300 ease-in-out" onclick={() => voteForTrackSimple(track.id, 'upvote')} aria-label="upvote track" title="Upvote Track">
@@ -2354,14 +3136,6 @@
 											<button disabled={getUserVoteForTrack(track.id) === 'downvote'} class="clickable bg-gradient-to-l from-purple-400/20 to-purple-400/80 {getButtonWidthClass(track.id, 'downvote')} flex items-center justify-center opacity-20 -skew-x-19 {getUserVoteForTrack(track.id) === 'downvote' ? '' : 'hover:opacity-80'} cursor-pointer rounded-r-lg transition-all duration-300 ease-in-out" onclick={() => voteForTrackSimple(track.id, 'downvote')} aria-label="downvote track" title="Downvote Track">
 												<svg viewBox="-2.4 -2.4 28.80 28.80" class="w-9 h-9 skew-x-19 rotate-180" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" ><path transform="translate(-2.4, -2.4), scale(1.7999999999999998)" fill="#f9fafb" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <title>Promote</title> <g id="页面-1" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"> <g id="Arrow" transform="translate(-432.000000, 0.000000)"> <g id="Promote" transform="translate(432.000000, 0.000000)"> <path d="M24,0 L24,24 L0,24 L0,0 L24,0 Z M12.5934901,23.257841 L12.5819402,23.2595131 L12.5108777,23.2950439 L12.4918791,23.2987469 L12.4918791,23.2987469 L12.4767152,23.2950439 L12.4056548,23.2595131 C12.3958229,23.2563662 12.3870493,23.2590235 12.3821421,23.2649074 L12.3780323,23.275831 L12.360941,23.7031097 L12.3658947,23.7234994 L12.3769048,23.7357139 L12.4804777,23.8096931 L12.4953491,23.8136134 L12.4953491,23.8136134 L12.5071152,23.8096931 L12.6106902,23.7357139 L12.6232938,23.7196733 L12.6232938,23.7196733 L12.6266527,23.7031097 L12.609561,23.275831 C12.6075724,23.2657013 12.6010112,23.2592993 12.5934901,23.257841 L12.5934901,23.257841 Z M12.8583906,23.1452862 L12.8445485,23.1473072 L12.6598443,23.2396597 L12.6498822,23.2499052 L12.6498822,23.2499052 L12.6471943,23.2611114 L12.6650943,23.6906389 L12.6699349,23.7034178 L12.6699349,23.7034178 L12.678386,23.7104931 L12.8793402,23.8032389 C12.8914285,23.8068999 12.9022333,23.8029875 12.9078286,23.7952264 L12.9118235,23.7811639 L12.8776777,23.1665331 C12.8752882,23.1545897 12.8674102,23.1470016 12.8583906,23.1452862 L12.8583906,23.1452862 Z M12.1430473,23.1473072 C12.1332178,23.1423925 12.1221763,23.1452606 12.1156365,23.1525954 L12.1099173,23.1665331 L12.0757714,23.7811639 C12.0751323,23.7926639 12.0828099,23.8018602 12.0926481,23.8045676 L12.108256,23.8032389 L12.3092106,23.7104931 L12.3186497,23.7024347 L12.3186497,23.7024347 L12.3225043,23.6906389 L12.340401,23.2611114 L12.337245,23.2485176 L12.337245,23.2485176 L12.3277531,23.2396597 L12.1430473,23.1473072 Z" id="MingCute" fill-rule="nonzero"> </path> <path d="M11.2929,8.2928 C11.6834,7.90228 12.3166,7.90228 12.7071,8.2928 L18.364,13.9497 C18.7545,14.3402 18.7545,14.9733 18.364,15.3639 C17.9734,15.7544 17.3403,15.7544 16.9497,15.3639 L12,10.4141 L7.05025,15.3639 C6.65973,15.7544 6.02656,15.7544 5.63604,15.3639 C5.24551,14.9733 5.24551,14.3402 5.63604,13.9497 L11.2929,8.2928 Z" fill="#c084fc"> </path> </g> </g> </g> </g></svg>
 											</button>
-										</div>
-									{/if}
-									<!-- "Now Playing" indicator for the first track -->
-									{#if index === 0}
-										<div class="absolute top-0 left-[-4%] w-[108%] h-full rounded-lg flex justify-center items-center opacity-0 group-hover:opacity-100 transition-opacity">
-											<div class="bg-secondary/20 text-secondary w-full h-full rounded-lg flex items-center justify-center opacity-80 text-sm font-medium">
-												♪ Now Playing - No Voting
-											</div>
 										</div>
 									{/if}
 								</div>
@@ -3041,9 +3815,4 @@
 			/>
 		{/if}
 	</div>
-
-	<!-- Music Player Component -->
-	{#if isMusicPlayerInitialized}
-		<MusicPlayer />
-	{/if}
 {/if}

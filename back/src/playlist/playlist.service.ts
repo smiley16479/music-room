@@ -378,7 +378,7 @@ export class PlaylistService {
 
     // Remove vote records associated with this track in the context of an event
     if (playlist.eventId) {
-      await this.eventService.removeVotesOfTrack(playlist.eventId, trackId, userId);
+      await this.eventService.removeVotesOfTrack(playlist.eventId, trackId);
     }
   
     // Shift remaining tracks

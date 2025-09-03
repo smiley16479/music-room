@@ -407,7 +407,7 @@ export async function deleteEvent(id: string): Promise<void> {
 }
 
 export async function joinEvent(eventId: string): Promise<void> {
-  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/participants`, {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/join`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${authService.getAuthToken()}`,
@@ -422,8 +422,8 @@ export async function joinEvent(eventId: string): Promise<void> {
 }
 
 export async function leaveEvent(eventId: string): Promise<void> {
-  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/participants`, {
-    method: 'DELETE',
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/leave`, {
+    method: 'POST',
     headers: {
       'Authorization': `Bearer ${authService.getAuthToken()}`,
       'Content-Type': 'application/json',
@@ -486,6 +486,21 @@ export async function removeVote(eventId: string, trackId: string): Promise<Vote
 
   const result = await response.json();
   return result.data || result;
+}
+
+export async function removeVotesOfTrack(eventId: string, trackId: string): Promise<void> {
+  const response = await fetch(`${config.apiUrl}/api/events/${eventId}/votes/${trackId}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${authService.getAuthToken()}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'Failed to remove all votes for track');
+  }
 }
 
 export async function getVotingResults(eventId: string): Promise<VoteResult[]> {

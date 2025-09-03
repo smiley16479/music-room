@@ -9,7 +9,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards, Logger } from '@nestjs/common';
+import { UseGuards, Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
@@ -18,6 +18,8 @@ import { Vote } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User, VisibilityLevel } from 'src/user/entities/user.entity';
 import { TrackVoteSnapshot } from './event.service';
+import { EventService } from './event.service';
+import { PlaylistService } from 'src/playlist/playlist.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
 import { IsLatitude } from 'class-validator';
@@ -47,6 +49,10 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     private jwtService: JwtService,
     private configService: ConfigService,
     private userService: UserService,
+    @Inject(forwardRef(() => EventService))
+    private eventService: EventService,
+    @Inject(forwardRef(() => PlaylistService))
+    private playlistService: PlaylistService,
   ) {}
 
   afterInit(server: Server) {
@@ -244,6 +250,29 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         timestamp: new Date().toISOString(),
       });
 
+      // Send current playback state if event is live and has a current track
+      try {
+        const eventWithStats = await this.eventService.findById(eventId);
+        if (eventWithStats && eventWithStats.status === 'live' && eventWithStats.currentTrackId && eventWithStats.currentTrackStartedAt) {
+          // Calculate elapsed time since track started
+          const elapsedTime = Math.floor((Date.now() - eventWithStats.currentTrackStartedAt.getTime()) / 1000);
+          
+          client.emit('playback-sync', {
+            eventId,
+            currentTrackId: eventWithStats.currentTrackId,
+            currentTrack: eventWithStats.currentTrack,
+            startTime: elapsedTime,
+            isPlaying: true,
+            timestamp: new Date().toISOString(),
+          });
+          
+          this.logger.log(`Sent playback sync to user ${client.userId} - track: ${eventWithStats.currentTrackId}, elapsed: ${elapsedTime}s`);
+        }
+      } catch (syncError) {
+        this.logger.warn(`Failed to send playback sync to user ${client.userId}: ${syncError.message}`);
+        // Don't fail the join process if sync fails
+      }
+
       // Confirm to the client that they joined
       client.emit('joined-event', { eventId, room });
       this.logger.log(`User ${client.userId} (${userDisplayName}) joined event ${eventId}`);
@@ -344,7 +373,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       client.emit('error', { message: 'Failed to send message', details: error.message });
     }
   }
-
+/*
   // User location updates (for location-based events)
   @SubscribeMessage('update-location')
   async handleUpdateLocation(
@@ -382,7 +411,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     } catch (error) {
       client.emit('error', { message: 'Failed to update location', details: error.message });
     }
-  }
+  }*/
 
   // Server-side notification methods (called by EventsService)
   notifyEventCreated(event: Event, creator: User) {
@@ -488,18 +517,20 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
-  /* notifyVoteRemoved(eventId: string, vote: Vote, tracks: TrackVoteSnapshot[]) {
+  notifyVoteRemoved(eventId: string, vote: Vote/* , tracks: TrackVoteSnapshot[]*/) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('vote-removed', {
       eventId,
       vote: {
         trackId: vote.trackId,
         userId: vote.userId,
+        type: vote.type,
+        weight: vote.weight,
       },
-      results: tracks.slice(0, 10),
-      timestamp: new Date().toISOString(),
+      // results: tracks.slice(0, 10),
+      // timestamp: new Date().toISOString(),
     });
-  } */
+  }
 
   notifyNowPlaying(eventId: string, track: TrackVoteSnapshot) {
     const room = SOCKET_ROOMS.EVENT(eventId);
@@ -567,7 +598,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       .map(socket => (socket as unknown as AuthenticatedSocket).userId)
       .filter(userId => userId !== undefined) as string[];
   }
-
+/*
   // Kick user from event (admin function)
   async kickUserFromEvent(eventId: string, userId: string, reason?: string) {
     const room = SOCKET_ROOMS.EVENT(eventId);
@@ -652,6 +683,467 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         message: 'Failed to get voting results', 
         details: error.message 
       });
+    }
+  }
+*/
+
+  // Music playback control - only for creators and admins
+  @SubscribeMessage('play-track')
+  async handlePlayTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId, startTime }: { eventId: string; trackId?: string; startTime?: number }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can control playback' });
+        return;
+      }
+
+      // Broadcast play command to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-play', {
+        eventId,
+        trackId,
+        startTime: startTime || 0,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Update current track in database if trackId is provided
+      if (trackId) {
+        try {
+          await this.eventService.updateCurrentTrack(eventId, trackId);
+          this.logger.log(`Updated current track in database: ${trackId} for event ${eventId}`);
+        } catch (dbError) {
+          this.logger.warn(`Failed to update current track in database: ${dbError.message}`);
+        }
+      }
+
+      this.logger.log(`User ${client.userId} played track ${trackId} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Play track error: ${error.message}`);
+      client.emit('error', { message: 'Failed to play track', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('pause-track')
+  async handlePauseTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can control playback' });
+        return;
+      }
+
+      // Broadcast pause command to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-pause', {
+        eventId,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} paused playback in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Pause track error: ${error.message}`);
+      client.emit('error', { message: 'Failed to pause track', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('seek-track')
+  async handleSeekTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, seekTime }: { eventId: string; seekTime: number }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can control playback' });
+        return;
+      }
+
+      // Broadcast seek command to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-seek', {
+        eventId,
+        seekTime,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} seeked to ${seekTime}s in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Seek track error: ${error.message}`);
+      client.emit('error', { message: 'Failed to seek track', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('change-track')
+  async handleChangeTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId, trackIndex }: { eventId: string; trackId: string; trackIndex?: number }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can control playback' });
+        return;
+      }
+
+      // Broadcast track change to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-track-changed', {
+        eventId,
+        trackId,
+        trackIndex,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Update current track in database
+      try {
+        await this.eventService.updateCurrentTrack(eventId, trackId);
+        this.logger.log(`Updated current track in database: ${trackId} for event ${eventId}`);
+      } catch (dbError) {
+        this.logger.warn(`Failed to update current track in database: ${dbError.message}`);
+      }
+
+      this.logger.log(`User ${client.userId} changed track to ${trackId} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Change track error: ${error.message}`);
+      client.emit('error', { message: 'Failed to change track', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('set-volume')
+  async handleSetVolume(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, volume }: { eventId: string; volume: number }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can control playback' });
+        return;
+      }
+
+      // Broadcast volume change to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-volume', {
+        eventId,
+        volume: Math.max(0, Math.min(100, volume)), // Clamp between 0-100
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} set volume to ${volume} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Set volume error: ${error.message}`);
+      client.emit('error', { message: 'Failed to set volume', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('skip-track')
+  async handleSkipTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can skip tracks' });
+        return;
+      }
+
+      // Broadcast skip to all participants
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('track-skipped', {
+        eventId,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} skipped track in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Skip track error: ${error.message}`);
+      client.emit('error', { message: 'Failed to skip track', details: error.message });
+    }
+  }
+
+  // Track accessibility tracking
+  private trackAccessibilityReports = new Map<string, Map<string, { canPlay: boolean; timestamp: Date }>>();
+
+  @SubscribeMessage('track-accessibility-report')
+  async handleTrackAccessibilityReport(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId, canPlay, reason }: { 
+      eventId: string; 
+      trackId: string; 
+      canPlay: boolean; 
+      reason?: string;
+    }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      const reportKey = `${eventId}:${trackId}`;
+      
+      if (!this.trackAccessibilityReports.has(reportKey)) {
+        this.trackAccessibilityReports.set(reportKey, new Map());
+      }
+      
+      const trackReports = this.trackAccessibilityReports.get(reportKey)!;
+      trackReports.set(client.userId, {
+        canPlay,
+        timestamp: new Date()
+      });
+
+      this.logger.log(`User ${client.userId} reported track ${trackId} accessibility: ${canPlay ? 'playable' : 'unplayable'} ${reason ? `(${reason})` : ''}`);
+
+      // Get current participants in the event to check consensus
+      const participants = await this.getEventParticipants(eventId);
+      const participantCount = participants.length;
+      
+      // If we have enough reports, check consensus
+      if (trackReports.size >= Math.min(3, Math.ceil(participantCount * 0.6))) {
+        const canPlayCount = Array.from(trackReports.values()).filter(report => report.canPlay).length;
+        const cannotPlayCount = trackReports.size - canPlayCount;
+        
+        // If majority cannot play the track, auto-skip it
+        if (cannotPlayCount > canPlayCount && cannotPlayCount >= 2) {
+          this.logger.log(`Majority cannot play track ${trackId} (${cannotPlayCount}/${trackReports.size}), auto-skipping`);
+          
+          // Only admins/creators can trigger the skip
+          const event = await this.eventService.findById(eventId, client.userId);
+          
+          // Find an admin user to trigger the skip
+          let adminUserId = event.creatorId;
+          if (!adminUserId && event.admins && event.admins.length > 0) {
+            adminUserId = event.admins[0].id;
+          }
+          
+          if (adminUserId) {
+            // Trigger auto-skip from admin perspective
+            await this.handleTrackSkipDueToAccessibility(eventId, trackId, adminUserId, 'majority_cannot_play');
+          }
+        }
+      }
+
+    } catch (error) {
+      this.logger.error(`Track accessibility report error: ${error.message}`);
+      client.emit('error', { message: 'Failed to report track accessibility', details: error.message });
+    }
+  }
+
+  private async handleTrackSkipDueToAccessibility(eventId: string, trackId: string, adminUserId: string, reason: string) {
+    try {
+      const room = SOCKET_ROOMS.EVENT(eventId);
+      const event = await this.eventService.findById(eventId, adminUserId);
+      
+      if (event.playlist && event.playlist.id) {
+        // Remove the problematic track
+        await this.playlistService.removeTrack(event.playlist.id, trackId, adminUserId);
+        this.logger.log(`Auto-removed inaccessible track ${trackId} from event ${eventId} (reason: ${reason})`);
+        
+        // Find next playable track
+        const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
+        
+        if (updatedPlaylist.length > 0) {
+          const nextTrack = updatedPlaylist[0];
+          
+          // Broadcast track change
+          this.server.to(room).emit('music-track-changed', {
+            eventId,
+            trackId: nextTrack.track.id,
+            trackIndex: 0,
+            controlledBy: adminUserId,
+            autoSkipped: true,
+            skipReason: reason,
+            continuePlaying: true, // Maintain playing state during auto-skip
+            timestamp: new Date().toISOString(),
+          });
+          
+          // Clear accessibility reports for the skipped track
+          this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
+          
+          // Update current track in database
+          await this.eventService.updateCurrentTrack(eventId, nextTrack.track.id);
+          
+          this.logger.log(`Auto-advanced to next track ${nextTrack.track.id} for event ${eventId}`);
+        } else {
+          // No more tracks available
+          this.server.to(room).emit('music-pause', {
+            eventId,
+            controlledBy: adminUserId,
+            reason: 'no_more_tracks',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+      
+    } catch (error) {
+      this.logger.error(`Auto-skip error: ${error.message}`);
+    }
+  }
+
+  @SubscribeMessage('track-ended')
+  async handleTrackEnded(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string }
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Only allow participants to notify about track ending
+      const room = SOCKET_ROOMS.EVENT(eventId);
+      
+      // Broadcast track ended notification to all participants first
+      this.server.to(room).emit('track-ended', {
+        eventId,
+        trackId,
+        notifiedBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} notified that track ${trackId} ended in event ${eventId}`);
+
+      // Check if the user is an admin or creator - only they can control track progression
+      const event = await this.eventService.findById(eventId, client.userId);
+      const isCreator = event.creatorId === client.userId;
+      const isAdmin = event.admins?.some(admin => admin.id === client.userId) || false;
+
+      if (isCreator || isAdmin) {
+        this.logger.log(`Admin ${client.userId} handling track progression for event ${eventId}`);
+        
+        // Remove the finished track from the event playlist
+        try {
+          // Get the event playlist
+          if (event.playlist && event.playlist.id) {
+            // Remove track from playlist (this will automatically update the event)
+            await this.playlistService.removeTrack(event.playlist.id, trackId, client.userId);
+            this.logger.log(`Removed finished track ${trackId} from event ${eventId} playlist`);
+            
+            // Clear accessibility reports for the finished track
+            this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
+            
+            // Get updated playlist to find next track
+            const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
+            
+            if (updatedPlaylist.length > 0) {
+              // Find the first playable track
+              const nextTrack = updatedPlaylist[0]; // After removal, first track becomes the next track
+              
+              if (nextTrack && nextTrack.track) {
+                // Broadcast the next track to all participants
+                this.server.to(room).emit('music-track-changed', {
+                  eventId,
+                  trackId: nextTrack.track.id,
+                  trackIndex: 0,
+                  controlledBy: client.userId,
+                  continuePlaying: true, // Indicate that playback should continue
+                  timestamp: new Date().toISOString(),
+                });
+
+                // Update current track in database
+                await this.eventService.updateCurrentTrack(eventId, nextTrack.track.id);
+                
+                this.logger.log(`Next track ${nextTrack.track.id} set for event ${eventId}`);
+              } else {
+                // No more tracks, pause playback
+                this.server.to(room).emit('music-pause', {
+                  eventId,
+                  pausedBy: client.userId,
+                  timestamp: new Date().toISOString(),
+                });
+                this.logger.log(`No more tracks in event ${eventId}, paused playback`);
+              }
+            } else {
+              // Playlist is empty, pause playback
+              this.server.to(room).emit('music-pause', {
+                eventId,
+                pausedBy: client.userId,
+                timestamp: new Date().toISOString(),
+              });
+              this.logger.log(`Event ${eventId} playlist is empty, paused playback`);
+            }
+          }
+        } catch (playlistError) {
+          this.logger.error(`Failed to handle track progression for event ${eventId}: ${playlistError.message}`);
+          // Pause playback on error
+          this.server.to(room).emit('music-pause', {
+            eventId,
+            pausedBy: client.userId,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } else {
+        this.logger.log(`User ${client.userId} is not an admin, cannot control track progression for event ${eventId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Track ended notification error: ${error.message}`);
+      client.emit('error', { message: 'Failed to notify track ended', details: error.message });
+    }
+  }
+
+  // Helper method to check if user can control playback
+  private async canControlPlayback(eventId: string, userId: string): Promise<boolean> {
+    try {
+      const event = await this.eventService.findById(eventId, userId);
+      if (!event) {
+        return false;
+      }
+
+      // Check if user is creator
+      if (event.creatorId === userId) {
+        return true;
+      }
+
+      // Check if user is admin
+      const isAdmin = event.admins?.some(admin => admin.id === userId);
+      return !!isAdmin;
+    } catch (error) {
+      this.logger.error(`Error checking playback control permissions: ${error.message}`);
+      return false;
     }
   }
 

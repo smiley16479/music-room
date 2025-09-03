@@ -21,15 +21,25 @@ export interface EventSocketEvents {
   'event-deleted': (data: { eventId: string }) => void;
 
   // Voting events
-  'vote-added': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
-  'vote-updated': (data: { eventId: string; vote: Vote; results: VoteResult[] }) => void;
-  'vote-removed': (data: { eventId: string; trackId: string; results: VoteResult[] }) => void;
+  'vote-updated': (data: { eventId: string; vote: { trackId: string; userId: string; type: 'upvote' | 'downvote'; weight: number; }; }) => void;
+  'vote-removed': (data: { eventId: string; vote: { trackId: string; userId: string; type: 'upvote' | 'downvote'; weight: number; }; }) => void;
+  'vote-optimistic-update': (data: { eventId: string; vote: { trackId: string; userId: string; type: 'upvote' | 'downvote'; }; timestamp: string; }) => void;
 
   // Track management
   'track-added': (data: { eventId: string; track: Track }) => void;
   'track-removed': (data: { eventId: string; trackId: string }) => void;
-  'tracks-reordered': (data: { eventId: string; trackOrder: string[] }) => void;
+  'tracks-reordered': (data: { eventId: string; trackOrder: string[]; playlistOrder?: string[] }) => void;
   'current-track-changed': (data: { eventId: string; track: Track | null; startedAt: string | null }) => void;
+  'track-ended': (data: { eventId: string; trackId: string; timestamp: string }) => void;
+
+  // Music synchronization events
+  'music-play': (data: { eventId: string; trackId?: string; startTime?: number; controlledBy: string; timestamp: string }) => void;
+  'music-pause': (data: { eventId: string; controlledBy: string; timestamp: string }) => void;
+  'music-seek': (data: { eventId: string; seekTime: number; controlledBy: string; timestamp: string }) => void;
+  'music-track-changed': (data: { eventId: string; trackId: string; trackIndex?: number; controlledBy: string; autoSkipped?: boolean; skipReason?: string; continuePlaying?: boolean; playlistOrder?: string[]; timestamp: string }) => void;
+  'music-volume': (data: { eventId: string; volume: number; controlledBy: string; timestamp: string }) => void;
+  'playback-state-updated': (data: { eventId: string; state: any; timestamp: string }) => void;
+  'playback-sync': (data: { eventId: string; currentTrackId: string; currentTrack: Track | null; startTime: number; isPlaying: boolean; timestamp: string }) => void;
 
   // Error handling
   'error': (data: { message: string; details?: string }) => void;
@@ -181,16 +191,7 @@ class EventSocketService {
       throw new Error('Socket not connected');
     }
 
-    this.socket.emit('vote', { eventId, trackId, type, weight });
-  }
-
-  // Remove a vote
-  removeVote(eventId: string, trackId: string) {
-    if (!this.socket) {
-      throw new Error('Socket not connected');
-    }
-
-    this.socket.emit('remove-vote', { eventId, trackId });
+    this.socket.emit('vote-track', { eventId, trackId, type });
   }
 
   // Request current voting results
@@ -212,12 +213,12 @@ class EventSocketService {
   }
 
   // Control playback (for event creators/admins)
-  playTrack(eventId: string, trackId: string) {
+  playTrack(eventId: string, trackId?: string, startTime?: number) {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
 
-    this.socket.emit('play-track', { eventId, trackId });
+    this.socket.emit('play-track', { eventId, trackId, startTime });
   }
 
   pauseTrack(eventId: string) {
@@ -228,12 +229,63 @@ class EventSocketService {
     this.socket.emit('pause-track', { eventId });
   }
 
+  seekTrack(eventId: string, seekTime: number) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('seek-track', { eventId, seekTime });
+  }
+
+  changeTrack(eventId: string, trackId: string, trackIndex?: number) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('change-track', { eventId, trackId, trackIndex });
+  }
+
+  setVolume(eventId: string, volume: number) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('set-volume', { eventId, volume });
+  }
+
   skipTrack(eventId: string) {
     if (!this.socket) {
       throw new Error('Socket not connected');
     }
 
     this.socket.emit('skip-track', { eventId });
+  }
+
+  // Notify when a track has ended (for admins to coordinate next track)
+  notifyTrackEnded(eventId: string, trackId: string) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('track-ended', { eventId, trackId });
+  }
+
+  // Report track accessibility issues for synchronization
+  reportTrackAccessibility(eventId: string, trackId: string, canPlay: boolean, reason?: string) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('track-accessibility-report', { eventId, trackId, canPlay, reason });
+  }
+
+  // Request current playlist order synchronization from server
+  requestPlaylistSync(eventId: string) {
+    if (!this.socket) {
+      throw new Error('Socket not connected');
+    }
+
+    this.socket.emit('request-playlist-sync', { eventId });
   }
 
   // Event listeners

@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import type { PlaylistTrack } from '../services/playlists';
 
 export interface CurrentTrack {
@@ -23,6 +23,9 @@ export interface PlayerState {
   isMuted: boolean;
   canControl: boolean; // User permission to control music
   deviceId?: string; // Connected device ID
+  isInEvent: boolean; // Whether currently in an event context
+  eventId?: string; // Current event ID if in event context
+  failedTrackIds: Set<string>; // Track IDs that failed to load (CORS/licensing issues)
 }
 
 const initialState: PlayerState = {
@@ -36,11 +39,17 @@ const initialState: PlayerState = {
   isLoading: false,
   isMuted: false,
   canControl: false,
-  deviceId: undefined
+  deviceId: undefined,
+  isInEvent: false,
+  eventId: undefined,
+  failedTrackIds: new Set()
 };
 
 function createMusicPlayerStore() {
   const { subscribe, set, update } = writable<PlayerState>(initialState);
+
+  // Store reference for internal access
+  let currentState: PlayerState = initialState;
 
   // Helper function to find next valid track with preview URL
   const findNextValidTrack = (playlist: PlaylistTrack[], startIndex: number): number => {
@@ -63,8 +72,9 @@ function createMusicPlayerStore() {
       
       checkedIndices.add(currentIndex);
       
-      // Check if this track has a valid preview URL
-      if (playlist[currentIndex].track.previewUrl) {
+      // Check if this track has a valid preview URL and is not marked as failed
+      if (playlist[currentIndex].track.previewUrl && 
+          !currentState.failedTrackIds.has(playlist[currentIndex].track.id)) {
         return currentIndex;
       }
       
@@ -95,8 +105,9 @@ function createMusicPlayerStore() {
       
       checkedIndices.add(currentIndex);
       
-      // Check if this track has a valid preview URL
-      if (playlist[currentIndex].track.previewUrl) {
+      // Check if this track has a valid preview URL and is not marked as failed
+      if (playlist[currentIndex].track.previewUrl && 
+          !currentState.failedTrackIds.has(playlist[currentIndex].track.id)) {
         return currentIndex;
       }
       
@@ -111,20 +122,22 @@ function createMusicPlayerStore() {
     
     // Track Control
     setCurrentTrack: (track: CurrentTrack, playlist: PlaylistTrack[] = [], index: number = 0) => {
-      console.log('MusicPlayerStore: Setting current track:', track);
-      update(state => ({
-        ...state,
-        currentTrack: track,
-        playlist,
-        currentTrackIndex: index,
-        duration: track.duration || 30 // Default to 30 seconds for previews
-      }));
+      update(state => {
+        currentState = {
+          ...state,
+          currentTrack: track,
+          playlist,
+          currentTrackIndex: index,
+          duration: track.duration || 30 // Default to 30 seconds for previews
+        };
+        return currentState;
+      });
     },
 
     setPlaylist: (playlist: PlaylistTrack[], currentIndex: number = 0) => {
       update(state => {
         const newTrack = playlist[currentIndex];
-        return {
+        currentState = {
           ...state,
           playlist,
           currentTrackIndex: currentIndex,
@@ -139,24 +152,76 @@ function createMusicPlayerStore() {
           } : null,
           duration: newTrack?.track.duration || 30
         };
+        return currentState;
       });
     },
 
     // Playback Control
     play: () => {
-      update(state => ({ ...state, isPlaying: true }));
+      update(state => {
+        currentState = { ...state, isPlaying: true };
+        return currentState;
+      });
     },
 
     pause: () => {
-      update(state => ({ ...state, isPlaying: false }));
+      update(state => {
+        currentState = { ...state, isPlaying: false };
+        return currentState;
+      });
     },
 
     togglePlay: () => {
-      update(state => ({ ...state, isPlaying: !state.isPlaying }));
+      update(state => {
+        currentState = { ...state, isPlaying: !state.isPlaying };
+        return currentState;
+      });
     },
 
     nextTrack: () => {
       update(state => {
+
+        // For events: find next unplayed track, don't loop
+        if (state.isInEvent) {
+          let nextIndex = state.currentTrackIndex + 1;
+          
+          // Find next unplayed and unfailed track
+          while (nextIndex < state.playlist.length) {
+            const track = state.playlist[nextIndex];
+            if (!state.failedTrackIds.has(track.track.id)) {
+              // Found an unplayed, unfailed track
+              const nextTrack = track;
+              currentState = {
+                ...state,
+                currentTrackIndex: nextIndex,
+                currentTrack: {
+                  id: nextTrack.track.id,
+                  title: nextTrack.track.title,
+                  artist: nextTrack.track.artist,
+                  album: nextTrack.track.album,
+                  duration: nextTrack.track.duration || 30,
+                  albumCoverUrl: nextTrack.track.albumCoverUrl,
+                  previewUrl: nextTrack.track.previewUrl
+                },
+                currentTime: 0,
+                duration: nextTrack.track.duration || 30,
+              };
+              return currentState;
+            }
+            nextIndex++;
+          }
+          
+          // No unplayed tracks found, pause and wait for new tracks
+          currentState = {
+            ...state,
+            isPlaying: false,
+            currentTrack: null,
+            currentTrackIndex: -1
+          };
+          return currentState;
+        }
+
+        // Original playlist behavior: loop through tracks
         let nextIndex = state.currentTrackIndex + 1;
         
         // If we're playing, try to find the next track with a valid preview URL
@@ -177,7 +242,8 @@ function createMusicPlayerStore() {
             if (validFromStart === -1) {
               // Really no valid tracks anywhere, stop playing
               console.warn('No tracks with valid preview URLs available in entire playlist');
-              return { ...state, isPlaying: false };
+              currentState = { ...state, isPlaying: false };
+              return currentState;
             } else {
               nextIndex = validFromStart;
             }
@@ -193,7 +259,7 @@ function createMusicPlayerStore() {
         }
         
         const nextTrack = state.playlist[nextIndex];
-        return {
+        currentState = {
           ...state,
           currentTrackIndex: nextIndex,
           currentTrack: {
@@ -210,6 +276,7 @@ function createMusicPlayerStore() {
           // Keep playing state - the audio component will handle auto-play
           isPlaying: state.isPlaying
         };
+        return currentState;
       });
     },
 
@@ -292,6 +359,72 @@ function createMusicPlayerStore() {
 
     clearDevice: () => {
       update(state => ({ ...state, deviceId: undefined, canControl: false }));
+    },
+
+    // Event Context Control
+    setInEvent: (isInEvent: boolean, eventId?: string) => {
+      update(state => {
+        currentState = { 
+          ...state, 
+          isInEvent, 
+          eventId,
+          failedTrackIds: isInEvent ? new Set() : new Set()
+        };
+        return currentState;
+      });
+    },
+
+    // Sync with event state
+    syncWithEvent: (trackId: string, isPlaying: boolean | undefined, currentTime: number = 0) => {
+      update(state => {
+        const trackIndex = state.playlist.findIndex(pt => pt.track.id === trackId);
+        if (trackIndex >= 0) {
+          const track = state.playlist[trackIndex];
+          currentState = {
+            ...state,
+            currentTrack: {
+              id: track.track.id,
+              title: track.track.title,
+              artist: track.track.artist,
+              album: track.track.album,
+              duration: track.track.duration || 30,
+              albumCoverUrl: track.track.albumCoverUrl,
+              previewUrl: track.track.previewUrl
+            },
+            currentTrackIndex: trackIndex,
+            isPlaying: isPlaying !== undefined ? isPlaying : state.isPlaying,
+            currentTime
+          };
+        }
+        return currentState;
+      });
+    },
+
+    // Event Track Management
+    clearPlayedTracks: () => {
+      update(state => {
+        currentState = { ...state, failedTrackIds: new Set() };
+        return currentState;
+      });
+    },
+
+    markTrackAsFailed: (trackId: string) => {
+      update(state => {
+        const newFailedTracks = new Set(state.failedTrackIds);
+        newFailedTracks.add(trackId);
+        return { ...state, failedTrackIds: newFailedTracks };
+      });
+    },
+
+    clearFailedTracks: () => {
+      update(state => ({ ...state, failedTrackIds: new Set() }));
+    },
+
+    getUnplayedTracksCount: () => {
+      if (!currentState.isInEvent) return currentState.playlist.length;
+      return currentState.playlist.filter((track: PlaylistTrack) => 
+        !currentState.failedTrackIds.has(track.track.id)
+      ).length;
     },
 
     // Reset

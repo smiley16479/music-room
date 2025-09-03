@@ -423,6 +423,7 @@ export class EventController {
   }
 
   @Delete(':id/vote/:trackId')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Remove vote',
     description: 'Removes the user\'s vote for a specific track in the event',
@@ -449,6 +450,37 @@ export class EventController {
       success: true,
       message: 'Vote removed successfully',
       data: results,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Delete(':id/votes/:trackId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Remove all votes for track',
+    description: 'Removes all votes for a specific track in the event (admin only)',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event',
+    required: true
+  })
+  @ApiParam({
+    name: 'trackId',
+    type: String,
+    description: 'The ID of the track to remove all votes from',
+    required: true
+  })
+  async removeVotesOfTrack(
+    @Param('id') id: string,
+    @Param('trackId') trackId: string,
+    @CurrentUser() user: User,
+  ) {
+    await this.eventService.removeVotesOfTrack(id, trackId);
+    return {
+      success: true,
+      message: 'All votes for track removed successfully',
       timestamp: new Date().toISOString(),
     };
   }

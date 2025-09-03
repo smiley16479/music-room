@@ -494,14 +494,6 @@
 		if (!playlist || !user || isMusicPlayerInitialized) return;
 
 		try {
-			// Don't initialize if playlist has no tracks
-			if (!playlist.tracks || playlist.tracks.length === 0) {
-				console.warn(
-					"Cannot initialize music player: playlist has no tracks",
-				);
-				return;
-			}
-
 			// Create room context for the music player
 			const roomContext = {
 				type: "playlist" as const,
@@ -513,9 +505,9 @@
 			};
 
 			console.log("Initializing music player with context:", roomContext);
-			console.log("Playlist tracks:", playlist.tracks.length);
+			console.log("Playlist tracks:", playlist.tracks?.length || 0);
 
-			// Initialize music player with playlist tracks
+			// Initialize music player with playlist tracks (or empty array if no tracks)
 			await musicPlayerService.initializeForRoom(
 				roomContext,
 				playlist.tracks || [],
