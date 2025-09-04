@@ -96,13 +96,6 @@ export class Event {
   @Column({ name: 'event_end_date', type: 'timestamp', nullable: true })
   eventEndDate: Date;
 
-  // Current playing track
-  @Column({ name: 'current_track_id', nullable: true })
-  currentTrackId: string;
-
-  @Column({ name: 'current_track_started_at', type: 'timestamp', nullable: true })
-  currentTrackStartedAt: Date;
-
   @Column({ name: 'max_votes_per_user', type: 'int', default: 1 })
   maxVotesPerUser: number;
 
@@ -120,9 +113,16 @@ export class Event {
   @Column({ name: 'creator_id' })
   creatorId: string;
 
+  // Current playing track
   @ManyToOne(() => Track, { nullable: true })
   @JoinColumn({ name: 'current_track_id' })
   currentTrack: Track;
+
+  @Column({ name: 'current_track_id', nullable: true })
+  currentTrackId: string;
+
+  @Column({ name: 'current_track_started_at', type: 'timestamp', nullable: true })
+  currentTrackStartedAt: Date;
 
   @OneToMany(() => Vote, (vote) => vote.event)
   votes: Vote[];

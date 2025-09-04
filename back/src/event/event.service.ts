@@ -691,6 +691,38 @@ export class EventService {
     return nextTrack;
   } */
 
+  async setCurrentTrack(eventId: string, trackId: string, userId: string): Promise<void> {
+    const event = await this.findById(eventId, userId);
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    console.log("trackId:", trackId);
+    event.playlist?.playlistTracks.forEach(element => {
+      console.log("playlist track:", element.trackId);
+    });
+
+    // if (event.playlist?.playlistTracks.some(pt => pt.trackId === trackId) === false)
+      // throw new NotFoundException('Track not found');
+
+    // Only creator or existing admin can promote (MAY BE TO DO: change pour les autorisations de device ? ⚠️)
+    if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
+      throw new ForbiddenException('Only creator or admin can promote another user');
+    }
+
+    /* A vérifier (chatGPT) ⚠️
+    Si tu mets à jour currentTrackId et recharges l’entité avec la relation, tu obtiens bien l’entité Track correspondante dans currentTrack.
+    La synchronisation se fait à la lecture, pas à l’écriture.
+    */
+    event.currentTrackId = trackId;
+    event.currentTrackStartedAt = new Date();
+    await this.eventRepository.save(event);
+
+    // Notify participants
+    this.eventGateway.notifyNowPlaying(eventId, trackId);
+  }
+
   /** Récupère tous les events où l'utilisateur est créateur ou participant, avec les admins */
   async getEventsUserCanInviteWithAdmins(userId: string): Promise<Event[]> {
     const events = await this.eventRepository

@@ -255,12 +255,12 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
-    func updateNowPlaying(eventId: String, trackId: String?) async throws -> NowPlayingResponse {
-        let endpoint = "/events/\(eventId)/now-playing"
+    func updateNowPlaying(eventId: String, trackId: String) async throws {
+        let endpoint = "/events/\(eventId)/now-playing/\(trackId)"
         let body: [String: Any] = [
-            "trackId": trackId ?? NSNull()
+            "trackId": trackId
         ]
-        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
+        /* return */let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
     }
     
     func skipTrack(eventId: String) async throws -> NowPlayingResponse {

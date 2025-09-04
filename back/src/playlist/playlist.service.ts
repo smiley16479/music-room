@@ -271,6 +271,8 @@ export class PlaylistService {
   ): Promise<PlaylistTrackWithDetails> {
     const playlist = await this.findById(playlistId, userId);
 
+    console.log(`Adding track to playlist ${playlistId} by user ${userId}`, playlist, '\n', addTrackDto);
+    
     // Check edit permissions
     await this.checkEditPermissions(playlist, userId);
 

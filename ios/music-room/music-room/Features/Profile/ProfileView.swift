@@ -911,6 +911,52 @@ struct NotificationSettingsView: View {
 
 // MARK: - Privacy Settings View (Placeholder)
 struct PrivacySettingsView: View {
+    @State private var displayNamePrivacy: PrivacyLevel = .public
+    @State private var bioPrivacy: PrivacyLevel = .friends
+    @State private var musicPreferencePrivacy: PrivacyLevel = .friends
+    @State private var locationPrivacy: PrivacyLevel = .private
+
+    var body: some View {
+        List {
+           /*  Section("Profile Visibility") {
+                NavigationLink("Display Name") {
+                    Text("Display Name Privacy Settings")
+                }
+                
+                NavigationLink("Bio") {
+                    Text("Bio Privacy Settings")
+                }
+                
+                NavigationLink("Location") {
+                    Text("Location Privacy Settings")
+                }
+            } */
+            Section("Profile Visibility") {
+                PrivacyToggleRow(
+                    title: "Display Name",
+                    selection: $displayNamePrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Bio",
+                    selection: $bioPrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Music Preferences",
+                    selection: $musicPreferencePrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Location",
+                    selection: $locationPrivacy
+                )
+            }
+        }
+        .navigationTitle("privacy_settings".localized)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/* Relicat avec NavigationLink vers autre page
+struct PrivacySettingsView: View {
     var body: some View {
         List {
             Section("Profile Visibility") {
@@ -931,7 +977,34 @@ struct PrivacySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+ */
 
+// MARK: - Toggle Privacy Setting Row
+enum PrivacyLevel: String, CaseIterable, Identifiable {
+    case `public` = "Public"
+    case friends = "Friends Only"
+    case `private` = "Private"
+    var id: String { rawValue }
+}
+
+struct PrivacyToggleRow: View {
+    let title: String
+    @Binding var selection: PrivacyLevel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            Picker("", selection: $selection) {
+                ForEach(PrivacyLevel.allCases) { level in
+                    Text(level.rawValue).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.vertical, 4)
+    }
+}
 // MARK: - Toggle Setting Row
 struct ToggleSettingRow: View {
     let title: String

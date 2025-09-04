@@ -204,6 +204,36 @@ struct Track: Codable, Identifiable {
         self.isCurrentlyPlaying = isCurrentlyPlaying
         self.preview = preview
     }
+
+
+    init?(from dict: [String: Any]) {
+        guard let id = dict["id"] as? String,
+              let title = dict["title"] as? String,
+              let artist = dict["artist"] as? String,
+              let duration = dict["duration"] as? Int else { return nil }
+        self.id = id
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+        self.deezerId = dict["deezerId"] as? String
+        self.album = dict["album"] as? String
+        self.previewUrl = dict["previewUrl"] as? String
+        self.albumCoverUrl = dict["albumCoverUrl"] as? String
+        self.albumCoverSmallUrl = dict["albumCoverSmallUrl"] as? String
+        self.albumCoverMediumUrl = dict["albumCoverMediumUrl"] as? String
+        self.albumCoverBigUrl = dict["albumCoverBigUrl"] as? String
+        self.deezerUrl = dict["deezerUrl"] as? String
+        self.genres = dict["genres"] as? [String]
+        self.releaseDate = dict["releaseDate"] as? String
+        self.available = dict["available"] as? Bool
+        self.createdAt = dict["createdAt"] as? String
+        self.updatedAt = dict["updatedAt"] as? String
+        self.likes = dict["likes"] as? Int
+        self.dislikes = dict["dislikes"] as? Int
+        self.hasPlayed = dict["hasPlayed"] as? Bool
+        self.isCurrentlyPlaying = dict["isCurrentlyPlaying"] as? Bool
+        self.preview = dict["preview"] as? String
+    }
 }
 
 // MARK: - Event Model

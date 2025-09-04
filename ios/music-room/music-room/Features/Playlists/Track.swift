@@ -16,6 +16,12 @@ class PlaylistViewModel {
     // @State private var errorMessage: String?
     // private let socketService = SocketService.shared
     let eventsSocket = EventsSocketService.shared
+
+    // Player
+    var audioPlayer: AVPlayer? = nil
+    var isPlaying: Bool = false
+    var currentTrackIndex: Int = 0
+    var volume: Float = 0.5
     
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -97,9 +103,7 @@ class PlaylistViewModel {
             return
         }
         print("Avant vote - likes: \(tracks[index].likes ?? 0), dislikes: \(tracks[index].dislikes ?? 0)")
-        
-        
-        
+
         // Use new API service to vote
         Task { [weak self] in
             guard let self = self else { return }
@@ -155,12 +159,16 @@ class PlaylistViewModel {
     }
     
     // MARK: - Playback Control
-    func updateNowPlaying(trackId: String?, position: Double? = nil) async {
+    func updateNowPlaying(trackId: String, position: Double? = nil) async {
         do {
-            let result = try await APIService.shared.updateNowPlaying(eventId: playlist.id, trackId: trackId)
+            guard let eventId = self.eventId else {
+                print("❌ Erreur: Aucun eventId associé")
+                return
+            }
+            let result = try await APIService.shared.updateNowPlaying(eventId: eventId, trackId: trackId)
             print("Now playing mis à jour: \(result)")
         } catch {
-            print("Erreur lors de la mise à jour: \(error)")
+            print("Erreur lors de la mise à jour (updateNowPlaying): \(error)")
         }
     }
     
@@ -175,15 +183,20 @@ class PlaylistViewModel {
     
     func updatePlaybackState(isPlaying: Bool, position: Double? = nil) async {
         do {
-            let result = try await APIService.shared.updatePlaybackState(eventId: playlist.id, isPlaying: isPlaying, position: position)
+            guard let eventId = self.eventId else {
+                print("❌ Erreur: Aucun eventId associé")
+                return
+            }
+            let result = try await APIService.shared.updatePlaybackState(eventId: eventId, isPlaying: isPlaying, position: position)
             print("État de lecture mis à jour: \(result)")
         } catch {
-            print("Erreur lors de la mise à jour: \(error)")
+            print("Erreur lors de la mise à jour (updatePlaybackState): \(error)")
         }
     }
     
     func addTrackToPlaylist(_ track: Track) async {
       print("Adding track to playlist: \(track)")
+      // let newTrack = Track(from: track) else { return }
         var newTrack = track
         newTrack.likes = 0
         newTrack.dislikes = 0
@@ -203,28 +216,15 @@ class PlaylistViewModel {
           // "position": ... // optionnel si tu veux gérer la position
       ]
 
-      Task {
-          do {
-              let playListTrack = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
-              await MainActor.run {
-                  tracks.append(playListTrack.track)
-                  sortUpcomingTracks()
-                  
-                  // Send track addition via socket
-//                  socketService.addTrack(trackId: playListTrack.track.id, playlistId: playlist.id)
-//                  isSaving = false
-//                  dismiss()
-              }
-          } catch {
-              await MainActor.run {
-//                    errorMessage = error.localizedDescription
-//                    isSaving = false
-                }
-          }
+      do {
+          let playListTrack = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
+      } catch {
+        print("Erreur lors de addTrackToPlaylist: \(error)")
+          // await MainActor.run {
+          //    errorMessage = error.localizedDescription
+          //    isSaving = false
+            // }
       }
-        // Forme du dto:
-        // trackId: string
-        // position?: number
     }
     
     func addProposedTrack(_ track: Track) {
@@ -265,6 +265,112 @@ class PlaylistViewModel {
     var currentTrack: Track? {
         tracks.first(where: { $0.id == currentTrackId })
     }
+
+// MARK AUDIO CONTROL
+    func togglePlayPause(for track: Track) {
+        guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
+        // Synchronize track state
+        syncCurrentTrack(track: track)
+
+        // Vérifie si le player joue déjà ce morceau
+        // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
+
+        // Met à jour l'index courant (dans syncCurrentTrack maintenant)
+        /* if let idx = viewModel.tracks.firstIndex(where: { $0.id == track.id }) {
+            currentTrackIndex = idx
+        }
+
+        let tracks = viewModel.tracks
+        if (!tracks.isEmpty && currentTrackIndex == 0) {
+            for i in tracks.indices {
+                viewModel.tracks[i].hasPlayed = false
+                viewModel.tracks[i].isCurrentlyPlaying = false
+            }
+            viewModel.tracks[0].hasPlayed = false
+            viewModel.tracks[0].isCurrentlyPlaying = true
+        } */
+
+        if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
+          currentAsset.url == url {
+            // Même morceau : toggle play/pause
+            if isPlaying {
+                audioPlayer?.pause()
+                isPlaying = false
+            } else {
+                audioPlayer?.play()
+                isPlaying = true
+            }
+        } else {
+            // Un autre morceau : pause l'ancien player
+            audioPlayer?.pause()
+            isPlaying = false
+            // Nouveau morceau : crée un nouveau player et joue
+            audioPlayer = AVPlayer(url: url)
+            audioPlayer?.play()
+            isPlaying = true
+        }
+    }
+
+    func playTrack(_ track: Track) {
+        guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
+        audioPlayer?.pause()
+        audioPlayer = AVPlayer(url: url)
+        audioPlayer?.play()
+        isPlaying = true
+
+        syncCurrentTrack(track: track)
+
+        // Retire l'ancien observer si besoin
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: audioPlayer?.currentItem)
+        // Ajoute un nouvel observer
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(trackDidFinishPlaying),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: audioPlayer?.currentItem
+        )
+    }
+
+    @objc private func trackDidFinishPlaying(_ notification: Notification) {
+        DispatchQueue.main.async {
+            self.nextTrack()
+        }
+    }
+
+   func nextTrack() {
+       guard !tracks.isEmpty else { return }
+
+       currentTrackIndex = (currentTrackIndex + 1) % tracks.count
+
+       let track = tracks[currentTrackIndex]
+      //  togglePlayPause(for: track)
+      playTrack(track)
+   }
+
+   func previousTrack() {
+      guard !tracks.isEmpty, currentTrackIndex != 0 else { return }
+
+       currentTrackIndex = (currentTrackIndex - 1 + tracks.count) % tracks.count
+
+       let track = tracks[currentTrackIndex]
+      //  togglePlayPause(for: track)
+      playTrack(track)
+   }
+
+  func syncCurrentTrack(track: Track) {
+
+      guard let currentIndex = self.tracks.firstIndex(where: { $0.id == track.id }) else { return }
+      self.currentTrackId = track.id
+
+      // Met à jour tous les états des tracks
+      for (i, _) in self.tracks.enumerated() {
+          self.tracks[i].isCurrentlyPlaying = (i == currentIndex)
+          self.tracks[i].hasPlayed = (i < currentIndex)
+      }
+
+      // Send current track change via socket
+      // SocketService.shared.updateCurrentTrack(trackId: track.id, playlistId: viewModel.playlist.id)
+  }
 
 
     // MARK: - Socket Setup
@@ -326,28 +432,39 @@ class PlaylistViewModel {
             }
         }
 
-        eventsSocket.on("track-removed") { [weak self] data, ack in
-            print("Vote update received via socket: \(data)")
+        // Écoute les ajouts de tracks
+        eventsSocket.on("track-added") { [weak self] data, ack in
+            print("track-added received via socket: \(data)")
             guard let self = self,
-                  let voteData = data.first as? [String: Any],
-                  let eventId = voteData["eventId"] as? String,
-                  let vote = voteData["vote"] as? [String: Any],
-                  let trackId = vote["trackId"] as? String,
-                  let type = vote["type"] as? String else { return }
+                  let addTrackData = data.first as? [String: Any],
+                  let track = addTrackData["track"] as? [String: Any],
+                  let eventId = addTrackData["eventId"] as? String,
+                  let newTrack = Track(from: track) else { return }
+
+            DispatchQueue.main.async {
+                  self.tracks.append(newTrack)
+                  self.sortUpcomingTracks()
+            }
+        }
+
+
+        // Écoute les suppressions de tracks
+        eventsSocket.on("track-removed") { [weak self] data, ack in
+            print("Track-removed received via socket: \(data)")
+            guard let self = self,
+                  let rmTrackData = data.first as? [String: Any],
+                  let eventId = rmTrackData["eventId"] as? String,
+                  let trackId = rmTrackData["trackId"] as? String,
+                  let removedBy = rmTrackData["removedBy"] as? String,
+                  let timestamp = rmTrackData["timestamp"] as? String else { return }
             
             DispatchQueue.main.async {
-                  if let index = self.tracks.firstIndex(where: { $0.id == trackId }) {
-                      if type == "upvote" {
-                          self.tracks[index].likes = (self.tracks[index].likes ?? 0) + 1
-                      } else if type == "downvote" {
-                          self.tracks[index].dislikes = (self.tracks[index].dislikes ?? 0) + 1
-                      }
-                      self.sortUpcomingTracks()
-                }
+                  self.tracks.removeAll { $0.id == trackId }
+                  self.sortUpcomingTracks()
             }
         }
         
-        // Écoute les suggestions de tracks
+        // Écoute les suggestions de tracks 📌 pas fait
         eventsSocket.on("trackSuggested") { [weak self] data, ack in
             guard let self = self,
                   let suggestionData = data.first as? [String: Any] else { return }
@@ -358,28 +475,28 @@ class PlaylistViewModel {
             }
         }
         
-        // Écoute les changements de track
-        eventsSocket.on("trackChanged") { [weak self] data, ack in
+        // Écoute les changements de track 📌 pas fait !! 
+        eventsSocket.on("now-playing") { [weak self] data, ack in
+
+            print("now-playing received via socket: \(data)")
+
             guard let self = self,
-                  let trackData = data.first as? [String: Any],
-                  let currentTrackId = trackData["currentTrackId"] as? String? else { return }
+                let trackData = data.first as? [String: Any],
+                let currentTrackId = trackData["trackId"] as? String? else { return }
+
+            if let currentTrackId = trackData["trackId"] as? String {
+                if let track = tracks.first(where: { $0.id == currentTrackId }) {
+                    syncCurrentTrack(track: track)
+                }
+            }
             
             DispatchQueue.main.async {
                 // Mettre à jour la track actuelle
-                if let oldCurrentIndex = self.tracks.firstIndex(where: { $0.isCurrentlyPlaying == true }) {
-                    self.tracks[oldCurrentIndex].isCurrentlyPlaying = false
-                    self.tracks[oldCurrentIndex].hasPlayed = true
-                }
-                
-                if let currentTrackId = currentTrackId,
-                   let newCurrentIndex = self.tracks.firstIndex(where: { $0.id == currentTrackId }) {
-                    self.tracks[newCurrentIndex].isCurrentlyPlaying = true
-                    self.currentTrackId = currentTrackId
-                }
+                self.currentTrackId = currentTrackId
             }
         }
         
-        // Écoute les changements d'état de lecture
+        // Écoute les changements d'état de lecture 📌 pas fait
         eventsSocket.on("playbackStateChanged") { [weak self] data, ack in
             guard let self = self,
                   let playbackData = data.first as? [String: Any],
@@ -394,258 +511,12 @@ class PlaylistViewModel {
                 }
             }
         }
-        /*
-        // Écoute les nouveaux messages
-        eventsSocket.onNewMessage { [weak self] data, ack in
-            guard let self = self,
-                  let messageData = data.first as? [String: Any],
-                  let message = self.parseMessage(from: messageData) else { return }
-            
-            DispatchQueue.main.async {
-                self.messages.append(message)
-            }
-        }
-        
-        // Écoute la musique en cours
-        eventsSocket.onNowPlaying { [weak self] data, ack in
-            guard let self = self,
-                  let trackData = data.first as? [String: Any],
-                  let track = self.parseTrack(from: trackData) else { return }
-            
-            DispatchQueue.main.async {
-                self.currentTrackId = track.id
-            }
-        }
-        
-        // Écoute les mises à jour d'événement
-        eventsSocket.onEventUpdated { [weak self] data, ack in
-            guard let self = self,
-                  let eventData = data.first as? [String: Any] else { return }
-            
-            DispatchQueue.main.async {
-                self.updateEvent(from: eventData)
-            }
-        }*/
     }
 
-
-    /*
-    // MARK: - Actions
-    func joinEvent() async {
-        guard let eventId = currentEvent?.id else { return }
-        do {
-            let result = try await APIService.shared.joinEvent(eventId: eventId)
-            print("Event rejoint: \(result)")
-        } catch {
-            print("Erreur lors de la jointure: \(error)")
-        }
-    }
-    
-    func leaveEvent() async {
-        guard let eventId = currentEvent?.id else { return }
-        do {
-            let result = try await APIService.shared.leaveEvent(eventId: eventId)
-            print("Event quitté: \(result)")
-        } catch {
-            print("Erreur lors de la sortie: \(error)")
-        }
-    }
-
-    func sendMessage(_ text: String) async {
-        guard let eventId = currentEvent?.id else { return }
-        do {
-            let message = try await APIService.shared.sendEventMessage(eventId: eventId, content: text, type: .text)
-            print("Message envoyé: \(message)")
-        } catch {
-            print("Erreur lors de l'envoi: \(error)")
-        }
-    }
-
-    // MARK: - Parsing Helpers
-    private func parseUser(from data: [String: Any]) -> User? {
-        guard let id = data["id"] as? String,
-              let name = data["name"] as? String else { return nil }
-        
-        let email = data["email"] as? String
-        return User(id: id, name: name, email: email ?? "")
-    }
-    
-    private func parseMessage(from data: [String: Any]) -> EventMessage? {
-        guard let id = data["id"] as? String,
-              let eventId = data["eventId"] as? String,
-              let content = data["content"] as? String,
-              let typeString = data["type"] as? String,
-              let type = EventMessage.MessageType(rawValue: typeString),
-              let authorData = data["author"] as? [String: Any],
-              let author = parseUser(from: authorData),
-              let createdAt = data["createdAt"] as? String else { return nil }
-        
-        let metadata: EventMessage.MessageMetadata? = nil // Parse metadata if needed
-        
-        return EventMessage(
-            id: id,
-            eventId: eventId,
-            content: content,
-            type: type,
-            author: author,
-            createdAt: createdAt,
-            metadata: metadata
-        )
-    }
-    
-    private func parseTrack(from data: [String: Any]) -> Track? {
-        guard let id = data["id"] as? String,
-              let title = data["title"] as? String,
-              let artist = data["artist"] as? String else { return nil }
-        
-        let album = data["album"] as? String
-        let duration = data["duration"] as? Int
-        let albumCoverUrl = data["albumCoverUrl"] as? String
-        let previewUrl = data["previewUrl"] as? String
-        let deezerId = data["deezerId"] as? String
-        let likes = data["likes"] as? Int
-        let dislikes = data["dislikes"] as? Int
-        let hasPlayed = data["hasPlayed"] as? Bool
-        let isCurrentlyPlaying = data["isCurrentlyPlaying"] as? Bool
-        
-        return Track(
-            id: id,
-            title: title,
-            artist: artist,
-            album: album,
-            duration: duration,
-            albumCoverUrl: albumCoverUrl,
-            previewUrl: previewUrl,
-            deezerId: deezerId,
-            likes: likes,
-            dislikes: dislikes,
-            hasPlayed: hasPlayed,
-            isCurrentlyPlaying: isCurrentlyPlaying
-        )
-    }*/
-    
     private func updateEvent(from data: [String: Any]) {
         // Met à jour l'événement avec les nouvelles données
         print("Event mis à jour: \(data)")
     }
-
-/*     // MARK: - ANCIEN Socket Management
-    private func setupSocketListeners() {
-        Task { @MainActor in
-            socketService.setupTrackListeners(
-                onTrackAdded: { [weak self] data in
-                    self?.handleTrackAdded(data)
-                },
-                onTrackRemoved: { [weak self] data in
-                    self?.handleTrackRemoved(data)
-                },
-                onTrackVoted: { [weak self] data in
-                    self?.handleTrackVoted(data)
-                },
-                onCurrentTrackChanged: { [weak self] data in
-                    self?.handleCurrentTrackChanged(data)
-                }
-            )
-            
-            socketService.setupPlaylistListeners { [weak self] data in
-                self?.handlePlaylistUpdated(data)
-            }
-        }
-    }
-    
-    private func joinPlaylistRoom() {
-        Task { @MainActor in
-            socketService.joinRoom("playlist-\(playlist.id)")
-        }
-    }
-    
-    private func leavePlaylistRoom() {
-            socketService.leaveRoom()
-    }
-    
-    // MARK: - Socket Event Handlers
-    private func handleTrackAdded(_ data: [String: Any]) {
-        guard let trackData = data["track"] as? [String: Any],
-              let trackId = trackData["id"] as? String,
-              let title = trackData["title"] as? String,
-              let artist = trackData["artist"] as? String,
-              let duration = trackData["duration"] as? Int else { return }
-        
-        let newTrack = Track(
-            id: trackId,
-            title: title,
-            artist: artist,
-            duration: duration,
-            previewUrl: trackData["previewUrl"] as? String,
-            albumCoverUrl: trackData["albumCoverUrl"] as? String,
-            likes: 0,
-            dislikes: 0,
-            hasPlayed: false,
-            isCurrentlyPlaying: false
-        )
-        
-        DispatchQueue.main.async {
-            self.tracks.append(newTrack)
-            self.sortUpcomingTracks()
-        }
-    }
-    
-    private func handleTrackRemoved(_ data: [String: Any]) {
-        guard let trackId = data["trackId"] as? String else { return }
-        
-        DispatchQueue.main.async {
-            self.tracks.removeAll { $0.id == trackId }
-        }
-    }
-    
-    private func handleTrackVoted(_ data: [String: Any]) {
-        guard let trackId = data["trackId"] as? String,
-              let voteType = data["voteType"] as? String else { return }
-        
-        DispatchQueue.main.async {
-            if let index = self.tracks.firstIndex(where: { $0.id == trackId }) {
-                if voteType == "like" {
-                    self.tracks[index].likes = (self.tracks[index].likes ?? 0) + 1
-                } else {
-                    self.tracks[index].dislikes = (self.tracks[index].dislikes ?? 0) + 1
-                }
-                self.sortUpcomingTracks()
-            }
-        }
-    }
-    
-    private func handleCurrentTrackChanged(_ data: [String: Any]) {
-        guard let trackId = data["trackId"] as? String else { return }
-        
-        DispatchQueue.main.async {
-            self.currentTrackId = trackId
-            self.updateTrackStates(currentTrackId: trackId)
-        }
-    }
-    
-    private func handlePlaylistUpdated(_ data: [String: Any]) {
-        // Handle playlist metadata updates if needed
-        print("Playlist updated: \(data)")
-    }
-    
-    // MARK: - Track State Management
-    private func updateTrackStates(currentTrackId: String) {
-        guard let currentIndex = tracks.firstIndex(where: { $0.id == currentTrackId }) else { return }
-        
-        for i in tracks.indices {
-            if i < currentIndex {
-                tracks[i].hasPlayed = true
-                tracks[i].isCurrentlyPlaying = false
-            } else if i == currentIndex {
-                tracks[i].hasPlayed = false
-                tracks[i].isCurrentlyPlaying = true
-            } else {
-                tracks[i].hasPlayed = false
-                tracks[i].isCurrentlyPlaying = false
-            }
-        }
-    }
- */
 }
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
@@ -979,151 +850,69 @@ struct PlaylistDetailsView: View {
 // MARK: Audio Player View
 struct AudioPlayerView: View {
     @State var viewModel: PlaylistViewModel
-    @State private var audioPlayer: AVPlayer? = nil
-    @State private var isPlaying: Bool = false
-    @State private var currentTrackIndex: Int = 0
-    @State private var volume: Float = 0.5
+    // @State private var audioPlayer: AVPlayer? = nil
+    // @State private var isPlaying: Bool = false
+    // @State private var currentTrackIndex: Int = 0
+    // @State private var volume: Float = 0.5
 
-   
-   var body: some View {
-       VStack(spacing: 8) {
-           let tracks = viewModel.tracks
-           if !tracks.isEmpty {
-               let track = tracks[currentTrackIndex]
-               Text(track.title)
-                   .font(.headline)
-               Text(track.artist)
-                   .font(.caption)
-                   .foregroundColor(.secondary)
-               HStack(spacing: 24) {
-                   Button(action: previousTrack) {
-                       Image(systemName: "backward.fill")
-                           .font(.title)
-                   }
-                   Button(action: {
-                       togglePlayPause(for: track)
-                   }) {
-                       Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                           .font(.system(size: 44))
-                           .foregroundColor(.blue)
-                   }
-                   Button(action: nextTrack) {
-                       Image(systemName: "forward.fill")
-                           .font(.title)
-                   }
-               }
+    var body: some View {
+        VStack(spacing: 8) {
+            let tracks = viewModel.tracks
+            if !tracks.isEmpty {
+                let track = viewModel.tracks[viewModel.currentTrackIndex]
+                Text(track.title)
+                    .font(.headline)
+                Text(track.artist)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack(spacing: 24) {
+                    Button(action: viewModel.previousTrack) {
+                        Image(systemName: "backward.fill")
+                            .font(.title)
+                    }
+                    Button(action: {
+                        viewModel.togglePlayPause(for: track)
+                    }) {
+                        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 44))
+                            .foregroundColor(.blue)
+                    }
+                    Button(action: viewModel.nextTrack) {
+                        Image(systemName: "forward.fill")
+                            .font(.title)
+                    }
+                }
 
-               // Volume slider
-               HStack {
-                   Image(systemName: "speaker.fill")
-                   Slider(value: Binding(
-                       get: { Double(volume) },
-                       set: { newValue in
-                           volume = Float(newValue)
-                           audioPlayer?.volume = volume
-                       }
-                   ), in: 0...1)
-                   Image(systemName: "speaker.wave.3.fill")
-               }
-               .padding(.horizontal)
-           }
-       }
-       .padding()
-       .onAppear {
-           audioPlayer?.volume = volume
-       }
-       .onChange(of: viewModel.currentTrackId) { old, newId in
-          if let id = newId, let track = viewModel.tracks.first(where: { $0.id == id }) {
-              togglePlayPause(for: track)
-          }
-      }
-   }
-
-   private func togglePlayPause(for track: Track) {
-    guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
-    // Synchronize track state
-    syncCurrentTrack(track: track)
-
-    // Vérifie si le player joue déjà ce morceau
-    // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
-
-    // Met à jour l'index courant
-    if let idx = viewModel.tracks.firstIndex(where: { $0.id == track.id }) {
-        currentTrackIndex = idx
-    }
-
-    let tracks = viewModel.tracks
-    if (!tracks.isEmpty && currentTrackIndex == 0) {
-        for i in tracks.indices {
-            viewModel.tracks[i].hasPlayed = false
-            viewModel.tracks[i].isCurrentlyPlaying = false
+                // Volume slider
+                HStack {
+                    Image(systemName: "speaker.fill")
+                    Slider(value: Binding(
+                        get: { Double(viewModel.volume) },
+                        set: { newValue in
+                            viewModel.volume = Float(newValue)
+                            viewModel.audioPlayer?.volume = viewModel.volume
+                        }
+                    ), in: 0...1)
+                    Image(systemName: "speaker.wave.3.fill")
+                }
+                .padding(.horizontal)
+            }
         }
-        viewModel.tracks[0].hasPlayed = false
-        viewModel.tracks[0].isCurrentlyPlaying = true
-    }
-
-    if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
-       currentAsset.url == url {
-        // Même morceau : toggle play/pause
-        if isPlaying {
-            audioPlayer?.pause()
-            isPlaying = false
-        } else {
-            audioPlayer?.play()
-            isPlaying = true
+        .padding()
+        .onAppear {
+            viewModel.audioPlayer?.volume = viewModel.volume
         }
-    } else {
-        // Un autre morceau : pause l'ancien player
-        audioPlayer?.pause()
-        isPlaying = false
-        // Nouveau morceau : crée un nouveau player et joue
-        audioPlayer = AVPlayer(url: url)
-        audioPlayer?.play()
-        isPlaying = true
-    }
-}
-
-   private func nextTrack() {
-       let tracks = viewModel.tracks
-       guard !tracks.isEmpty else { return }
-       // Mark previous track as played
-       if tracks.indices.contains(currentTrackIndex) {
-           viewModel.tracks[currentTrackIndex].hasPlayed = true
-           viewModel.tracks[currentTrackIndex].isCurrentlyPlaying = false
-       }
-       currentTrackIndex = (currentTrackIndex + 1) % tracks.count
-       isPlaying = false
-       let track = tracks[currentTrackIndex]
-       togglePlayPause(for: track)
-   }
-
-   private func previousTrack() {
-       let tracks = viewModel.tracks
-       guard !tracks.isEmpty, currentTrackIndex != 0 else { return }
-       // Unmark hasPlayed for current track if going back
-       if tracks.indices.contains(currentTrackIndex) {
-           viewModel.tracks[currentTrackIndex].hasPlayed = false
-           viewModel.tracks[currentTrackIndex].isCurrentlyPlaying = false
-       }
-       currentTrackIndex = (currentTrackIndex - 1 + tracks.count) % tracks.count
-       isPlaying = false
-       let track = tracks[currentTrackIndex]
-       togglePlayPause(for: track)
-   }
-
-   private func syncCurrentTrack(track: Track) {
-       let tracks = viewModel.tracks
-        // Update currentTrackId in the viewModel
-        viewModel.currentTrackId = track.id
-        
-        // Update isCurrentlyPlaying for all tracks
-        for i in tracks.indices {
-            viewModel.tracks[i].isCurrentlyPlaying = (tracks[i].id == track.id)
+        .onChange(of: viewModel.currentTrackId) { old, newId in
+            if let id = newId, let track = viewModel.tracks.first(where: { $0.id == id }) {
+                Task {
+                    print("Current track changed to id: \(id), title: \(track.title)")
+                    await viewModel.updateNowPlaying(trackId: id)
+                }
+                // nextTrack() // Ne pas utiliser nextTrack ici, car cela change l'index
+                // togglePlayPause(for: track)
+            }
         }
-        
-        // Send current track change via socket
-//        SocketService.shared.updateCurrentTrack(trackId: track.id, playlistId: viewModel.playlist.id)
-   }
+    }
 }
 
 // MARK: - Proposed Tracks View
