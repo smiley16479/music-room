@@ -73,15 +73,17 @@ export function generateGenericAvatar(name: string): string {
 
 /**
  * Gets the appropriate avatar URL for a user
- * Priority: Custom avatar URL > Generated avatar
+ * Priority: Custom avatar URL (excluding Google URLs due to rate limiting) > Generated avatar
  */
 export function getUserAvatarUrl(user: { avatarUrl?: string; displayName?: string; email?: string }): string {
-	// Use custom avatar if available and not a generic SVG
-	if (user.avatarUrl && !user.avatarUrl.startsWith('data:image/svg+xml')) {
+	// Check if user has a custom avatar URL that's not a generic SVG or Google URL
+	if (user.avatarUrl && 
+		!user.avatarUrl.startsWith('data:image/svg+xml') && 
+		!user.avatarUrl.includes('googleusercontent.com')) {
 		return user.avatarUrl;
 	}
 	
-	// Generate consistent avatar
+	// Generate consistent avatar for Google URLs or missing avatars
 	const name = user.displayName || user.email || 'User';
 	return generateGenericAvatar(name);
 }

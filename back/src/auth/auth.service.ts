@@ -19,7 +19,7 @@ import { User } from 'src/user/entities/user.entity';
 
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RequestPasswordResetDto, ResetPasswordDto } from 'src/user/dto/reset-password.dto';
+import { RequestPasswordResetDto, ResetPasswordDto, ChangePasswordDto } from 'src/user/dto/reset-password.dto';
 import { UserService } from 'src/user/user.service';
 import { EmailService } from 'src/email/email.service';
 import { generateGenericAvatar, getFacebookProfilePictureUrl } from 'src/common/utils/avatar.utils';
@@ -263,8 +263,9 @@ private decodeJWT(token: string): any {
           emailVerified: true,
         });
       } else {
-        // Create new user with Google profile picture or generic avatar
-        const avatarUrl = googleUser.picture || generateGenericAvatar(googleUser.name || googleUser.email);
+        // Create new user with generic avatar instead of Google profile picture to avoid rate limiting
+        // Google profile pictures from googleusercontent.com have rate limits that cause 429 errors
+        const avatarUrl = generateGenericAvatar(googleUser.name || googleUser.email);
         
         user = await this.userService.create({
           email: googleUser.email,
@@ -413,6 +414,34 @@ async verifyGoogleIdToken(idToken: string) {
     const user = await this.userService.findByResetToken(token);
     if (!user || !user.resetPasswordExpires || user.resetPasswordExpires < new Date()) {
       throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Update user
+    await this.userService.update(user.id, {
+      resetPasswordToken: undefined,
+      resetPasswordExpires: undefined,
+    });
+
+    await this.userService.setNewPassword(user.id, hashedPassword);
+
+    // Send confirmation email
+    await this.emailService.sendPasswordResetConfirmation(user.email);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const { currentPassword, newPassword } = dto;
+
+    const user = await this.userService.findById(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new BadRequestException('Current password is incorrect');
     }
 
     // Hash new password

@@ -2889,9 +2889,7 @@
 
 		<!-- Music Player -->
 		{#if isMusicPlayerInitialized && event?.playlist && event.playlist.length > 0}
-			<div class="w-full bg-white rounded-lg shadow-md p-6 mb-6">
-				<MusicPlayer />
-			</div>
+			<MusicPlayer />
 		{/if}
 
 		<!-- Playlist -->

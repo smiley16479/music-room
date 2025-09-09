@@ -932,18 +932,6 @@
 						Manage your friend list and invitations
 					</p>
 
-					<!-- Success/Error Messages -->
-					{#if success}
-						<div class="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded-lg">
-							{success}
-						</div>
-					{/if}
-					{#if error}
-						<div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded-lg">
-							{error}
-						</div>
-					{/if}
-
 					<!-- Sub-navigation -->
 					<div class="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg">
 						<button

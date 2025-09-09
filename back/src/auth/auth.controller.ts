@@ -35,7 +35,7 @@ import { FacebookLinkAuthGuard } from './guards/facebook-link-auth.guard';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { RequestPasswordResetDto, ResetPasswordDto } from 'src/user/dto/reset-password.dto';
+import { RequestPasswordResetDto, ResetPasswordDto, ChangePasswordDto } from 'src/user/dto/reset-password.dto';
 
 import { User } from 'src/user/entities/user.entity';
 
@@ -206,6 +206,37 @@ export class AuthController {
     return {
       success: true,
       message: 'Password reset successfully',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+    @Public()
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Change password',
+    description: 'Change the user\'s password using the current password and new password',
+  })
+  @ApiBody({
+    type: ChangePasswordDto,
+    description: 'Change password data including current password and new password',
+    required: true,
+    examples: {
+      example1: {
+        summary: 'Change password',
+        value: {
+          currentPassword: 'OldPassword123!',
+          newPassword: 'NewStrongPassword123!',
+          confirmPassword: 'NewStrongPassword123!',
+        },
+      },
+    },
+  })
+  async changePassword(@Body() dto: ChangePasswordDto, @CurrentUser() user: User) {
+    await this.authService.changePassword(user.id, dto);
+    return {
+      success: true,
+      message: 'Password changed successfully',
       timestamp: new Date().toISOString(),
     };
   }

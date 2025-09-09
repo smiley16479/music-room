@@ -59,7 +59,8 @@ export function generateGenericAvatar(name: string): string {
 
 /**
  * Gets the appropriate avatar URL based on user data
- * Priority: Facebook profile picture > Google profile picture > Generic avatar
+ * Priority: Facebook profile picture > Generic avatar
+ * Note: Google profile pictures are avoided due to rate limiting issues (429 errors)
  */
 export function getAvatarUrl(userData: {
   displayName?: string;
@@ -68,17 +69,15 @@ export function getAvatarUrl(userData: {
   facebookProfilePicture?: string;
   googleProfilePicture?: string;
 }): string {
-  const { displayName, facebookProfilePicture, googleProfilePicture } = userData;
+  const { displayName, facebookProfilePicture } = userData;
   
   // Use Facebook profile picture if available
   if (facebookProfilePicture) {
     return facebookProfilePicture;
   }
   
-  // Use Google profile picture if available
-  if (googleProfilePicture) {
-    return googleProfilePicture;
-  }
+  // Skip Google profile pictures to avoid rate limiting issues (429 errors)
+  // Google profile pictures from googleusercontent.com have rate limits
   
   // Generate generic avatar
   return generateGenericAvatar(displayName || 'User');
