@@ -27,6 +27,22 @@ export class CreateDeviceDto {
   };
 
   @IsOptional()
+  @IsString()
+  systemVersion?: string;
+
+  @IsOptional()
+  @IsString()
+  identifier?: string;
+
+  @IsOptional()
+  @IsString()
+  model?: string;
+
+  @IsOptional()
+  @IsString()
+  systemName?: string;
+
+  @IsOptional()
   @IsBoolean()
   canBeControlled?: boolean;
 }

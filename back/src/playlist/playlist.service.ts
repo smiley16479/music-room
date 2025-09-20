@@ -256,6 +256,8 @@ export class PlaylistService {
   ): Promise<PlaylistTrackWithDetails> {
     const playlist = await this.findById(playlistId, userId);
 
+    console.log(`Adding track to playlist ${playlistId} by user ${userId}`, playlist, '\n', addTrackDto);
+    
     // Check edit permissions
     await this.checkEditPermissions(playlist, userId);
 
@@ -439,16 +441,28 @@ export class PlaylistService {
     return updatedTracks;
   }
 
-  async getPlaylistTracks(playlistId: string, userId?: string): Promise<PlaylistTrackWithDetails[]> {
+  async getPlaylistTracks(playlistId: string, userId?: string): Promise<any[]> {
     const playlist = await this.findById(playlistId, userId);
 
     const tracks = await this.playlistTrackRepository.find({
       where: { playlistId },
-      relations: ['track', 'addedBy'],
+      relations: ['track', 'addedBy', 'votes'],
       order: { position: 'ASC' },
     });
 
-    return tracks as PlaylistTrackWithDetails[];
+    const tracksWithVoteCounts = tracks.map(pt => {
+      const likes = pt.votes?.filter(v => v.type === 'upvote').length || 0;
+      const dislikes = pt.votes?.filter(v => v.type === 'downvote').length || 0;
+      return {
+        ...pt,
+        track: {
+          ...pt.track,
+          likes,
+          dislikes,
+        },
+      };
+    });
+    return tracksWithVoteCounts// as PlaylistTrackWithDetails[];
   }
 
   // Collaborator Management

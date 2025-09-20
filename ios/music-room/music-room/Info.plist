@@ -41,5 +41,7 @@
     <string>$(API_BASE_URL_DEV)</string>
     <key>GOOGLE_SCHEMA_IOS</key>
     <string>$(GOOGLE_SCHEMA_IOS)</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Nous avons besoin de votre position pour vous situer pres d'un event</string>
 </dict>
 </plist>

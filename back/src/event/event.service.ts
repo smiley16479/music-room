@@ -27,7 +27,7 @@ import { PlaylistService } from 'src/playlist/playlist.service';
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { toZonedTime } from 'date-fns-tz';
 
 export interface EventWithStats extends Event {
   stats: {
@@ -195,6 +195,7 @@ export class EventService {
     };
   }
 
+  /** Retrieve Full Event with votes & tracks */
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
@@ -217,9 +218,9 @@ export class EventService {
   async update(id: string, updateEventDto: UpdateEventDto, userId: string): Promise<Event> {
     const event = await this.findById(id, userId);
 
-    // Only creator or admin can update event
-    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
-      throw new ForbiddenException('Only the creator or admin can update this event');
+    // Only creator can update event
+    if (event.creatorId !== userId) {
+      throw new ForbiddenException('Only the creator can update this event');
     }
 
     Object.assign(event, updateEventDto);
@@ -435,11 +436,18 @@ export class EventService {
       throw new ConflictException('User has already voted for this track');
     }
 
+    const playlistTrackId = event.playlist?.playlistTracks?.find(pt => pt.trackId === voteDto.trackId)?.id;
+    if (!playlistTrackId) {
+      throw new BadRequestException('Track is not in the event playlist');
+    }
+
+
     // Create vote
     const vote = this.voteRepository.create({
       eventId,
       userId,
       trackId: voteDto.trackId,
+      playlistTrackId,
       type: voteDto.type || VoteType.UPVOTE,
       weight: voteDto.weight || 1,
     });
@@ -774,6 +782,38 @@ export class EventService {
     return nextTrack;
   } */
 
+  async setCurrentTrack(eventId: string, trackId: string, userId: string): Promise<void> {
+    const event = await this.findById(eventId, userId);
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    console.log("trackId:", trackId);
+    event.playlist?.playlistTracks.forEach(element => {
+      console.log("playlist track:", element.trackId);
+    });
+
+    // if (event.playlist?.playlistTracks.some(pt => pt.trackId === trackId) === false)
+      // throw new NotFoundException('Track not found');
+
+    // Only creator or existing admin can promote (MAY BE TO DO: change pour les autorisations de device ? ⚠️)
+    if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
+      throw new ForbiddenException('Only creator or admin can promote another user');
+    }
+
+    /* A vérifier (chatGPT) ⚠️
+    Si tu mets à jour currentTrackId et recharges l’entité avec la relation, tu obtiens bien l’entité Track correspondante dans currentTrack.
+    La synchronisation se fait à la lecture, pas à l’écriture.
+    */
+    event.currentTrackId = trackId;
+    event.currentTrackStartedAt = new Date();
+    await this.eventRepository.save(event);
+
+    // Notify participants
+    this.eventGateway.notifyNowPlaying(eventId, trackId);
+  }
+
   // Update current track for an event (for music synchronization)
   async updateCurrentTrack(eventId: string, trackId: string): Promise<void> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
@@ -806,7 +846,14 @@ export class EventService {
       .orWhere('participant.id = :userId', { userId })
       .orWhere('playlistCollaborators.id = :userId', { userId })
       .getMany();
-    return events;
+
+    const timeZone = 'Europe/Paris';
+    return events.map(event => ({
+      ...event,
+      // eventDate: toZonedTime(new Date(event.eventDate), timeZone),
+      // eventEndDate: toZonedTime(new Date(event.eventEndDate), timeZone),
+      status: this.computeStatus(event),
+    }));
   }
 
   // Invitation System
@@ -860,12 +907,15 @@ export class EventService {
     // Get unique tracks from votes
     const uniqueTrackIds = new Set(event.votes?.map(v => v.trackId) || []);
     const trackCount = uniqueTrackIds.size;
-
+    const timeZone = 'Europe/Paris';
     const isUserParticipating = userId ? 
       event.participants?.some(p => p.id === userId) || false : false;
 
     return {
       ...event,
+      // eventDate: toZonedTime(new Date(event.eventDate), timeZone),
+      // eventEndDate: toZonedTime(new Date(event.eventEndDate), timeZone),
+      status: this.computeStatus(event),
       stats: {
         participantCount,
         voteCount,
@@ -1052,5 +1102,18 @@ export class EventService {
       .where('status = :status', { status: EventStatus.LIVE })
       .andWhere('eventEndDate <= :now', { now })
       .execute();
+  }
+
+  computeStatus(event: Event): EventStatus {
+    // Convertit la date courante en heure de Paris
+    const timeZone = 'Europe/Paris';
+    const now = toZonedTime(new Date(), timeZone);
+
+    const start = toZonedTime(new Date(event.eventDate), timeZone);
+    const end = toZonedTime(new Date(event.eventEndDate), timeZone);
+
+    if (now < start) return EventStatus.UPCOMING;
+    if (now >= start && now <= end) return EventStatus.LIVE;
+    return EventStatus.ENDED;
   }
 }

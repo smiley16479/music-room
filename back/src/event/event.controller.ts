@@ -552,6 +552,26 @@ export class EventController {
     };
   } */
 
+  @Patch(':id/now-playing/:trackId')
+  @ApiOperation({ summary: 'Set current track', description: 'Sets the current playing track for a playlist' })
+  @ApiParam({ name: 'id', type: String, description: 'Playlist ID', required: true })
+  @ApiParam({ name: 'trackId', type: String, description: 'The ID of the track', required: true })
+  async setCurrentTrack(
+    @Param('id') id: string,
+    @Param('trackId') trackId: string,
+    @CurrentUser() user: User,
+  ) {
+
+    console.log(`Playlist ${id} now-playing/:trackId ${trackId}`);
+
+    await this.eventService.setCurrentTrack(id, trackId, user.id);
+    return {
+      success: true,
+      message: 'Current track updated',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   // Location-based features
   @Post(':id/check-location')
   @HttpCode(HttpStatus.OK)

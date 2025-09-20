@@ -11,6 +11,7 @@ struct ProfileView: View {
     @State private var showingFriends = false
     @State private var showingHelp = false
     @State private var showingSignOutAlert = false
+    @State private var userStats: UserStats? = nil
     
     var body: some View {
         NavigationView {
@@ -20,7 +21,7 @@ struct ProfileView: View {
                     ProfileHeaderView()
                     
                     // Quick Stats
-                    QuickStatsView()
+                    QuickStatsView(stats: userStats)
                     
                     // Profile Sections
                     VStack(spacing: 16) {
@@ -96,6 +97,19 @@ struct ProfileView: View {
             }
             .navigationTitle("profile".localized)
             .navigationBarTitleDisplayMode(.large)
+        }.task {
+            do {
+                let userProfil = try await APIService.shared.getUserProfile()
+                await MainActor.run {
+                    userStats = UserStats(
+                        playlistsCount: userProfil.createdPlaylists?.count ?? 0,
+                        eventsCount: userProfil.createdEvents?.count ?? 0,
+                        friendsCount: userProfil.friends?.count ?? 0
+                    )
+                }
+            } catch {
+                print("Erreur chargement stats:", error)
+            }
         }
         .sheet(isPresented: $showingEditProfile) {
             EditProfileView()
@@ -432,7 +446,7 @@ struct FriendProfileView: View {
                         Image(systemName: "person.crop.circle").foregroundColor(.gray)
                             .frame(width: 100, height: 100)
                     }
-                    // Champs selon visibilité
+                    // Champs selon visibilité ⚠️ à ajuster ne fonctionne pas encore
                     if user.displayNameVisibility != .private {
                         Text(user.displayName).font(.title2).fontWeight(.bold)
                     }
@@ -600,28 +614,36 @@ struct ProfileHeaderView: View {
 
 // MARK: - Quick Stats
 struct QuickStatsView: View {
+  let stats: UserStats?
+
     var body: some View {
         HStack(spacing: 20) {
             StatItemView(
                 icon: "music.note.list",
-                value: "12",
+                value: String(stats?.playlistsCount ?? 0),
                 label: "Playlists"
             )
             
             StatItemView(
                 icon: "calendar.badge.checkmark",
-                value: "5",
+                value: String(stats?.eventsCount ?? 0),
                 label: "Events"
             )
             
             StatItemView(
                 icon: "person.2.fill",
-                value: "24",
+                value: String(stats?.friendsCount ?? 0),
                 label: "Friends"
             )
         }
         .padding(.horizontal, 20)
     }
+}
+
+struct UserStats {
+    let playlistsCount: Int
+    let eventsCount: Int
+    let friendsCount: Int
 }
 
 struct StatItemView: View {
@@ -911,6 +933,52 @@ struct NotificationSettingsView: View {
 
 // MARK: - Privacy Settings View (Placeholder)
 struct PrivacySettingsView: View {
+    @State private var displayNamePrivacy: PrivacyLevel = .public
+    @State private var bioPrivacy: PrivacyLevel = .friends
+    @State private var musicPreferencePrivacy: PrivacyLevel = .friends
+    @State private var locationPrivacy: PrivacyLevel = .private
+
+    var body: some View {
+        List {
+           /*  Section("Profile Visibility") {
+                NavigationLink("Display Name") {
+                    Text("Display Name Privacy Settings")
+                }
+                
+                NavigationLink("Bio") {
+                    Text("Bio Privacy Settings")
+                }
+                
+                NavigationLink("Location") {
+                    Text("Location Privacy Settings")
+                }
+            } */
+            Section("Profile Visibility") {
+                PrivacyToggleRow(
+                    title: "Display Name",
+                    selection: $displayNamePrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Bio",
+                    selection: $bioPrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Music Preferences",
+                    selection: $musicPreferencePrivacy
+                )
+                PrivacyToggleRow(
+                    title: "Location",
+                    selection: $locationPrivacy
+                )
+            }
+        }
+        .navigationTitle("privacy_settings".localized)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/* Relicat avec NavigationLink vers autre page
+struct PrivacySettingsView: View {
     var body: some View {
         List {
             Section("Profile Visibility") {
@@ -931,7 +999,34 @@ struct PrivacySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+ */
 
+// MARK: - Toggle Privacy Setting Row
+enum PrivacyLevel: String, CaseIterable, Identifiable {
+    case `public` = "Public"
+    case friends = "Friends Only"
+    case `private` = "Private"
+    var id: String { rawValue }
+}
+
+struct PrivacyToggleRow: View {
+    let title: String
+    @Binding var selection: PrivacyLevel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            Picker("", selection: $selection) {
+                ForEach(PrivacyLevel.allCases) { level in
+                    Text(level.rawValue).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.vertical, 4)
+    }
+}
 // MARK: - Toggle Setting Row
 struct ToggleSettingRow: View {
     let title: String

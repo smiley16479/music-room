@@ -65,6 +65,9 @@ export class DeviceController {
     description: 'Returns all devices owned by the current user',
   })
   async getMyDevices(@CurrentUser() user: User) {
+
+    console.log("Fetching devices for user:", user.id);
+    
     const devices = await this.deviceService.findUserDevices(user.id);
     return {
       success: true,

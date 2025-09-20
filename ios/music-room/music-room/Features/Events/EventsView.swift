@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 struct EventsView: View {
     @State private var editingEvent: Event? = nil
@@ -9,6 +10,8 @@ struct EventsView: View {
     @State private var selectedFilter: EventFilter = .all
     
     @EnvironmentObject private var authManager: AuthenticationManager
+
+    @ObservedObject private var locationManager = LocationManager.shared
 
     var filteredEvents: [Event] {
         var filtered = events
@@ -36,11 +39,22 @@ struct EventsView: View {
                 }
             }
         case .nearby:
-            // Exemple simple : filtre sur la même ville que l'utilisateur
-            if let userLocation = authManager.currentUser?.location?.lowercased() {
+            // Filtrage géographique : user dans le rayon de l'event
+            if let userCoord = locationManager.userLocation?.coordinate {
                 filtered = filtered.filter { event in
-                    event.locationName?.lowercased().contains(userLocation) == true
+                    if let eventLat = event.latitude, let eventLon = event.longitude, let radius = event.locationRadius {
+                        let eventCoord = CLLocationCoordinate2D(latitude: eventLat, longitude: eventLon)
+                      let distance = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+                      .distance(from: CLLocation(latitude: eventLat, longitude: eventLon))
+                      print("User: \(userCoord), Event: \(eventCoord), Distance: \(distance), Radius: \(radius)")
+                      return distance <= Double(radius)
+                        return LocationManager.shared.isWithinRadius(userCoord: userCoord, eventCoord: eventCoord, radius: Double(radius))
+                    }
+                    return false
                 }
+            } else {
+                // Si pas de position user, ne rien afficher (ou tout afficher si tu préfères)
+                filtered = []
             }
         }
 
@@ -116,15 +130,18 @@ struct EventsView: View {
             }
         }
         .sheet(item: $editingEvent) { event in
-            EventEditView(event: event, onEventUpdated: { updatedEvent in
-                // Remplace l'event dans la liste
-                if let idx = events.firstIndex(where: { $0.id == updatedEvent.id }) {
-                    events[idx] = updatedEvent
-                }
-            }, onEventDeleted: { deletedEvent in
-                // Retire l'event de la liste
-                events.removeAll { $0.id == deletedEvent.id }
-            })
+            if let idx = events.firstIndex(where: { $0.id == event.id }) {
+                EventEditView(
+                    event: $events[idx],
+                    onEventUpdated: { updatedEvent in
+                        events[idx] = updatedEvent
+                    }, onEventDeleted: { deletedEvent in
+                        events.removeAll { $0.id == deletedEvent.id }
+                    })
+                    .onDisappear {
+                        editingEvent = nil
+                    }
+            }
         }
         .task {
           if !isLoading {
@@ -286,11 +303,11 @@ struct EventListItem: View {
                     
                     Spacer()
                     
-                    if let eventDate = event.eventDate {
-                        Text(formatDate(eventDate))
+                     if let eventDate = event.eventDate {
+                        Text(eventDate.formatParisDate())
                             .font(.caption)
                             .foregroundColor(.textSecondary)
-                    }
+                     }
                 }
             }
         }
@@ -308,11 +325,6 @@ struct EventListItem: View {
             return .gray
         }
     }
-    
-    private func formatDate(_ dateString: String) -> String {
-        // Format date string for display
-        return dateString
-    }
 }
 
 // MARK: - Create Event View (Form)
@@ -322,6 +334,7 @@ struct CreateEventView: View {
     @State private var name: String = ""
     @State private var description: String = ""
     @State private var location: String = ""
+    @State private var radius: Double = 100
     @State private var date: Date = Date()
     @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
@@ -349,6 +362,7 @@ struct CreateEventView: View {
                     startDate: $date,
                     endDate: $endDate,
                     location: $location,
+                    radius: $radius,
                     showPastDateValidation: true,
                     minimumDurationHours: 1
                 )
@@ -402,32 +416,37 @@ struct CreateEventView: View {
             errorMessage = DateValidation.validationMessage(startDate: date, endDate: endDate)
             return
         }
-        
-        isSaving = true
-        errorMessage = nil
-        let eventData: [String: Any] = [
-            "name": name,
-            "description": description,
-            "locationName": location,
-            "eventDate": ISO8601DateFormatter().string(from: date),
-            "eventEndDate": ISO8601DateFormatter().string(from: endDate),
-            "visibility": isPublic ? "public" : "private",
-            "selectedPlaylistId": selectedPlaylist?.id ?? "",
-            "playlistName": createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
-        ]
-        Task {
-            do {
-                print("🆕 Creating event with data: \(eventData)")
-                let createdEvent = try await APIService.shared.createEvent(eventData)
-                await MainActor.run {
-                    onEventCreated?(createdEvent)
-                    isSaving = false
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isSaving = false
+
+        LocationManager.shared.getLongLatFromAddressString(place: location) { coordinate in
+            isSaving = true
+            errorMessage = nil
+            let eventData: [String: Any] = [
+                "name": name,
+                "description": description,
+                "locationName": location,
+                "locationRadius": Int(radius),
+                "latitude": coordinate?.latitude ?? 0,
+                "longitude": coordinate?.longitude ?? 0,
+                "eventDate": ISO8601DateFormatter().string(from: date),
+                "eventEndDate": ISO8601DateFormatter().string(from: endDate),
+                "visibility": isPublic ? "public" : "private",
+                "selectedPlaylistId": selectedPlaylist?.id ?? "",
+                "playlistName": createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
+            ]
+            Task {
+                do {
+                    print("🆕 Creating event with data: \(eventData)")
+                    let createdEvent = try await APIService.shared.createEvent(eventData)
+                    await MainActor.run {
+                        onEventCreated?(createdEvent)
+                        isSaving = false
+                        dismiss()
+                    }
+                } catch {
+                    await MainActor.run {
+                        errorMessage = error.localizedDescription
+                        isSaving = false
+                    }
                 }
             }
         }
@@ -517,13 +536,14 @@ struct EventEditView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var tabManager: MainTabManager
     @EnvironmentObject var authManager: AuthenticationManager
-    @State var event: Event
+    @Binding var event: Event
     var onEventUpdated: (Event) -> Void
     var onEventDeleted: (Event) -> Void
 
     @State private var name: String = ""
     @State private var description: String = ""
     @State private var location: String = ""
+    @State private var radius: Double = 100
     @State private var date: Date = Date()
     @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
@@ -575,20 +595,29 @@ struct EventEditView: View {
                     startDate: $date,
                     endDate: $endDate,
                     location: $location,
+                    radius: $radius,
                     showPastDateValidation: false,
                     minimumDurationHours: 1
                 )
 
                 if let playlist = event.playlist {
-                    Button(action: {
-                        tabManager.selectedTab = 2 // Onglet Playlists (index à adapter)
-                        tabManager.selectedPlaylist = playlist
-                        dismiss()
-                    }) {
-                        HStack {
-                            Text(playlist.name)
-                            Spacer()
-                            Image(systemName: "chevron.right")
+                    Section(header: Text("Go To Playslist")) {
+                        Button(action: {
+                            tabManager.selectedTab = 2 // Onglet Playlists
+                            tabManager.selectedPlaylist = playlist
+                            if let data = try? JSONEncoder().encode(playlist),
+                                let jsonObject = try? JSONSerialization.jsonObject(with: data, options: []),
+                                let prettyData = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted]),
+                                let prettyString = String(data: prettyData, encoding: .utf8) {
+                                print("✅ playlist:\n\(prettyString)")
+                            }
+                            dismiss()
+                        }) {
+                            HStack {
+                                Text(playlist.name)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }
                         }
                     }
                 }
@@ -614,7 +643,7 @@ struct EventEditView: View {
                                     }
                                 }
                             }
-                            Button("Invite User") {
+                            Button("Invite Friends") {
                                 activeSheet = .inviteUser
                             }
                         }
@@ -656,9 +685,11 @@ struct EventEditView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") { dismiss() }
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") { saveEvent() }
-                        .disabled(isSaving || name.isEmpty)
+                if isAdmin {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Save") { saveEvent() }
+                            .disabled(isSaving || name.isEmpty)
+                    }
                 }
             }
             .onAppear(perform: setup)
@@ -721,10 +752,22 @@ struct EventEditView: View {
         name = event.name
         description = event.description ?? ""
         location = event.locationName ?? ""
+        radius = Double(event.locationRadius ?? 100)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        date = formatter.date(from: event.eventDate ?? "") ?? Date()
-        endDate = formatter.date(from: event.eventEndDate ?? "") ?? Date()
+        if let d = formatter.date(from: event.eventDate ?? "") {
+            date = d
+        } else {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: event.eventDate ?? "") ?? Date()
+        }
+
+        if let d = formatter.date(from: event.eventEndDate ?? "") {
+            endDate = d
+        } else {
+            formatter.formatOptions = [.withInternetDateTime]
+            endDate = formatter.date(from: event.eventEndDate ?? "") ?? Date()
+        }
         isPublic = event.visibility == .public
         invitedUsers = event.participants ?? []
         admins = event.admins ?? []
@@ -738,34 +781,40 @@ struct EventEditView: View {
             return
         }
         
-        isSaving = true
-        errorMessage = nil
-        let eventData: [String: Any] = [
-            "name": name,
-            "description": description,
-            "locationName": location,
-            "eventDate": ISO8601DateFormatter().string(from: date),
-            "eventEndDate": ISO8601DateFormatter().string(from: endDate),
-            "visibility": isPublic ? "public" : "private",
-            "admins": admins.map { $0.id }, // il n'y a pas en db
-            "participants": invitedUsers.map { $0.id } // il n'y a pas en db
-        ]
-        Task {
-            do {
-                let updated = try await APIService.shared.updateEvent(eventId: event.id, eventData)
-                await MainActor.run {
-                    event = updated
-                    onEventUpdated(updated)
-                    isSaving = false
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isSaving = false
+        LocationManager.shared.getLongLatFromAddressString(place: location) { coordinate in
+            isSaving = true
+            errorMessage = nil
+            let eventData: [String: Any] = [
+                "name": name,
+                "description": description,
+                "locationName": location,
+                "locationRadius": Int(radius),
+                "latitude": coordinate?.latitude ?? 0,
+                "longitude": coordinate?.longitude ?? 0,
+                "eventDate": ISO8601DateFormatter().string(from: date),
+                "eventEndDate": ISO8601DateFormatter().string(from: endDate),
+                "visibility": isPublic ? "public" : "private",
+                "admins": admins.map { $0.id }, // il n'y a pas en db
+                "participants": invitedUsers.map { $0.id } // il n'y a pas en db
+            ]
+            Task {
+                do {
+                    let updated = try await APIService.shared.updateEvent(eventId: event.id, eventData)
+                    await MainActor.run {
+                        // event = updated
+                        onEventUpdated(updated)
+                        isSaving = false
+                        dismiss()
+                    }
+                } catch {
+                    await MainActor.run {
+                        errorMessage = error.localizedDescription
+                        isSaving = false
+                    }
                 }
             }
         }
+        
     }
 
     private func deleteEvent() {
@@ -916,7 +965,7 @@ struct InviteView: View {
         isLoading = true
         Task {
             do {
-                switch mode {
+                switch mode { // assign:
                 case .userToEvent(let user):
                     items = try await APIService.shared.getMyEvents().map { $0 as Any }
                 case .eventToUser(let event):
