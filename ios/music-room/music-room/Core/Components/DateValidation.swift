@@ -37,6 +37,7 @@ struct EventDateSection: View {
     @Binding var startDate: Date
     @Binding var endDate: Date
     @Binding var location: String
+    @Binding var radius: Double
 
     private var startDateRange: PartialRangeFrom<Date> {
         showPastDateValidation ? Date()... : Date.distantPast...
@@ -49,12 +50,15 @@ struct EventDateSection: View {
         startDate: Binding<Date>,
         endDate: Binding<Date>,
         location: Binding<String>,
+        radius: Binding<Double>,
         showPastDateValidation: Bool = true,
         minimumDurationHours: Int = 1
     ) {
+      print("radius: \(radius.wrappedValue)")
         self._startDate = startDate
         self._endDate = endDate
         self._location = location
+        self._radius = radius
         self.showPastDateValidation = showPastDateValidation
         self.minimumDurationHours = minimumDurationHours
     }
@@ -79,7 +83,10 @@ struct EventDateSection: View {
     var body: some View {
         Section(header: Text("Location & Date")) {
             TextField("Location", text: $location)
-            
+            Stepper(value: $radius, in: 100...10000, step: 50) {
+                Text("Rayon : \(Int(radius)) m")
+            }
+            Slider(value: $radius, in: 100...10000, step: 50).accentColor(.musicPrimary)
             DatePicker(
                 "Date de début",
                 selection: $startDate,
@@ -93,21 +100,18 @@ struct EventDateSection: View {
                     defaultHoursToAdd: 2
                 )
             }
-            
             DatePicker(
                 "Date de fin",
                 selection: $endDate,
                 in: startDate...,
                 displayedComponents: [.date, .hourAndMinute]
             )
-            
             // Affichage de la durée si les dates sont valides
             if isDateValid && endDate > startDate {
                 Text(DateValidation.formatDuration(from: startDate, to: endDate))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            
             // Message d'erreur si dates invalides
             if let errorMessage = validationMessage {
                 Text(errorMessage)

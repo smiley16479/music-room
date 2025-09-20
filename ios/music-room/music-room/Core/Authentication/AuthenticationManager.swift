@@ -33,9 +33,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
         super.init()
         checkAuthenticationStatus()
     }
-    
 
-   
     func checkAuthenticationStatus() {
         if let token = keychainService.getAccessToken() {
             // Verify token with backend
@@ -73,7 +71,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
             }
         }
     }
-    
+
     func signIn(email: String, password: String) async {
         isLoading = true
         errorMessage = nil
@@ -90,7 +88,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
             }
         }
     }
-    
+
 // MARK: - Social Authentication Google  
     func signInWithGoogle() async {
         isLoading = true

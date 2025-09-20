@@ -26,6 +26,7 @@
 
 // Home Screen
 "discover_events" = "Discover Events";
+"discover_playlists" = "Discover Playlists";
 "your_playlists" = "Your Playlists";
 "recent_activity" = "Recent Activity";
 "music_preferences" = "Music Preferences";

@@ -21,6 +21,9 @@ struct User: Codable, Identifiable {
     let lastSeen: String?
     let createdAt: String?
     let updatedAt: String?
+    let friends: [User]?
+    let createdPlaylists: [Playlist]?
+    let createdEvents: [Event]?
     
     // Privacy settings
     let displayNameVisibility: VisibilityLevel?
@@ -29,7 +32,7 @@ struct User: Codable, Identifiable {
     let locationVisibility: VisibilityLevel?
     
     enum CodingKeys: String, CodingKey {
-        case id, email, displayName, avatarUrl, bio, birthDate, location, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt
+        case id, email, displayName, avatarUrl, bio, birthDate, location, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt, friends, createdPlaylists, createdEvents
         case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility
     }
     
@@ -51,6 +54,9 @@ struct User: Codable, Identifiable {
         bioVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .bioVisibility)
         birthDateVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .birthDateVisibility)
         locationVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .locationVisibility)
+        friends = try container.decodeIfPresent([User].self, forKey: .friends)
+        createdPlaylists = try container.decodeIfPresent([Playlist].self, forKey: .createdPlaylists)
+        createdEvents = try container.decodeIfPresent([Event].self, forKey: .createdEvents)
     }
 
     // Public initializer for manual instantiation and mocks
@@ -70,7 +76,10 @@ struct User: Codable, Identifiable {
         displayNameVisibility: VisibilityLevel? = nil,
         bioVisibility: VisibilityLevel? = nil,
         birthDateVisibility: VisibilityLevel? = nil,
-        locationVisibility: VisibilityLevel? = nil
+        locationVisibility: VisibilityLevel? = nil,
+        friends: [User]? = nil,
+        createdPlaylists: [Playlist]? = nil,
+        createdEvents: [Event]? = nil
     ) {
         self.id = id
         self.email = email
@@ -88,6 +97,9 @@ struct User: Codable, Identifiable {
         self.bioVisibility = bioVisibility
         self.birthDateVisibility = birthDateVisibility
         self.locationVisibility = locationVisibility
+        self.friends = friends
+        self.createdPlaylists = createdPlaylists
+        self.createdEvents = createdEvents
     }
 }
 
@@ -415,19 +427,19 @@ struct Device: Codable, Identifiable {
     let id: String
     let name: String
     let type: DeviceType
-    let status: DeviceStatus
+    var status: DeviceStatus
     let deviceInfo: String?
     let lastSeen: String
     let isActive: Bool
-    let canBeControlled: Bool
-    let delegatedToId: String?
-    let delegationExpiresAt: String?
-    let delegationPermissions: [String]?
+    var canBeControlled: Bool
+    let identifier: String?
+    var delegatedToId: String?
+    var delegationExpiresAt: String?
     let createdAt: String
     let updatedAt: String
     let ownerId: String
     let owner: User?
-    let delegatedTo: User?
+    var delegatedTo: User?
 }
 
 enum DeviceType: String, Codable, CaseIterable {

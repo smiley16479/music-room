@@ -71,13 +71,19 @@ export class Event {
   status: EventStatus;
 
   // Location data for location-based voting
-  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true, transformer: {
+    to: (value: number) => value,
+    from: (value: string) => parseFloat(value),
+  }})
   latitude: number;
 
-  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true })
+  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true, transformer: {
+    to: (value: number) => value,
+    from: (value: string) => parseFloat(value),
+  }})
   longitude: number;
 
-  @Column({ name: 'location_radius', type: 'int', nullable: true, comment: 'Radius in meters' })
+  @Column({ name: 'location_radius', type: 'int', nullable: true, comment: 'Radius in meters', default: 1000 })
   locationRadius: number;
 
   @Column({ name: 'location_name', nullable: true })
