@@ -6,7 +6,7 @@ class DevicesViewModel {
     var connectedUsers: [[String: Any]] = []
 
     init() {
-        /* // Configure les écouteurs d'événements socket ici si nécessaire
+        // Configure les écouteurs d'événements socket ici si nécessaire
         devicesSocket.on("device-connections") { data, ack in
             guard let dict = data.first as? [String: Any],
                   let connections = dict["connections"] as? [[String: Any]] else { return }
@@ -32,7 +32,17 @@ class DevicesViewModel {
                 print("Infos device contrôle révoqué :", dict)
                 // Tu peux aussi traiter dict ici (deviceId, userId, timestamp, etc)
             }
-        } */
+        }
+    }
+
+    // deinit {
+    //   // deferred statements
+    //     devicesSocket.removeAllListeners()
+    // }
+
+    func setPlaybackStateOnDevice(_ deviceId: String, _ isPlaying: Bool, _ volume: Double, _ prevNext: Number) {
+        print("Requesting connections for deviceId: \(deviceId)")
+        devicesSocket.emit("playback-state", with: [["deviceId": deviceId, "isPlaying": isPlaying, "volume": volume, "prevNext": prevNext]])
     }
 
     func getConnectedDevices(_ deviceId: String) {
@@ -547,9 +557,9 @@ struct MusicControlsView: View {
         Task {
             do {
                 if device.status == .playing {
-                    // _ = try await APIService.shared.pauseDevice(device.id)
+                    _ = try await APIService.shared.pauseDevice(device.id)
                 } else {
-                    // _ = try await APIService.shared.playDevice(device.id)
+                    _ = try await APIService.shared.playDevice(device.id)
                 }
                 isLoading = false
             } catch {
@@ -564,7 +574,7 @@ struct MusicControlsView: View {
         errorMessage = nil
         Task {
             do {
-                // _ = try await APIService.shared.nextTrackOnDevice(device.id)
+                _ = try await APIService.shared.nextTrackOnDevice(device.id)
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -578,7 +588,7 @@ struct MusicControlsView: View {
         errorMessage = nil
         Task {
             do {
-                // _ = try await APIService.shared.previousTrackOnDevice(device.id)
+                _ = try await APIService.shared.previousTrackOnDevice(device.id)
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -592,7 +602,7 @@ struct MusicControlsView: View {
         errorMessage = nil
         Task {
             do {
-                // _ = try await APIService.shared.setDeviceVolume(device.id, volume)
+                _ = try await APIService.shared.setDeviceVolume(device.id, volume)
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription

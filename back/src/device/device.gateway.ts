@@ -257,11 +257,12 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       deviceId: string; 
       state: {
         isPlaying: boolean;
-        currentTrack?: any;
-        position: number;
         volume: number;
-        shuffle: boolean;
-        repeat: string;
+        prevNext?: number;
+        // currentTrack?: any;
+        // position: number;
+        // shuffle: boolean;
+        // repeat: string;
       };
     },
   ) {
