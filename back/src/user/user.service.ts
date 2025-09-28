@@ -16,6 +16,7 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { PaginatedResponse } from '../common/dto/response.dto';
 import { generateGenericAvatar, getFacebookProfilePictureUrl } from 'src/common/utils/avatar.utils';
 import { MusicPreferencesDto } from './dto/music-preferences.dto';
+import { UpdatePrivacySettingsDto } from './dto/update-privacy-settings.dto';
 
 @Injectable()
 export class UserService {
@@ -328,9 +329,10 @@ export class UserService {
   }
 
   // Advanced queries
-  async findUsersWithMusicPreferences(genres: string[]): Promise<User[]> {
-    return this.userRepository
+  async findUsersWithMusicPreferences(genres: string[], currentUserId?: string): Promise<User[]> {
+    const queryBuilder = this.userRepository
       .createQueryBuilder('user')
+      .leftJoin('user.friends', 'friend')
       .where('JSON_EXTRACT(user.musicPreferences, "$.favoriteGenres") IS NOT NULL')
       .andWhere(
         genres.map((_, index) => 
@@ -340,12 +342,35 @@ export class UserService {
           params[`genre${index}`] = genre;
           return params;
         }, {})
-      )
+      );
+
+    // Apply privacy filtering for music preferences
+    if (currentUserId) {
+      queryBuilder
+        .andWhere(
+          `(user.musicPreferenceVisibility = :publicVisibility 
+           OR (user.musicPreferenceVisibility = :friendsVisibility AND friend.id = :currentUserId)
+           OR user.id = :currentUserId)`,
+          {
+            publicVisibility: VisibilityLevel.PUBLIC,
+            friendsVisibility: VisibilityLevel.FRIENDS,
+            currentUserId: currentUserId
+          }
+        );
+    } else {
+      // If no current user, only show public music preferences
+      queryBuilder.andWhere('user.musicPreferenceVisibility = :publicVisibility', {
+        publicVisibility: VisibilityLevel.PUBLIC
+      });
+    }
+
+    return queryBuilder
       .select([
         'user.id',
         'user.displayName',
         'user.avatarUrl',
         'user.musicPreferences',
+        'user.musicPreferenceVisibility',
       ])
       .getMany();
   }
@@ -354,6 +379,24 @@ export class UserService {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
     user.musicPreferences = preferences;
+    return this.userRepository.save(user);
+  }
+
+  async updatePrivacySettings(userId: string, privacySettings: Partial<{
+    displayNameVisibility: VisibilityLevel;
+    bioVisibility: VisibilityLevel;
+    birthDateVisibility: VisibilityLevel;
+    locationVisibility: VisibilityLevel;
+    musicPreferenceVisibility: VisibilityLevel;
+  }>): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Update privacy settings
+    Object.assign(user, privacySettings);
+    
     return this.userRepository.save(user);
   }
 
@@ -407,8 +450,15 @@ export class UserService {
     // Build visible data based on privacy settings
     const visibleData: Partial<User> = {
       id: user.id,
+      email: viewerId === userId ? user.email : undefined, // Only show email to self
       createdAt: user.createdAt,
       lastSeen: user.lastSeen,
+      // Always include privacy settings so UI can show what's visible
+      displayNameVisibility: user.displayNameVisibility,
+      bioVisibility: user.bioVisibility,
+      birthDateVisibility: user.birthDateVisibility,
+      locationVisibility: user.locationVisibility,
+      musicPreferenceVisibility: user.musicPreferenceVisibility,
     };
 
     // Apply visibility rules
@@ -433,8 +483,9 @@ export class UserService {
       visibleData.birthDate = user.birthDate;
     }
 
-    // Music preferences might be visible based on general privacy or for matching
-    if (isFriend || user.displayNameVisibility === VisibilityLevel.PUBLIC) {
+    // Apply music preferences visibility rules
+    if (user.musicPreferenceVisibility === VisibilityLevel.PUBLIC || 
+        (user.musicPreferenceVisibility === VisibilityLevel.FRIENDS && isFriend)) {
       visibleData.musicPreferences = user.musicPreferences;
     }
 
@@ -448,6 +499,15 @@ export class UserService {
     });
 
     return user?.friends?.some(friend => friend.id === userId2) || false;
+  }
+
+  // Utility method to filter user arrays based on privacy settings
+  async filterUsersWithPrivacy(users: User[], viewerId?: string): Promise<Partial<User>[]> {
+    return Promise.all(
+      users.map(async (user) => 
+        await this.getVisibleUserData(user.id, viewerId)
+      )
+    );
   }
 
   // Bulk operations

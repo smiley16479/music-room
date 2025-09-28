@@ -70,6 +70,11 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
     }
 
+    func updatePrivacySettings(_ privacySettings: [String: Any]) async throws -> User {
+        let endpoint = "/users/me/privacy"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: privacySettings)
+    }
+
     func searchUsers(query: String) async throws -> [User] {
         let endpoint = "/users/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
@@ -177,9 +182,22 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
     }
     
+    func inviteUserToEvent(eventId: String, userId: String, message: String? = nil) async throws {
+        let endpoint = "/invitations"
+        let body: [String: Any] = [
+            "inviteeId": userId,
+            "type": "event",
+            "eventId": eventId,
+            "message": message as Any
+        ]
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    // Legacy method for backward compatibility
     func inviteUsersToEvent(eventId: String, _ usersEmails: [String]) async throws {
+        // This method is deprecated - use inviteUserToEvent with userId instead
         let endpoint = "/events/\(eventId)/invite"
-        let body = ["emails": usersEmails] // Encapsulation dans un dictionnaire JSON
+        let body = ["emails": usersEmails]
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
     }
     

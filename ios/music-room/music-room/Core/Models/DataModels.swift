@@ -10,7 +10,7 @@ struct AuthResponse: Codable {
 // MARK: - User Models
 struct User: Codable, Identifiable {
     let id: String
-    let email: String
+    let email: String?
     let displayName: String
     let avatarUrl: String?
     let bio: String?
@@ -30,16 +30,17 @@ struct User: Codable, Identifiable {
     let bioVisibility: VisibilityLevel?
     let birthDateVisibility: VisibilityLevel?
     let locationVisibility: VisibilityLevel?
+    let musicPreferenceVisibility: VisibilityLevel?
     
     enum CodingKeys: String, CodingKey {
         case id, email, displayName, avatarUrl, bio, birthDate, location, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt, friends, createdPlaylists, createdEvents
-        case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility
+        case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility, musicPreferenceVisibility
     }
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        email = try container.decode(String.self, forKey: .email)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? "Unknown"
         avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
@@ -54,6 +55,7 @@ struct User: Codable, Identifiable {
         bioVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .bioVisibility)
         birthDateVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .birthDateVisibility)
         locationVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .locationVisibility)
+        musicPreferenceVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .musicPreferenceVisibility)
         friends = try container.decodeIfPresent([User].self, forKey: .friends)
         createdPlaylists = try container.decodeIfPresent([Playlist].self, forKey: .createdPlaylists)
         createdEvents = try container.decodeIfPresent([Event].self, forKey: .createdEvents)
@@ -62,7 +64,7 @@ struct User: Codable, Identifiable {
     // Public initializer for manual instantiation and mocks
     init(
         id: String,
-        email: String,
+        email: String?,
         displayName: String,
         avatarUrl: String? = nil,
         bio: String? = nil,
@@ -77,6 +79,7 @@ struct User: Codable, Identifiable {
         bioVisibility: VisibilityLevel? = nil,
         birthDateVisibility: VisibilityLevel? = nil,
         locationVisibility: VisibilityLevel? = nil,
+        musicPreferenceVisibility: VisibilityLevel? = nil,
         friends: [User]? = nil,
         createdPlaylists: [Playlist]? = nil,
         createdEvents: [Event]? = nil
@@ -97,6 +100,7 @@ struct User: Codable, Identifiable {
         self.bioVisibility = bioVisibility
         self.birthDateVisibility = birthDateVisibility
         self.locationVisibility = locationVisibility
+        self.musicPreferenceVisibility = musicPreferenceVisibility
         self.friends = friends
         self.createdPlaylists = createdPlaylists
         self.createdEvents = createdEvents
@@ -120,14 +124,14 @@ struct MusicPreferences: Codable {
 
 enum VisibilityLevel: String, Codable, CaseIterable {
     case `public` = "public"
-    case friendsOnly = "friends"
+    case friends = "friends"
     case `private` = "private"
     
     var localizedString: String {
         switch self {
         case .public:
             return "public".localized
-        case .friendsOnly:
+        case .friends:
             return "friends".localized
         case .private:
             return "private".localized

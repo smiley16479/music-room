@@ -986,11 +986,11 @@ struct InviteView: View {
                 switch mode {
                 case .userToEvent(let user):
                     let event = items[idx] as! Event
-                    try await APIService.shared.inviteUsersToEvent(eventId: event.id, [user.email])
+                    try await APIService.shared.inviteUserToEvent(eventId: event.id, userId: user.id)
                     toastMessage = "Invitation envoyée à \(user.displayName)"
                 case .eventToUser(let event):
                     let user = items[idx] as! User
-                    try await APIService.shared.inviteUsersToEvent(eventId: event.id, [user.email])
+                    try await APIService.shared.inviteUserToEvent(eventId: event.id, userId: user.id)
                     toastMessage = "Invitation envoyée à \(user.displayName)"
                 }
                 showToast = true

@@ -385,7 +385,9 @@ struct SearchingFriendsView: View {
                             }
                             VStack(alignment: .leading) {
                                 Text(user.displayName).font(.body)
-                                Text(user.email).font(.caption).foregroundColor(.secondary)
+                                if let email = user.email {
+                                    Text(email).font(.caption).foregroundColor(.secondary)
+                                }
                             }
                             Spacer()
                             Button("Add") {
@@ -931,12 +933,22 @@ struct NotificationSettingsView: View {
     }
 }
 
-// MARK: - Privacy Settings View (Placeholder)
+// MARK: - Privacy Settings View
 struct PrivacySettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authManager: AuthenticationManager
+    
     @State private var displayNamePrivacy: PrivacyLevel = .public
     @State private var bioPrivacy: PrivacyLevel = .friends
     @State private var musicPreferencePrivacy: PrivacyLevel = .friends
     @State private var locationPrivacy: PrivacyLevel = .private
+    @State private var birthDatePrivacy: PrivacyLevel = .friends
+    
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    @State private var hasChanges = false
 
     var body: some View {
         List {
@@ -958,22 +970,96 @@ struct PrivacySettingsView: View {
                     title: "Display Name",
                     selection: $displayNamePrivacy
                 )
+                .onChange(of: displayNamePrivacy) { _ in hasChanges = true }
+                
                 PrivacyToggleRow(
                     title: "Bio",
                     selection: $bioPrivacy
                 )
+                .onChange(of: bioPrivacy) { _ in hasChanges = true }
+                
                 PrivacyToggleRow(
-                    title: "Music Preferences",
-                    selection: $musicPreferencePrivacy
+                    title: "Birth Date",
+                    selection: $birthDatePrivacy
                 )
+                .onChange(of: birthDatePrivacy) { _ in hasChanges = true }
+                
                 PrivacyToggleRow(
                     title: "Location",
                     selection: $locationPrivacy
                 )
+                .onChange(of: locationPrivacy) { _ in hasChanges = true }
+                
+                PrivacyToggleRow(
+                    title: "Music Preferences",
+                    selection: $musicPreferencePrivacy
+                )
+                .onChange(of: musicPreferencePrivacy) { _ in hasChanges = true }
+            }
+            
+            if let error = errorMessage {
+                Section {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
             }
         }
         .navigationTitle("privacy_settings".localized)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    Task { await savePrivacySettings() }
+                }
+                .disabled(!hasChanges || isSaving)
+                .foregroundColor(.musicPrimary)
+            }
+        }
+        .onAppear {
+            loadCurrentPrivacySettings()
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+    
+    private func loadCurrentPrivacySettings() {
+        guard let user = authManager.currentUser else { return }
+        
+        // Convert VisibilityLevel to PrivacyLevel
+        displayNamePrivacy = PrivacyLevel(rawValue: user.displayNameVisibility?.rawValue ?? "public") ?? .public
+        bioPrivacy = PrivacyLevel(rawValue: user.bioVisibility?.rawValue ?? "friends") ?? .friends
+        birthDatePrivacy = PrivacyLevel(rawValue: user.birthDateVisibility?.rawValue ?? "friends") ?? .friends
+        locationPrivacy = PrivacyLevel(rawValue: user.locationVisibility?.rawValue ?? "friends") ?? .friends
+        musicPreferencePrivacy = PrivacyLevel(rawValue: user.musicPreferenceVisibility?.rawValue ?? "friends") ?? .friends
+    }
+    
+    private func savePrivacySettings() async {
+        isSaving = true
+        errorMessage = nil
+        
+        let privacySettings: [String: Any] = [
+            "displayNameVisibility": displayNamePrivacy.rawValue,
+            "bioVisibility": bioPrivacy.rawValue,
+            "birthDateVisibility": birthDatePrivacy.rawValue,
+            "locationVisibility": locationPrivacy.rawValue,
+            "musicPreferenceVisibility": musicPreferencePrivacy.rawValue
+        ]
+        
+        do {
+            let updatedUser = try await APIService.shared.updatePrivacySettings(privacySettings)
+            await MainActor.run {
+                authManager.currentUser = updatedUser
+                hasChanges = false
+                toastMessage = "Privacy settings updated successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+            }
+        }
+        
+        isSaving = false
     }
 }
 
@@ -1003,10 +1089,19 @@ struct PrivacySettingsView: View {
 
 // MARK: - Toggle Privacy Setting Row
 enum PrivacyLevel: String, CaseIterable, Identifiable {
-    case `public` = "Public"
-    case friends = "Friends Only"
-    case `private` = "Private"
+    case `public` = "public"
+    case friends = "friends"
+    case `private` = "private"
+    
     var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .public: return "Public"
+        case .friends: return "Friends Only"
+        case .private: return "Private"
+        }
+    }
 }
 
 struct PrivacyToggleRow: View {
@@ -1019,7 +1114,7 @@ struct PrivacyToggleRow: View {
                 .font(.headline)
             Picker("", selection: $selection) {
                 ForEach(PrivacyLevel.allCases) { level in
-                    Text(level.rawValue).tag(level)
+                    Text(level.displayName).tag(level)
                 }
             }
             .pickerStyle(.segmented)

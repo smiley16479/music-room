@@ -216,9 +216,11 @@ struct InvitationDetailView2: View {
                         Text(inviter.displayName)
                             .font(.title3)
                             .fontWeight(.semibold)
-                        Text(inviter.email)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if let email = inviter.email {
+                            Text(email)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
 

@@ -15,6 +15,7 @@ import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
+import { UpdatePrivacySettingsDto } from './dto/update-privacy-settings.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
@@ -90,9 +91,16 @@ export class UserController {
       parseInt(limit, 10),
     );
 
+    // Apply privacy settings to each user in the search results
+    const filteredUsers = await Promise.all(
+      users.map(async (foundUser) => 
+        await this.userService.getVisibleUserData(foundUser.id, user.id)
+      )
+    );
+
     return {
       success: true,
-      data: users,
+      data: filteredUsers,
       timestamp: new Date().toISOString(),
     };
   }
@@ -137,9 +145,17 @@ export class UserController {
   })
   async getMyFriends(@CurrentUser() user: User) {
     const friends = await this.userService.getFriends(user.id);
+    
+    // Apply privacy settings to each friend's data
+    const filteredFriends = await Promise.all(
+      friends.map(async (friend) => 
+        await this.userService.getVisibleUserData(friend.id, user.id)
+      )
+    );
+
     return {
       success: true,
-      data: friends,
+      data: filteredFriends,
       timestamp: new Date().toISOString(),
     };
   }
@@ -222,13 +238,23 @@ export class UserController {
     required: false,
     example: 'rock,pop,jazz'
   })
-  async findUsersWithMusicPreferences(@Query('genres') genres: string) {
+  async findUsersWithMusicPreferences(
+    @Query('genres') genres: string,
+    @CurrentUser() user: User,
+  ) {
     const genreList = genres ? genres.split(',') : [];
-    const users = await this.userService.findUsersWithMusicPreferences(genreList);
+    const users = await this.userService.findUsersWithMusicPreferences(genreList, user.id);
+    
+    // Apply full privacy settings to each user result
+    const filteredUsers = await Promise.all(
+      users.map(async (foundUser) => 
+        await this.userService.getVisibleUserData(foundUser.id, user.id)
+      )
+    );
     
     return {
       success: true,
-      data: users,
+      data: filteredUsers,
       timestamp: new Date().toISOString(),
     };
   }
@@ -242,6 +268,25 @@ export class UserController {
     return {
       success: true,
       data: userData,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Patch('me/privacy')
+  @ApiOperation({
+    summary: 'Update privacy settings',
+    description: 'Updates the current user\'s privacy settings for profile visibility',
+  })
+  @ApiBody({ type: UpdatePrivacySettingsDto })
+  async updatePrivacySettings(
+    @CurrentUser() user: User,
+    @Body() privacySettings: UpdatePrivacySettingsDto,
+  ) {
+    const updatedUser = await this.userService.updatePrivacySettings(user.id, privacySettings);
+    return {
+      success: true,
+      message: 'Privacy settings updated successfully',
+      data: updatedUser,
       timestamp: new Date().toISOString(),
     };
   }
