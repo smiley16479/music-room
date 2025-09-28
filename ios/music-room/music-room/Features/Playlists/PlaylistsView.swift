@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PlaylistsView: View {
     @EnvironmentObject var tabManager: MainTabManager
+    @EnvironmentObject var authManager: AuthenticationManager
     @State private var playlists: [Playlist] = []
     @State private var isLoading = false
     @State private var searchText = ""
@@ -25,7 +26,9 @@ struct PlaylistsView: View {
             break
         case .myPlaylists:
             // Filter playlists created by current user
-            break
+            if let currentUserId = authManager.currentUser?.id {
+                filtered = filtered.filter { $0.creatorId == currentUserId }
+            }
 //        case .collaborative:
 //            filtered = filtered.filter { $0.isCollaborative }
         case .event:
@@ -198,12 +201,6 @@ struct PlaylistsGrid: View {
     var body: some View {
         LazyVGrid(columns: gridColumns, spacing: 20) {
             ForEach(playlists) { playlist in
-                /* NavigationLink(
-                    destination: PlaylistDetailsView(playlist: playlist),
-                    label: {
-                        PlaylistGridItem(playlist: playlist)
-                    }
-                )*/
                 ZStack(alignment: .topTrailing) {
                     NavigationLink(
                         destination: PlaylistDetailsView(playlist: playlist),

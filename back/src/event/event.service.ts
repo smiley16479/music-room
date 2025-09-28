@@ -783,35 +783,61 @@ export class EventService {
   } */
 
   async setCurrentTrack(eventId: string, trackId: string, userId: string): Promise<void> {
-    const event = await this.findById(eventId, userId);
+    console.log("🎵 setCurrentTrack called with:", { eventId, trackId, userId });
+    try {
+      
 
-    if (!event) {
-      throw new NotFoundException('Event not found');
+      const event = await this.findById(eventId, userId);
+
+      if (!event) {
+        throw new NotFoundException('Event not found');
+      }
+
+      console.log("🎵 Current event currentTrackId before update:", event.currentTrackId);
+      console.log("🎵 Requested trackId:", trackId);
+      console.log("🎵 Available tracks in playlist:");
+      event.playlist?.playlistTracks.forEach(element => {
+        console.log("  - trackId:", element.trackId, "position:", element.position);
+      });
+
+      // Vérifier que la track existe dans la playlist de l'event
+      const trackExists = event.playlist?.playlistTracks.some(pt => pt.trackId === trackId);
+      if (!trackExists) {
+        throw new NotFoundException(`Track ${trackId} not found in event playlist`);
+      }
+
+      // Vérifier que la track existe vraiment dans la DB (crucial pour la relation)
+      const track = await this.trackRepository.findOne({ where: { id: trackId } });
+      if (!track) {
+        throw new NotFoundException(`Track ${trackId} does not exist in database`);
+      }
+      console.log("🎵 Track found in DB:", track.title, "by", track.artist);
+
+      // Only creator or existing admin can set current track
+      if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
+        throw new ForbiddenException('Only creator and admins can set current track');
+      }
+
+      /* A vérifier (chatGPT) ⚠️
+      Si tu mets à jour currentTrackId et recharges l’entité avec la relation, tu obtiens bien l’entité Track correspondante dans currentTrack.
+      La synchronisation se fait à la lecture, pas à l’écriture. NON C FAUX
+      */
+      // SOLUTION: Assigner directement la relation ET l'ID pour éviter les problèmes de cohérence
+      event.currentTrack = track;  // ✅ Assigne la relation directement
+      event.currentTrackId = trackId;  // ✅ Assigne aussi l'ID pour la cohérence
+      event.currentTrackStartedAt = new Date();
+      
+      const savedEvent = await this.eventRepository.save(event);
+      
+      console.log("🎵 Event saved with currentTrackId:", savedEvent.currentTrackId);
+      console.log("🎵 Event saved with currentTrackStartedAt:", savedEvent.currentTrackStartedAt);
+
+      // Notify participants
+      this.eventGateway.notifyNowPlaying(eventId, trackId);
+    } catch (error) {
+      console.error('ERROR:', error);
+      
     }
-
-    console.log("trackId:", trackId);
-    event.playlist?.playlistTracks.forEach(element => {
-      console.log("playlist track:", element.trackId);
-    });
-
-    // if (event.playlist?.playlistTracks.some(pt => pt.trackId === trackId) === false)
-      // throw new NotFoundException('Track not found');
-
-    // Only creator or existing admin can promote (MAY BE TO DO: change pour les autorisations de device ? ⚠️)
-    if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
-      throw new ForbiddenException('Only creator or admin can promote another user');
-    }
-
-    /* A vérifier (chatGPT) ⚠️
-    Si tu mets à jour currentTrackId et recharges l’entité avec la relation, tu obtiens bien l’entité Track correspondante dans currentTrack.
-    La synchronisation se fait à la lecture, pas à l’écriture.
-    */
-    event.currentTrackId = trackId;
-    event.currentTrackStartedAt = new Date();
-    await this.eventRepository.save(event);
-
-    // Notify participants
-    this.eventGateway.notifyNowPlaying(eventId, trackId);
   }
 
   // Update current track for an event (for music synchronization)

@@ -291,8 +291,8 @@ extension DevicesSocketService {
     func updateDeviceStatus(deviceId: String, status: String, metadata: [String: Any]? = nil) {
         emit("update-device-status", with: [["deviceId": deviceId, "status": status, "metadata": metadata ?? [:]]])
     }
-    func sendPlaybackState(deviceId: String, state: [String: Any]) {
-        emit("playback-state", with: [["deviceId": deviceId, "state": state]])
+    func sendPlaybackCommand(deviceIdentifier: String, command: String) {
+        emit("playback-state", with: [["deviceIdentifier": deviceIdentifier, "command": command]])
     }
     func requestDeviceInfo(deviceId: String) {
         emit("request-device-info", with: [["deviceId": deviceId]])

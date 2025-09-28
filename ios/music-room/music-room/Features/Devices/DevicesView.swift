@@ -40,10 +40,6 @@ class DevicesViewModel {
     //     devicesSocket.removeAllListeners()
     // }
 
-    func setPlaybackStateOnDevice(_ deviceId: String, _ isPlaying: Bool, _ volume: Double, _ prevNext: Number) {
-        print("Requesting connections for deviceId: \(deviceId)")
-        devicesSocket.emit("playback-state", with: [["deviceId": deviceId, "isPlaying": isPlaying, "volume": volume, "prevNext": prevNext]])
-    }
 
     func getConnectedDevices(_ deviceId: String) {
         print("Requesting connections for deviceId: \(deviceId)")
@@ -299,6 +295,9 @@ struct DeviceListItem: View {
                         Text(device.type.localizedString)
                             .font(.caption)
                             .foregroundColor(.textSecondary)
+                        Text(device.identifier ?? "")
+                            .font(.caption2)
+                            .foregroundColor(.textSecondary)
                     }
                     Spacer()
                     // Status IN/offline...
@@ -367,7 +366,7 @@ struct DeviceListItem: View {
                         Text(error).foregroundColor(.red).font(.caption)
                     }
 
-                    if device.delegatedToId != nil {
+                    /* if device.delegatedToId != nil {
                         Button("Voir utilisateurs connectés") {
                             print("button pushed: \(device.id)")
                             viewModel.getConnectedDevices(device.id)
@@ -385,7 +384,7 @@ struct DeviceListItem: View {
                     }
                     .font(.caption)
                     .foregroundColor(.blue)
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(PlainButtonStyle()) */
                 }
             }
         }
@@ -433,6 +432,9 @@ struct DelegatedDeviceListItem: View {
                             .foregroundColor(.textPrimary)
                         Text("Owned by \(device.owner?.displayName ?? "User")")
                             .font(.caption)
+                            .foregroundColor(.textSecondary)
+                        Text(device.identifier ?? "")
+                            .font(.caption2)
                             .foregroundColor(.textSecondary)
                     }
                     Spacer()
@@ -505,6 +507,8 @@ struct DeviceControlButton: View {
                 .background(Color.musicPrimary)
                 .clipShape(Circle())
         }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
     }
 }
 
@@ -514,6 +518,7 @@ struct MusicControlsView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var volume: Double = 0.5
+    let devicesSocket = DevicesSocketService.shared
 
     var body: some View {
         VStack(spacing: 12) {
@@ -524,16 +529,20 @@ struct MusicControlsView: View {
                     action: previousTrack
                 )
                 DeviceControlButton(
-                    icon: device.status == .playing ? "pause.fill" : "play.fill",
-                    action: playPause
+                    icon: "play.fill",
+                    action: play
+                )
+                DeviceControlButton(
+                    icon: "pause.fill",
+                    action: pause
                 )
                 DeviceControlButton(
                     icon: "forward.fill",
                     action: nextTrack
                 )
-                Spacer()
+                // Spacer()
                 // Volume Control
-                HStack {
+                /* HStack {
                     Image(systemName: "speaker.wave.1")
                         .foregroundColor(.textSecondary)
                     Slider(value: $volume, in: 0...1, step: 0.01, onEditingChanged: { editing in
@@ -543,7 +552,7 @@ struct MusicControlsView: View {
                         .frame(width: 80)
                     Image(systemName: "speaker.wave.3")
                         .foregroundColor(.textSecondary)
-                }
+                } */
             }
             if let error = errorMessage {
                 Text(error).foregroundColor(.red).font(.caption)
@@ -551,16 +560,28 @@ struct MusicControlsView: View {
         }
     }
 
-    private func playPause() {
+    private func play() {
         isLoading = true
         errorMessage = nil
+        print("🎵 PLAY button pressed")
         Task {
             do {
-                if device.status == .playing {
-                    _ = try await APIService.shared.pauseDevice(device.id)
-                } else {
-                    _ = try await APIService.shared.playDevice(device.id)
-                }
+                devicesSocket.sendPlaybackCommand(deviceIdentifier: device.identifier ?? "Hello", command: "play")
+                isLoading = false
+            } catch {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
+        }
+    }
+
+    private func pause() {
+        isLoading = true
+        errorMessage = nil
+        print("⏸️ PAUSE button pressed")
+        Task {
+            do {
+                devicesSocket.sendPlaybackCommand(deviceIdentifier: device.identifier ?? "Hello", command: "pause")
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -572,9 +593,10 @@ struct MusicControlsView: View {
     private func nextTrack() {
         isLoading = true
         errorMessage = nil
+        print("⏭️ NEXT button pressed") 
         Task {
             do {
-                _ = try await APIService.shared.nextTrackOnDevice(device.id)
+                devicesSocket.sendPlaybackCommand(deviceIdentifier: device.identifier ?? "Hello", command: "next")
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -586,9 +608,10 @@ struct MusicControlsView: View {
     private func previousTrack() {
         isLoading = true
         errorMessage = nil
+        print("⏮️ PREVIOUS button pressed")
         Task {
             do {
-                _ = try await APIService.shared.previousTrackOnDevice(device.id)
+                devicesSocket.sendPlaybackCommand(deviceIdentifier: device.identifier ?? "Hello", command: "previous")
                 isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
@@ -600,15 +623,14 @@ struct MusicControlsView: View {
     private func setVolume() {
         isLoading = true
         errorMessage = nil
-        Task {
-            do {
-                _ = try await APIService.shared.setDeviceVolume(device.id, volume)
-                isLoading = false
-            } catch {
-                errorMessage = error.localizedDescription
-                isLoading = false
-            }
-        }
+        // Task {
+            // do {
+                // isLoading = false
+            // } catch {
+                // errorMessage = error.localizedDescription
+                // isLoading = false
+            // }
+        // }
     }
 }
 

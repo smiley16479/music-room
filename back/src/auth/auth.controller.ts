@@ -514,6 +514,48 @@ export class AuthController {
     }
   }
 
+  @Public()
+  @Post('facebook/limited-login')
+  @ApiOperation({
+    summary: 'Facebook Limited Login for mobile (SDK v23.0+)',
+    description: 'Handles Facebook Limited Login authentication tokens from mobile SDK v23.0+',
+  })
+  async facebookLimitedLogin(@Body('authentication_token') authToken: string) {
+    try {
+      this.logger.log(`facebookLimitedLogin authentication_token received`);
+      
+      // Le token d'authentification est un JWT signé par Facebook
+      // Décoder le token pour récupérer les infos utilisateur
+      const decoded = this.jwtService.decode(authToken) as any;
+      
+      if (!decoded) {
+        throw new BadRequestException('Invalid authentication token format');
+      }
+      
+      const fbUserData = {
+        id: decoded.sub, // Facebook user ID
+        email: decoded.email,
+        name: decoded.name,
+        picture: decoded.picture
+      };
+      
+      // Utiliser la même logique de login que pour le classic login
+      const result = await this.authService.facebookLogin(fbUserData);
+      
+      this.logger.log(`facebookLimitedLogin result`, result);
+      return {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        user: result.user
+      };
+    } catch (error) {
+      this.logger.error('Facebook Limited Login failed:', error);
+      throw new BadRequestException('Facebook Limited Login authentication failed');
+    }
+  }
+
+
+
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({

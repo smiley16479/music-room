@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
@@ -212,13 +213,13 @@ struct PlaylistDetailsView: View {
                AudioPlayerView(viewModel: viewModel)
             }
 
-        Button("Test Socket") {
+        /* Button("Test Socket") {
             viewModel.eventsSocket.test()
         }
         .padding()
         .background(Color.blue.opacity(0.1))
         .cornerRadius(8)
-        .foregroundColor(.blue)
+        .foregroundColor(.blue) */
 
             // Content
             if displayMode == .list {
@@ -236,6 +237,26 @@ struct PlaylistDetailsView: View {
         .task {
             await viewModel.loadPlaylistDetails()
         }
+        .onAppear {
+            // Debug: Afficher les tracks et leur statut
+            print("🎵 DEBUG: Playlist loaded with \(viewModel.tracks.count) tracks")
+            for (index, track) in viewModel.tracks.enumerated() {
+                print("  - Track [\(index)]: \(track.title)")
+                print("    ID: \(track.id)")
+                print("    isCurrentlyPlaying: \(track.isCurrentlyPlaying ?? false)")
+                print("    hasPlayed: \(track.hasPlayed ?? false)")
+            }
+            
+            // Debug: Current track ID du viewModel
+            if let currentId = viewModel.currentTrackId {
+                print("🎵 Current track ID in viewModel: \(currentId)")
+                let currentIndex = viewModel.tracks.firstIndex { $0.id == currentId } ?? -1
+                print("🎵 Current track index calculated: \(currentIndex)")
+                print("🎵 viewModel.currentTrackIndex: \(viewModel.currentTrackIndex)")
+            } else {
+                print("🎵 No current track ID in viewModel")
+            }
+        }
     }
     // MARK: List View
     @ViewBuilder
@@ -249,27 +270,42 @@ struct PlaylistDetailsView: View {
 
     private var adminListView: some View {
         List {
-            ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+            ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay).enumerated()), id: \.element.id) { index, track in
+                let calculatedCurrentIndex = viewModel.currentTrackId != nil ? 
+                    (viewModel.tracks.firstIndex { $0.id == viewModel.currentTrackId } ?? viewModel.currentTrackIndex) : 
+                    viewModel.currentTrackIndex
+                
                 TrackRowView(
                     track: track,
                     onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
                     onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
                     canVote: !(track.hasPlayed ?? false)
-                          && !(track.isCurrentlyPlaying ?? false)
-                          && (playlist.name.hasPrefix("[Event]"))
+                          && !((track.isCurrentlyPlaying ?? false) || (viewModel.currentTrackId == track.id))
+                          && !(index < calculatedCurrentIndex)  // Pas de vote pour les tracks avant la courante
+                          && (playlist.name.hasPrefix("[Event]")),
+                    currentTrackId: viewModel.currentTrackId,
+                    trackIndex: index,
+                    currentTrackIndex: calculatedCurrentIndex
                 )
                 .listRowInsets(EdgeInsets())
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    // Sélectionne la track et démarre automatiquement
                     viewModel.currentTrackId = track.id
+                    viewModel.togglePlayPause(for: track)
                 }
             }
             .onDelete { indexSet in
-                for index in indexSet {
-                    let track = viewModel.tracks[index]
-                    viewModel.tracks.remove(at: index)
-                    Task {
-                      try await APIService.shared.removeMusicFromPlaylist(playlist.id, trackId: track.id)
+                // Récupérer les tracks à supprimer AVANT de modifier le tableau
+                let tracksToDelete = indexSet.map { viewModel.tracks[$0] }
+                
+                // Supprimer du tableau (SwiftUI s'occupe des animations)
+                viewModel.tracks.remove(atOffsets: indexSet)
+                
+                // Supprimer de la base de données en async
+                Task {
+                    for track in tracksToDelete {
+                        try await APIService.shared.removeMusicFromPlaylist(playlist.id, trackId: track.id)
                     }
                 }
             }
@@ -284,14 +320,22 @@ struct PlaylistDetailsView: View {
     private var userScrollView: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay))) { track in
+                ForEach(Array(viewModel.tracks.prefix(maxTracksToDisplay).enumerated()), id: \.element.id) { index, track in
+                    let calculatedCurrentIndex = viewModel.currentTrackId != nil ? 
+                        (viewModel.tracks.firstIndex { $0.id == viewModel.currentTrackId } ?? viewModel.currentTrackIndex) : 
+                        viewModel.currentTrackIndex
+                    
                     TrackRowView(
                         track: track,
                         onLike: { viewModel.voteTrack(id: track.id, isLike: true) },
                         onDislike: { viewModel.voteTrack(id: track.id, isLike: false) },
                         canVote: !(track.hasPlayed ?? false)
-                              && !(track.isCurrentlyPlaying ?? false)
-                              && (playlist.name.hasPrefix("[Event]"))
+                              && !((track.isCurrentlyPlaying ?? false) || (viewModel.currentTrackId == track.id))
+                              && !(index < calculatedCurrentIndex)  // Pas de vote pour les tracks avant la courante
+                              && (playlist.name.hasPrefix("[Event]")),
+                        currentTrackId: viewModel.currentTrackId,
+                        trackIndex: index,
+                        currentTrackIndex: calculatedCurrentIndex
                     )
                 }
             }
@@ -357,23 +401,25 @@ struct AudioPlayerView: View {
                 }
 
                 // Volume slider
-                HStack {
+               /*  HStack {
                     Image(systemName: "speaker.fill")
                     Slider(value: Binding(
                         get: { Double(viewModel.volume) },
                         set: { newValue in
                             viewModel.volume = Float(newValue)
                             viewModel.audioPlayer?.volume = viewModel.volume
+                            print("📢 Volume changed to: \(viewModel.volume), AVPlayer volume: \(viewModel.audioPlayer?.volume ?? -1)")
                         }
                     ), in: 0...1)
                     Image(systemName: "speaker.wave.3.fill")
                 }
-                .padding(.horizontal)
+                .padding(.horizontal) */
             }
         }
         .padding()
         .onAppear {
             viewModel.audioPlayer?.volume = viewModel.volume
+            configureAudioSession()
         }
         .onChange(of: viewModel.currentTrackId) { old, newId in
             if let id = newId, let track = viewModel.tracks.first(where: { $0.id == id }) {
@@ -384,6 +430,17 @@ struct AudioPlayerView: View {
                 // nextTrack() // Ne pas utiliser nextTrack ici, car cela change l'index
                 // togglePlayPause(for: track)
             }
+        }
+    }
+    
+    private func configureAudioSession() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [])
+            try audioSession.setActive(true)
+            print("📢 Audio session configured for hardware volume control")
+        } catch {
+            print("❌ Failed to configure audio session: \(error)")
         }
     }
 }
@@ -448,6 +505,25 @@ struct TrackRowView: View {
     let onLike: () -> Void
     let onDislike: () -> Void
     let canVote: Bool
+    var currentTrackId: String? = nil  // Ajout pour la synchronisation
+    var trackIndex: Int = 0  // Index de cette track dans la playlist
+    var currentTrackIndex: Int = 0  // Index de la track en cours
+    
+    // Computed property pour déterminer si la track est en cours
+    private var isCurrentlyPlaying: Bool {
+        return (track.isCurrentlyPlaying ?? false) || (currentTrackId == track.id)
+    }
+    
+    // Computed property pour déterminer si la track doit être marquée comme lue
+    private var shouldShowAsPlayed: Bool {
+        // Si la track a vraiment été jouée, la marquer comme lue
+        if track.hasPlayed ?? false {
+            return true
+        }
+        
+        // Marquer comme lues toutes les tracks avant l'index de la track courante
+        return trackIndex < currentTrackIndex
+    }
     
     var body: some View {
         HStack(spacing: 12) {
@@ -491,10 +567,10 @@ struct TrackRowView: View {
              Spacer()
             
             // Status indicator
-            if (track.isCurrentlyPlaying ?? false) {
+            if isCurrentlyPlaying {
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundColor(.green)
-            } else if (track.hasPlayed ?? false) {
+            } else if shouldShowAsPlayed {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.gray)
             }
@@ -534,7 +610,7 @@ struct TrackRowView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill((track.isCurrentlyPlaying ?? false) ? Color.blue.opacity(0.1) : Color.gray.opacity(0.05))
+                .fill(isCurrentlyPlaying ? Color.blue.opacity(0.1) : Color.gray.opacity(0.05))
         )
     }
 }

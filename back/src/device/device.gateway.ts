@@ -19,6 +19,7 @@ import { User } from 'src/user/entities/user.entity';
 import { PlaybackCommand, DeviceService } from './device.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
+import { log } from 'console';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -111,6 +112,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     try {
       if (!client.userId) {
         client.emit('error', { message: 'Authentication required' });
+        console.error('handleConnectDevice unauthorized: no userId', { clientUserId: client.userId });
         return;
       }
 
@@ -125,6 +127,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
       // Join device room
       const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
+      this.logger.debug(`Joining DEVICE room ${room} for device ${deviceIdentifier}`);
       await client.join(room);
       const userRoom = SOCKET_ROOMS.USER(client.userId);
       await client.join(userRoom);
@@ -135,7 +138,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       client.data.connectedAt = new Date().toISOString();
 
       // Ajout dans Redis
-      await this.deviceConnectionRedis.addUserToDevice(deviceIdentifier, client.userId);
+      // await this.deviceConnectionRedis.addUserToDevice(deviceIdentifier, client.userId);
 
       client.emit('device-connected', {
         deviceIdentifier,
@@ -146,6 +149,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       this.logger.log(`User ${client.userId} connected to device ${deviceIdentifier}`);
     } catch (error) {
       client.emit('error', { message: 'Failed to connect to device', details: error.message });
+      this.logger.error(`device ${deviceIdentifier} Error: ${error.message}`);
     }
   }
 
@@ -250,35 +254,41 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('playback-state')
   async handlePlaybackState(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { 
-      deviceId, 
+/*     @MessageBody() { 
+      deviceIdentifier, 
       state 
     }: { 
-      deviceId: string; 
+      deviceIdentifier: string; 
       state: {
-        isPlaying: boolean;
-        volume: number;
+        isPlaying?: boolean;
+        volume?: number;
         prevNext?: number;
         // currentTrack?: any;
         // position: number;
         // shuffle: boolean;
         // repeat: string;
       };
-    },
+    }, */
+      @MessageBody() data?: any,
   ) {
+
+    const { deviceIdentifier, command } = data[0];  // Extraction depuis l'array
+
+    this.logger.debug(`SubscribeMessage('playback-state') Device ${deviceIdentifier} state comand: ${command}`);
+
     try {
-      if (!client.userId || client.deviceId !== deviceId) {
-        return;
-      }
+      // if (!client.userId || client.deviceIdentifier !== deviceIdentifier) {
+      //   return;
+      // }
 
       // Update last activity
       await this.deviceService.updateLastActivity(client.id);
 
       // Broadcast playback state to device room
-      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
       client.to(room).emit('playback-state-updated', {
-        deviceId,
-        state,
+        deviceIdentifier,
+        command,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {

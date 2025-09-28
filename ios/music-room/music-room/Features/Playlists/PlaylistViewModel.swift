@@ -23,6 +23,7 @@ class PlaylistViewModel {
     // @State private var errorMessage: String?
     // private let socketService = SocketService.shared
     let eventsSocket = EventsSocketService.shared
+    let devicesSocket = DevicesSocketService.shared
 
     // Player
     var audioPlayer: AVPlayer? = nil
@@ -91,9 +92,24 @@ class PlaylistViewModel {
     }
 
     func loadPlaylistDetails() async {
-        // Appelle l’API pour récupérer les détails et les tracks
+        // Appelle l'API pour récupérer les détails et les tracks
         do {
             let playlistTracks = try await APIService.shared.getPlaylistTracks(playlist.id).map { $0.track }
+            
+            // Si cette playlist est associée à un event, récupérer le currentTrackId
+            if let eventId = playlist.eventId {
+                let event = try await APIService.shared.getEvent(eventId: eventId)
+                print("🎵 Event loaded - currentTrackId: \(event.currentTrackId ?? "nil")")
+                await MainActor.run {
+                    self.currentTrackId = event.currentTrackId
+                    if let currentId = event.currentTrackId {
+                        // Trouver l'index de la track courante
+                        self.currentTrackIndex = playlistTracks.firstIndex { $0.id == currentId } ?? 0
+                        print("🎵 Set currentTrackIndex to: \(self.currentTrackIndex)")
+                    }
+                }
+            }
+            
             // Mets à jour les tracks et autres infos
             await MainActor.run {
                 self.tracks = playlistTracks
@@ -298,7 +314,7 @@ class PlaylistViewModel {
         tracks.first(where: { $0.id == currentTrackId })
     }
 
-// MARK AUDIO CONTROL
+// MARK: - AUDIO CONTROL
     func togglePlayPause(for track: Track) {
         guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
         // Synchronize track state
@@ -543,6 +559,61 @@ class PlaylistViewModel {
                 }
             }
         }
+
+        devicesSocket.onPlaybackStateUpdated { [weak self] data, ack in
+            print("📡 Playback state updated:", data)
+    guard let self = self,
+          let dict = data.first as? [String: Any] else {
+        print("❌ Erreur : Données invalides ou vides")
+        return
+    }
+    
+    // Étape 2 : Extraire les clés individuelles
+    let deviceIdentifier = dict["deviceIdentifier"] as? String
+    let timestamp = dict["timestamp"] as? String
+    let command = dict["command"] as? String
+    
+    // Étape 3 : Extraire le sous-dictionnaire `state`
+    /* guard let state = dict["state"] as? [String: Any] else {
+        print("❌ Erreur : État manquant dans les données")
+        return
+    }
+    
+    // Étape 4 : Extraire les valeurs spécifiques de `state`
+    let isPlaying = state["isPlaying"] as? Bool  // true/false (NSNumber 1/0 est converti automatiquement)
+    let volume = state["volume"] as? Float
+    let position = state["position"] as? Double */
+
+            switch command {
+                case "play":
+                    audioPlayer?.play()
+                    isPlaying = true
+                case "pause":
+                    audioPlayer?.pause()
+                    isPlaying = false
+                case "next":
+                    nextTrack()
+                    
+                case "previous":
+                    previousTrack()
+                    
+                /* case "setVolume":
+                    if let volume = data?["volume"] as? Float {
+                        audioPlayer?.volume = volume
+                        self.volume = volume
+                    }
+                    
+                case "seek":
+                    if let position = data?["position"] as? Double {
+                        let time = CMTime(seconds: position, preferredTimescale: 1)
+                        audioPlayer?.seek(to: time)
+                    }
+                     */
+                default:
+                    print("Commande inconnue: \(command)")
+            }
+        }
+
     }
 
     private func updateEvent(from data: [String: Any]) {

@@ -10,7 +10,7 @@ struct ContentView: View {
         NavigationView {
             if authenticationManager.isAuthenticated {
                 MainTabView()
-                    .toolbar {
+                    /* .toolbar {
                         #if DEBUG
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("Test") {
@@ -18,7 +18,7 @@ struct ContentView: View {
                             }
                         }
                         #endif
-                    }
+                    } */
             } else {
                 WelcomeView()
             }

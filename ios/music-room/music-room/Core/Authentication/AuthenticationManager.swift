@@ -261,33 +261,86 @@ class AuthenticationManager:  NSObject, ObservableObject {
         print("✅ signInWithFacebook")
         let loginManager = LoginManager()
         
-        loginManager.logIn(permissions: ["public_profile", "email"], from: nil) { result, error in
-            if let error = error {
-                self.errorMessage = "Facebook login failed: \(error.localizedDescription)"
-                self.isLoading = false
-                return
-            }
-            
-            guard let result = result, !result.isCancelled else {
-                self.errorMessage = "Facebook login was cancelled."
-                self.isLoading = false
-                return
-            }
-            
-            // Récupération du token
-            if let tokenString = AccessToken.current?.tokenString {
-                Task {
-                    // Ici, tu envoies `tokenString` à ton backend
-                    // pour qu’il l’échange contre un token de session interne
-                    await self.exchangeFacebookTokenForAppToken(token: tokenString)
+        // Configuration pour SDK v23.0+ avec Limited Login
+        let configuration = LoginConfiguration(
+            permissions: ["public_profile", "email"],
+            tracking: .enabled,
+            nonce: UUID().uuidString
+        )
+        
+        loginManager.logIn(configuration: configuration) { result in
+            Task { @MainActor in
+                // Dans SDK v23.0+, vérifier si l'utilisateur a annulé ou s'il y a des tokens
+                switch result {
+                case .cancelled:
+                    self.errorMessage = "Facebook login was cancelled."
+                    self.isLoading = false
+                    return
+                case .failed(let error):
+                    self.errorMessage = "Facebook login failed: \(error.localizedDescription)"
+                    self.isLoading = false
+                    return
+                case .success:
+                    // Succès - vérifier les tokens disponibles
+                    break
                 }
-            } else {
-                self.errorMessage = "No access token found"
-                self.isLoading = false
+                
+                // Gestion du Limited Login (SDK v23.0+) - priorité à AuthenticationToken
+                if let authenticationToken = AuthenticationToken.current {
+                    print("✅ Using Limited Login with authentication token")
+                    await self.exchangeFacebookAuthTokenForAppToken(authToken: authenticationToken.tokenString)
+                } else if let accessToken = AccessToken.current {
+                    print("✅ Using Classic Login with access token")
+                    await self.exchangeFacebookTokenForAppToken(token: accessToken.tokenString)
+                } else {
+                    self.errorMessage = "No authentication token found after successful login"
+                    self.isLoading = false
+                }
             }
         }
     }
     
+    
+    
+    // Nouvelle méthode pour gérer les AuthenticationToken (Limited Login)
+    @MainActor
+    func exchangeFacebookAuthTokenForAppToken(authToken: String) async {
+        do {
+            let endpoint = "\(AppConfig.baseURL)/auth/facebook/limited-login"
+            print("✅ exchangeFacebookAuthTokenForAppToken \(endpoint)")
+            
+            var request = URLRequest(url: URL(string: endpoint)!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            let body: [String: String] = ["authentication_token": authToken]
+            request.httpBody = try JSONEncoder().encode(body)
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                throw NSError(domain: "AuthError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Server error"])
+            }
+            
+            let authResponse = try JSONDecoder().decode(AuthResponse.self, from: data)
+            
+            print("🔒 Facebook Limited Login successful")
+            keychainService.saveAccessToken(authResponse.accessToken)
+            if let refreshToken = authResponse.refreshToken {
+                keychainService.saveRefreshToken(refreshToken)
+            }
+            
+            self.currentUser = authResponse.user
+            self.isAuthenticated = true
+            self.isLoading = false
+            
+        } catch {
+            self.errorMessage = "Failed to authenticate with Limited Login: \(error.localizedDescription)"
+            self.isLoading = false
+        }
+    }
+
     @MainActor
     func exchangeFacebookTokenForAppToken(token: String) async {
         // Appel API vers ton backend
