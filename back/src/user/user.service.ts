@@ -200,6 +200,16 @@ export class UserService {
     await this.userRepository.remove(user);
   }
 
+  async linkGoogleAccount(userId: string, googleId: string): Promise<User> {
+    await this.userRepository.update(userId, { googleId });
+    return await this.findById(userId);
+  }
+
+  async linkFacebookAccount(userId: string, facebookId: string): Promise<User> {
+    await this.userRepository.update(userId, { facebookId });
+    return await this.findById(userId);
+  }
+
   async unlinkGoogleAccount(userId: string): Promise<void> {
     await this.userRepository.update(userId, { googleId: null });
   }

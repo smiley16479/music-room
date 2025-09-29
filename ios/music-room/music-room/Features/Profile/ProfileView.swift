@@ -729,6 +729,12 @@ struct EditProfileView: View {
     
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    // Social account linking states
+    @State private var isLinkingGoogle = false
+    @State private var isLinkingFacebook = false
 
     private func updateProfile() async {
         isSaving = true
@@ -754,32 +760,80 @@ struct EditProfileView: View {
 
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Edit Profile")
-                    .font(.title)
-                // Form fields
-                CustomTextField(
-                    text: $displayName,
-                    title: "display_name".localized,
-                    placeholder: "Enter display name",
-                    icon: "person"
-                )
-                CustomTextField(
-                    text: $bio,
-                    title: "bio".localized,
-                    placeholder: "Tell us about yourself",
-                    icon: "text.alignleft"
-                )
-                CustomTextField(
-                    text: $location,
-                    title: "location".localized,
-                    placeholder: "Your location",
-                    icon: "location"
-                )
-                if let error = errorMessage {
-                    Text(error).foregroundColor(.red)
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Edit Profile")
+                        .font(.title)
+                        .padding(.top)
+                    
+                    // Profile Information Section
+                    VStack(spacing: 16) {
+                        CustomTextField(
+                            text: $displayName,
+                            title: "display_name".localized,
+                            placeholder: "Enter display name",
+                            icon: "person"
+                        )
+                        CustomTextField(
+                            text: $bio,
+                            title: "bio".localized,
+                            placeholder: "Tell us about yourself",
+                            icon: "text.alignleft"
+                        )
+                        CustomTextField(
+                            text: $location,
+                            title: "location".localized,
+                            placeholder: "Your location",
+                            icon: "location"
+                        )
+                    }
+                    
+                    // Social Account Linking Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Link Social Accounts")
+                            .font(.headline)
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            // Google Account Linking
+                            SocialAccountLinkRow(
+                                provider: "Google",
+                                icon: "globe",
+                                isLinked: authManager.currentUser?.googleId != nil,
+                                isLinking: isLinkingGoogle,
+                                onLink: {
+                                    Task { await linkGoogleAccount() }
+                                },
+                                onUnlink: {
+                                    Task { await unlinkGoogleAccount() }
+                                }
+                            )
+                            
+                            // Facebook Account Linking
+                            SocialAccountLinkRow(
+                                provider: "Facebook",
+                                icon: "person.2.circle",
+                                isLinked: authManager.currentUser?.facebookId != nil,
+                                isLinking: isLinkingFacebook,
+                                onLink: {
+                                    Task { await linkFacebookAccount() }
+                                },
+                                onUnlink: {
+                                    Task { await unlinkFacebookAccount() }
+                                }
+                            )
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
+                    }
+                    
+                    Spacer()
                 }
-                Spacer()
             }
             .padding()
             .navigationTitle("edit_profile".localized)
@@ -803,6 +857,76 @@ struct EditProfileView: View {
             displayName = authManager.currentUser?.displayName ?? ""
             bio = authManager.currentUser?.bio ?? ""
             location = authManager.currentUser?.location ?? ""
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+    
+    // MARK: - Social Account Linking Methods
+    private func linkGoogleAccount() async {
+        isLinkingGoogle = true
+        errorMessage = nil
+        
+        do {
+            // Use existing Google sign-in logic but for linking
+            try await authManager.linkGoogleAccount()
+            await MainActor.run {
+                toastMessage = "Google account linked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to link Google account: \(error.localizedDescription)"
+            }
+        }
+        
+        isLinkingGoogle = false
+    }
+    
+    private func unlinkGoogleAccount() async {
+        do {
+            try await authManager.unlinkGoogleAccount()
+            await MainActor.run {
+                toastMessage = "Google account unlinked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to unlink Google account: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    private func linkFacebookAccount() async {
+        isLinkingFacebook = true
+        errorMessage = nil
+        
+        do {
+            // Use existing Facebook sign-in logic but for linking
+            try await authManager.linkFacebookAccount()
+            await MainActor.run {
+                toastMessage = "Facebook account linked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to link Facebook account: \(error.localizedDescription)"
+            }
+        }
+        
+        isLinkingFacebook = false
+    }
+    
+    private func unlinkFacebookAccount() async {
+        do {
+            try await authManager.unlinkFacebookAccount()
+            await MainActor.run {
+                toastMessage = "Facebook account unlinked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to unlink Facebook account: \(error.localizedDescription)"
+            }
         }
     }
 }
@@ -1134,6 +1258,59 @@ struct ToggleSettingRow: View {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
         }
+    }
+}
+
+// MARK: - Social Account Link Row
+struct SocialAccountLinkRow: View {
+    let provider: String
+    let icon: String
+    let isLinked: Bool
+    let isLinking: Bool
+    let onLink: () -> Void
+    let onUnlink: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(isLinked ? .green : .gray)
+                .frame(width: 30)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(provider)
+                    .font(.headline)
+                    .foregroundColor(.textPrimary)
+                
+                Text(isLinked ? "Account linked" : "Not linked")
+                    .font(.caption)
+                    .foregroundColor(isLinked ? .green : .textSecondary)
+            }
+            
+            Spacer()
+            
+            if isLinking {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else {
+                Button(isLinked ? "Unlink" : "Link") {
+                    if isLinked {
+                        onUnlink()
+                    } else {
+                        onLink()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(isLinked ? .red : .musicPrimary)
+            }
+        }
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 

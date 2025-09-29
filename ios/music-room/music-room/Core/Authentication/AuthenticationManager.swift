@@ -175,7 +175,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
         }
     }
 
-    func exchangeGoogleCodeForToken(code: String) async {
+    func exchangeGoogleCodeForToken(code: String, isLinking: Bool = false) async {
         guard let url = URL(string: "\(AppConfig.baseURL)/auth/google/mobile-token") else {
             await MainActor.run {
                 self.errorMessage = "Invalid backend URL"
@@ -342,7 +342,7 @@ class AuthenticationManager:  NSObject, ObservableObject {
     }
 
     @MainActor
-    func exchangeFacebookTokenForAppToken(token: String) async {
+    func exchangeFacebookTokenForAppToken(token: String, isLinking: Bool = false) async {
         // Appel API vers ton backend
         do {
             let endpoint = "\(AppConfig.baseURL)/auth/facebook/mobile-login"
@@ -416,16 +416,217 @@ class AuthenticationManager:  NSObject, ObservableObject {
     }
     
     // MARK: - Account Management
-    func linkGoogleAccount() async {
-        // Implementation for linking Google account
+    func linkGoogleAccount() async throws {
+        isLoading = true
+        errorMessage = nil
+        
+        // Use the same Google OAuth flow as sign-in but for linking
+        let clientId = AppConfig.googleClientId
+        let redirectUri = "\(AppConfig.googleSchemaIOS)://"
+        let scope = "openid email profile"
+        
+        var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+        components.queryItems = [
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "client_id", value: clientId),
+            URLQueryItem(name: "redirect_uri", value: redirectUri),
+            URLQueryItem(name: "scope", value: scope),
+            URLQueryItem(name: "access_type", value: "offline"),
+            URLQueryItem(name: "prompt", value: "select_account")
+        ]
+        
+        guard let authURL = components.url else {
+            await MainActor.run {
+                self.errorMessage = "Invalid authentication URL"
+                self.isLoading = false
+            }
+            throw APIError.invalidURL
+        }
+        
+        // Start web authentication session
+        await MainActor.run {
+            self.currentWebAuthSession = ASWebAuthenticationSession(
+                url: authURL,
+                callbackURLScheme: AppConfig.googleSchemaIOS
+            ) { [weak self] callbackURL, error in
+                Task {
+                    await self?.handleGoogleLinkCallback(callbackURL: callbackURL, error: error)
+                }
+            }
+            self.currentWebAuthSession?.presentationContextProvider = self
+            self.currentWebAuthSession?.start()
+        }
     }
     
-    func linkFacebookAccount() async {
-        // Implementation for linking Facebook account
+    func linkFacebookAccount() async throws {
+        isLoading = true
+        errorMessage = nil
+        
+        let loginManager = LoginManager()
+        
+        // Use the same configuration approach as signInWithFacebook
+        let configuration = LoginConfiguration(
+            permissions: ["public_profile", "email"],
+            tracking: .enabled,
+            nonce: UUID().uuidString
+        )
+        
+        await withCheckedContinuation { continuation in
+            loginManager.logIn(configuration: configuration) { result in
+                Task { @MainActor in
+                    self.isLoading = false
+                    
+                    // Use the same switch logic as signInWithFacebook
+                    switch result {
+                    case .cancelled:
+                        self.errorMessage = "Facebook login was cancelled"
+                    case .failed(let error):
+                        self.errorMessage = "Facebook login failed: \(error.localizedDescription)"
+                    case .success:
+                        // Check for available tokens - same logic as signInWithFacebook
+                        if let authenticationToken = AuthenticationToken.current {
+                            await self.linkFacebookAccountWithToken(token: authenticationToken.tokenString)
+                        } else if let accessToken = AccessToken.current {
+                            await self.linkFacebookAccountWithToken(token: accessToken.tokenString)
+                        } else {
+                            self.errorMessage = "No access token received from Facebook"
+                        }
+                    @unknown default:
+                        self.errorMessage = "Unknown Facebook login result"
+                    }
+                    
+                    continuation.resume()
+                }
+            }
+        }
+    }
+    
+    func unlinkGoogleAccount() async throws {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            try await apiService.unlinkGoogleAccount()
+            
+            // Refresh user data to reflect changes
+            let updatedUser = try await apiService.getCurrentUser()
+            await MainActor.run {
+                self.currentUser = updatedUser
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+            throw error
+        }
+    }
+    
+    func unlinkFacebookAccount() async throws {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            try await apiService.unlinkFacebookAccount()
+            
+            // Refresh user data to reflect changes
+            let updatedUser = try await apiService.getCurrentUser()
+            await MainActor.run {
+                self.currentUser = updatedUser
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isLoading = false
+            }
+            throw error
+        }
     }
     
     func linkDeezerAccount() async {
         // Implementation for linking Deezer account
+    }
+    
+    // MARK: - Account Linking Callbacks
+    @MainActor
+    private func handleGoogleLinkCallback(callbackURL: URL?, error: Error?) async {
+        isLoading = false
+        
+        if let error = error {
+            if error.localizedDescription.contains("cancelled") {
+                self.errorMessage = "Linking cancelled"
+            } else {
+                self.errorMessage = "Authentication error: \(error.localizedDescription)"
+            }
+            return
+        }
+        
+        guard let callbackURL = callbackURL,
+              let components = URLComponents(string: callbackURL.absoluteString),
+              let queryItems = components.queryItems else {
+            self.errorMessage = "Invalid callback URL"
+            return
+        }
+        
+        if let error = queryItems.first(where: { $0.name == "error" })?.value {
+            self.errorMessage = "Authentication failed: \(error)"
+            return
+        }
+        
+        guard let code = queryItems.first(where: { $0.name == "code" })?.value else {
+            self.errorMessage = "No authorization code received"
+            return
+        }
+        
+        // Exchange code for linking (similar to sign-in but for linking)
+        await linkGoogleAccountWithCode(code: code)
+    }
+    
+
+    
+    private func linkGoogleAccountWithCode(code: String) async {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let redirectUri = "\(AppConfig.googleSchemaIOS)://"
+            let updatedUser = try await apiService.linkGoogleAccount(code: code, redirectUri: redirectUri)
+            
+            print("🔗 Google account linked successfully!")
+            print("🔗 Updated user googleId: \(updatedUser.googleId ?? "nil")")
+            
+            await MainActor.run {
+                self.currentUser = updatedUser
+                self.isLoading = false
+            }
+        } catch {
+            print("❌ Failed to link Google account: \(error)")
+            await MainActor.run {
+                self.errorMessage = "Failed to link Google account: \(error.localizedDescription)"
+                self.isLoading = false
+            }
+        }
+    }
+    
+    private func linkFacebookAccountWithToken(token: String) async {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            let updatedUser = try await apiService.linkFacebookAccount(token: token)
+            
+            await MainActor.run {
+                self.currentUser = updatedUser
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Failed to link Facebook account: \(error.localizedDescription)"
+                self.isLoading = false
+            }
+        }
     }
     
     func forgotPassword(email: String) async {

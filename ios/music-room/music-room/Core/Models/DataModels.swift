@@ -16,6 +16,8 @@ struct User: Codable, Identifiable {
     let bio: String?
     let birthDate: String?
     let location: String?
+    let googleId: String?
+    let facebookId: String?
     let emailVerified: Bool?
     let musicPreferences: MusicPreferences?
     let lastSeen: String?
@@ -33,7 +35,7 @@ struct User: Codable, Identifiable {
     let musicPreferenceVisibility: VisibilityLevel?
     
     enum CodingKeys: String, CodingKey {
-        case id, email, displayName, avatarUrl, bio, birthDate, location, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt, friends, createdPlaylists, createdEvents
+        case id, email, displayName, avatarUrl, bio, birthDate, location, googleId, facebookId, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt, friends, createdPlaylists, createdEvents
         case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility, musicPreferenceVisibility
     }
     
@@ -46,6 +48,8 @@ struct User: Codable, Identifiable {
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
         birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate)
         location = try container.decodeIfPresent(String.self, forKey: .location)
+        googleId = try container.decodeIfPresent(String.self, forKey: .googleId)
+        facebookId = try container.decodeIfPresent(String.self, forKey: .facebookId)
         emailVerified = try container.decodeIfPresent(Bool.self, forKey: .emailVerified)
         musicPreferences = try container.decodeIfPresent(MusicPreferences.self, forKey: .musicPreferences)
         lastSeen = try container.decodeIfPresent(String.self, forKey: .lastSeen)
@@ -70,6 +74,8 @@ struct User: Codable, Identifiable {
         bio: String? = nil,
         birthDate: String? = nil,
         location: String? = nil,
+        googleId: String? = nil,
+        facebookId: String? = nil,
         emailVerified: Bool? = nil,
         musicPreferences: MusicPreferences? = nil,
         lastSeen: String? = nil,
@@ -91,6 +97,8 @@ struct User: Codable, Identifiable {
         self.bio = bio
         self.birthDate = birthDate
         self.location = location
+        self.googleId = googleId
+        self.facebookId = facebookId
         self.emailVerified = emailVerified
         self.musicPreferences = musicPreferences
         self.lastSeen = lastSeen

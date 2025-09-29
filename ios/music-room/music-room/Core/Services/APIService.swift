@@ -54,6 +54,46 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
+    // MARK: - Social Account Linking
+    func linkGoogleAccount(code: String, redirectUri: String) async throws -> User {
+        let endpoint = "/auth/google/mobile-token"
+        let body: [String: Any] = [
+            "code": code,
+            "redirectUri": redirectUri,
+            "platform": "ios",
+            "linkingMode": "link"
+        ]
+        
+        print("🔗 Linking Google account with body: \(body)")
+        
+        let response: User = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+        
+        print("🔗 Link response user googleId: \(response.googleId ?? "nil")")
+        
+        return response
+    }
+    
+    func linkFacebookAccount(token: String) async throws -> User {
+        let endpoint = "/auth/facebook/mobile-login"
+        let body: [String: Any] = [
+            "access_token": token,
+            "linkingMode": "link"
+        ]
+        let response: User = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+        
+        return response
+    }
+    
+    func unlinkGoogleAccount() async throws {
+        let endpoint = "/auth/unlink-google"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func unlinkFacebookAccount() async throws {
+        let endpoint = "/auth/unlink-facebook"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
     // MARK: - User Endpoints
     func getUserProfile() async throws -> User {
         let endpoint = "/users/me"

@@ -578,6 +578,37 @@ async verifyGoogleIdToken(idToken: string) {
     }
   }
 
+  async getUserFromToken(token: string): Promise<User> {
+    try {
+      const decoded = this.jwtService.verify(token);
+      return await this.userService.findById(decoded.sub);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid token');
+    }
+  }
+
+  async linkGoogleAccount(userId: string, googleId: string): Promise<User> {
+    // Vérifier si ce compte Google n'est pas déjà lié à un autre utilisateur
+    const existingUser = await this.userService.findByGoogleId(googleId);
+    if (existingUser && existingUser.id !== userId) {
+      throw new BadRequestException('This Google account is already linked to another user');
+    }
+
+    // Lier le compte Google à l'utilisateur
+    return await this.userService.linkGoogleAccount(userId, googleId);
+  }
+
+  async linkFacebookAccount(userId: string, facebookId: string): Promise<User> {
+    // Vérifier si ce compte Facebook n'est pas déjà lié à un autre utilisateur
+    const existingUser = await this.userService.findByFacebookId(facebookId);
+    if (existingUser && existingUser.id !== userId) {
+      throw new BadRequestException('This Facebook account is already linked to another user');
+    }
+
+    // Lier le compte Facebook à l'utilisateur
+    return await this.userService.linkFacebookAccount(userId, facebookId);
+  }
+
   async unlinkGoogleAccount(currentUser: User): Promise<void> {
     if (!currentUser.googleId) {
       throw new BadRequestException('No Google account is linked to this profile');
