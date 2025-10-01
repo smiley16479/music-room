@@ -102,11 +102,18 @@ class MusicPlayerService {
       
       case 'invited':
         const hasInvite = roomContext.participants.includes(user.id);
+        
+        // For playlists: public playlists allow playback control for all users, private only for invited
+        // For events: only admins can control
+        const canPlayback = roomContext.type === 'playlist' 
+          ? (roomContext.visibility === 'public' || hasInvite)
+          : false;
+        
         return { 
-          canControl: roomContext.type === 'playlist' ? hasInvite : false, // Events restrict control to admins only
+          canControl: canPlayback, 
           canVote: hasInvite, 
           canAddTracks: hasInvite,
-          reason: hasInvite ? undefined : 'Invitation required'
+          reason: canPlayback ? undefined : 'Invitation required'
         };
       
       case 'location-time':

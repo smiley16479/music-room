@@ -17,6 +17,7 @@ import { UserModule } from '../user/user.module';
 import { EmailModule } from '../email/email.module';
 import { PlaylistModule } from 'src/playlist/playlist.module';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
+import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { Playlist } from 'src/playlist/entities/playlist.entity';
     }),
     UserModule,
     EmailModule,
+    CommonModule,
     forwardRef(() => PlaylistModule)
   ],
   controllers: [EventController],

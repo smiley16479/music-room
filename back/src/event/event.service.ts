@@ -19,13 +19,14 @@ import { Invitation, InvitationType, InvitationStatus } from 'src/invitation/ent
 
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { LocationDto } from '../common/dto/location.dto';
 import { CreateVoteDto } from './dto/vote.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { LocationDto } from '../common/dto/location.dto';
 
 import { PlaylistService } from 'src/playlist/playlist.service';
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
+import { GeocodingService } from '../common/services/geocoding.service';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
@@ -72,6 +73,7 @@ export class EventService {
     private readonly playlistService: PlaylistService,
     private readonly emailService: EmailService,
     private readonly eventGateway: EventGateway,
+    private readonly geocodingService: GeocodingService,
   ) {}
 
   // CRUD Operations
@@ -82,13 +84,28 @@ export class EventService {
       throw new NotFoundException('Creator not found');
     }
 
-    // Validate location-based event requirements
+    // Handle location-based event requirements
     if (createEventDto.licenseType === EventLicenseType.LOCATION_BASED) {
-      if (!createEventDto.latitude || !createEventDto.longitude || !createEventDto.locationRadius) {
-        throw new BadRequestException('Location-based events require coordinates and radius');
+      if (!createEventDto.locationRadius) {
+        throw new BadRequestException('Location-based events require a location radius');
       }
       if (!createEventDto.votingStartTime || !createEventDto.votingEndTime) {
         throw new BadRequestException('Location-based events require voting time constraints');
+      }
+
+      // Handle city-based geocoding or direct coordinates
+      if (createEventDto.cityName) {
+        // Use city name to get coordinates
+        try {
+          const geocodeResult = await this.geocodingService.geocodeCity(createEventDto.cityName);
+          createEventDto.latitude = geocodeResult.latitude;
+          createEventDto.longitude = geocodeResult.longitude;
+          createEventDto.locationName = geocodeResult.displayName;
+        } catch (error) {
+          throw new BadRequestException(`Unable to find location for city "${createEventDto.cityName}": ${error.message}`);
+        }
+      } else if (!createEventDto.latitude || !createEventDto.longitude) {
+        throw new BadRequestException('Location-based events require either a city name or coordinates (latitude/longitude)');
       }
     }
 
@@ -143,7 +160,7 @@ export class EventService {
     return this.findById(savedEvent.id, creatorId);
   }
 
-  async findAll(paginationDto: PaginationDto, userId?: string) {
+  async findAll(paginationDto: PaginationDto, userId?: string, userLocation?: LocationDto) {
     const { page, limit, skip } = paginationDto;
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
@@ -174,8 +191,11 @@ export class EventService {
 
     const [events, total] = await queryBuilder.getManyAndCount();
 
+    // Always filter location-based events based on user location
+    const filteredEvents = await this.filterEventsByLocation(events, userLocation, userId);
+
     const eventsWithStats = await Promise.all(
-      events.map(event => this.addEventStats(event, userId)),
+      filteredEvents.map(event => this.addEventStats(event, userId)),
     );
 
     const totalPages = Math.ceil(total / limit);
@@ -186,13 +206,43 @@ export class EventService {
       pagination: {
         page,
         limit,
-        total,
-        totalPages,
-        hasNext: page < totalPages,
+        total: filteredEvents.length,
+        totalPages: Math.ceil(filteredEvents.length / limit),
+        hasNext: page < Math.ceil(filteredEvents.length / limit),
         hasPrev: page > 1,
       },
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private async filterEventsByLocation(events: Event[], userLocation: LocationDto | undefined, userId?: string): Promise<Event[]> {
+    const filteredEvents: Event[] = [];
+
+    for (const event of events) {
+      // Non-location-based events are always shown
+      if (event.licenseType !== EventLicenseType.LOCATION_BASED) {
+        filteredEvents.push(event);
+        continue;
+      }
+
+      // Always show events created by the user, regardless of location
+      if (event.creatorId === userId) {
+        filteredEvents.push(event);
+        continue;
+      }
+
+      // For location-based events, check if user is within range
+      // If no location is provided, don't show location-based events (unless user is creator)
+      if (userLocation) {
+        const hasLocationPermission = await this.checkLocationPermission(event.id, userLocation, userId);
+        if (hasLocationPermission) {
+          filteredEvents.push(event);
+        }
+      }
+      // If no userLocation, location-based events are not shown (except for creators, handled above)
+    }
+
+    return filteredEvents;
   }
 
   async findById(id: string, userId?: string): Promise<EventWithStats> {
@@ -222,6 +272,21 @@ export class EventService {
       throw new ForbiddenException('Only the creator or admin can update this event');
     }
 
+    // Handle city-based geocoding for location-based events
+    if (updateEventDto.licenseType === EventLicenseType.LOCATION_BASED || event.licenseType === EventLicenseType.LOCATION_BASED) {
+      if (updateEventDto.cityName) {
+        // Use city name to get coordinates
+        try {
+          const geocodeResult = await this.geocodingService.geocodeCity(updateEventDto.cityName);
+          updateEventDto.latitude = geocodeResult.latitude;
+          updateEventDto.longitude = geocodeResult.longitude;
+          updateEventDto.locationName = geocodeResult.displayName;
+        } catch (error) {
+          throw new BadRequestException(`Unable to find location for city "${updateEventDto.cityName}": ${error.message}`);
+        }
+      }
+    }
+
     Object.assign(event, updateEventDto);
     const updatedEvent = await this.eventRepository.save(event);
 
@@ -244,7 +309,7 @@ export class EventService {
   }
 
   // Participant Management
-  async addParticipant(eventId: string, userId: string): Promise<void> {
+  async addParticipant(eventId: string, userId: string, userLocation?: LocationDto): Promise<void> {
     const event = await this.eventRepository.findOne({
       where: { id: eventId },
       relations: ['participants', 'playlist', 'playlist.collaborators'],
@@ -262,6 +327,18 @@ export class EventService {
 
     // Check access permissions
     await this.checkEventAccess(event, userId);
+
+    // For location-based events, verify user location permissions (skip for event creators)
+    if (event.licenseType === EventLicenseType.LOCATION_BASED && event.creatorId !== userId) {
+      if (!userLocation) {
+        throw new BadRequestException('Location is required to join this location-based event');
+      }
+      
+      const hasLocationPermission = await this.checkLocationPermission(eventId, userLocation, userId);
+      if (!hasLocationPermission) {
+        throw new ForbiddenException('You are not within the required location radius to join this event');
+      }
+    }
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -672,28 +749,23 @@ export class EventService {
     };
   }
 
-  async checkLocationPermission(eventId: string, userLocation: LocationDto): Promise<boolean> {
+  async checkLocationPermission(eventId: string, userLocation: LocationDto, userId?: string): Promise<boolean> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
 
     if (!event || event.licenseType !== EventLicenseType.LOCATION_BASED) {
       return true; // Not location-based
     }
 
+    // Event creators and admins bypass location restrictions
+    if (userId && (event.creatorId === userId || event.admins?.some(admin => admin.id === userId))) {
+      return true;
+    }
+
     if (!event.latitude || !event.longitude || !event.locationRadius) {
       return false;
     }
 
-    // Check if current time is within voting hours
-    const now = new Date();
-    const currentTime = now.toTimeString().substring(0, 5); // HH:MM format
-
-    if (event.votingStartTime && event.votingEndTime) {
-      if (currentTime < event.votingStartTime || currentTime > event.votingEndTime) {
-        return false;
-      }
-    }
-
-    // Calculate distance
+    // Calculate distance - this is the only check for joining events
     const distance = this.calculateDistance(
       userLocation.latitude,
       userLocation.longitude,
@@ -702,6 +774,25 @@ export class EventService {
     );
 
     return distance <= (event.locationRadius / 1000); // Convert meters to km
+  }
+
+  private async checkVotingTimePermission(event: Event, userId?: string): Promise<boolean> {
+    // Event creators and admins bypass time restrictions
+    if (userId && (event.creatorId === userId || event.admins?.some(admin => admin.id === userId))) {
+      return true;
+    }
+
+    // Check if current time is within voting hours (only applies to location-based events)
+    if (event.licenseType === EventLicenseType.LOCATION_BASED && event.votingStartTime && event.votingEndTime) {
+      const now = new Date();
+      const currentTime = now.toTimeString().substring(0, 5); // HH:MM format
+
+      if (currentTime < event.votingStartTime || currentTime > event.votingEndTime) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   // Event State Management
@@ -1054,8 +1145,22 @@ export class EventService {
         break;
 
       case EventLicenseType.LOCATION_BASED:
-        // Location check would be done on the frontend before calling this
-        // We assume if the call reaches here, location was already verified
+        // Event creators can always vote in their own events
+        if (event.creatorId === userId) {
+          return;
+        }
+        
+        // Event admins can always vote
+        if (event.admins?.some(admin => admin.id === userId)) {
+          return;
+        }
+        
+        // Check voting time restrictions for location-based events
+        const canVoteByTime = await this.checkVotingTimePermission(event, userId);
+        if (!canVoteByTime) {
+          throw new ForbiddenException('Voting is not allowed outside the specified voting hours for this location-based event');
+        }
+        
         break;
     }
   }

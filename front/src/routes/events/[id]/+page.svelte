@@ -35,6 +35,7 @@
 	import { deezerService, type DeezerTrack } from "$lib/services/deezer";
 	import { musicPlayerService } from "$lib/services/musicPlayer";
 	import { musicPlayerStore } from "$lib/stores/musicPlayer";
+	import { geocodingService } from "$lib/services/geocoding";
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
 	import AddCollaboratorModal from "$lib/components/AddCollaboratorModal.svelte";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
@@ -95,13 +96,18 @@
 		licenseType: "open" as "open" | "invited" | "location_based",
 		visibility: "public" as "public" | "private",
 		locationName: "",
-		latitude: undefined as number | undefined,
-		longitude: undefined as number | undefined,
 		locationRadius: undefined as number | undefined,
 		votingStartTime: undefined as string | undefined,
 		votingEndTime: undefined as string | undefined,
 		maxVotesPerUser: 1
 	});
+
+	// Edit form city input state
+	let editCityInput = $state("");
+	let editCitySuggestions = $state<string[]>([]);
+	let showEditCitySuggestions = $state(false);
+	let isGeocodingEditCity = $state(false);
+	let editCityError = $state("");
 	// Vote button animation state tracking - local to this user only
 	let voteAnimations = $state(new Map<string, { upvote: string, downvote: string, remove: string }>());
 	// Local user vote state tracking - independent of WebSocket updates
@@ -1901,8 +1907,6 @@
 				licenseType: event.licenseType,
 				visibility: event.visibility,
 				locationName: event.locationName || "",
-				latitude: event.latitude || undefined,
-				longitude: event.longitude || undefined,
 				locationRadius: event.locationRadius || undefined,
 				votingStartTime: event.votingStartTime || undefined,
 				votingEndTime: event.votingEndTime || undefined,
@@ -2604,6 +2608,60 @@
 		}
 	}
 
+	// Edit city input handling functions
+	async function handleEditCityInput(event: globalThis.Event & { currentTarget: EventTarget & HTMLInputElement }) {
+		const target = event.currentTarget;
+		const value = target.value;
+		editCityInput = value;
+		editCityError = "";
+
+		if (value.length >= 2) {
+			try {
+				editCitySuggestions = await geocodingService.getSuggestedCities(value);
+				showEditCitySuggestions = editCitySuggestions.length > 0;
+			} catch (error) {
+				console.error('Error getting city suggestions:', error);
+				editCitySuggestions = [];
+				showEditCitySuggestions = false;
+			}
+		} else {
+			editCitySuggestions = [];
+			showEditCitySuggestions = false;
+		}
+	}
+
+	function selectEditCity(city: string) {
+		editCityInput = city;
+		editCitySuggestions = [];
+		showEditCitySuggestions = false;
+		editCityError = "";
+	}
+
+	function hideEditCitySuggestions() {
+		// Delay hiding to allow for city selection
+		setTimeout(() => {
+			showEditCitySuggestions = false;
+		}, 150);
+	}
+
+	async function validateEditCityInput() {
+		if (!editCityInput.trim()) {
+			editCityError = "";
+			return;
+		}
+
+		try {
+			const isValid = await geocodingService.validateCity(editCityInput.trim());
+			if (!isValid) {
+				editCityError = `City "${editCityInput}" not found. Please check the spelling or try a different city.`;
+			} else {
+				editCityError = "";
+			}
+		} catch (error) {
+			editCityError = "Unable to validate city. Please try again.";
+		}
+	}
+
 </script>
 
 <svelte:head>
@@ -2794,13 +2852,6 @@
 							Private
 						</span>
 					{/if}
-					{#if isPlaylistCollaborator && !isCreator && !isAdmin}
-						<span
-							class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
-						>
-							Collaborator Access
-						</span>
-					{/if}
 					{#if event.visibility !== "private" && event.licenseType === "invited"}
 						<span
 							class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800"
@@ -2814,33 +2865,6 @@
 						>
 							{event.locationName}
 						</span>
-					{/if}
-					{#if event.licenseType === "location_based"}
-						{#if locationStatus === 'checking'}
-							<span
-								class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800"
-							>
-								📍 Checking location...
-							</span>
-						{:else if locationStatus === 'allowed'}
-							<span
-								class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800"
-							>
-								📍 Location verified
-							</span>
-						{:else if locationStatus === 'denied'}
-							<span
-								class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
-							>
-								📍 Location required
-							</span>
-						{:else if locationStatus === 'unavailable'}
-							<span
-								class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800"
-							>
-								📍 Location unavailable
-							</span>
-						{/if}
 					{/if}
 				</div>
 			</div>
@@ -3533,49 +3557,7 @@
 											/>
 										</div>
 
-										<div
-											class="grid grid-cols-1 md:grid-cols-2 gap-4"
-										>
-											<div>
-												<label
-													for="latitude"
-													class="block text-sm font-medium text-gray-700 mb-2"
-													>Latitude</label
-												>
-												<input
-													id="latitude"
-													type="number"
-													bind:value={
-														editEventData.latitude
-													}
-													step="0.0001"
-													min="-90"
-													max="90"
-													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-													placeholder="e.g., 40.7128"
-												/>
-											</div>
 
-											<div>
-												<label
-													for="longitude"
-													class="block text-sm font-medium text-gray-700 mb-2"
-													>Longitude</label
-												>
-												<input
-													id="longitude"
-													type="number"
-													bind:value={
-														editEventData.longitude
-													}
-													step="0.0001"
-													min="-180"
-													max="180"
-													class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-													placeholder="e.g., -74.0060"
-												/>
-											</div>
-										</div>
 
 										<div>
 											<label

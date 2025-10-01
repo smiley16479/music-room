@@ -634,6 +634,12 @@
 				playlist?.collaborators?.some((c: any) => c.id === user.id)) ||
 			playlist?.licenseType === "open",
 	);
+	const canAddTracks = $derived(
+		isOwner ||
+			(user &&
+				playlist?.collaborators?.some((c: any) => c.id === user.id)) ||
+			playlist?.licenseType === "open",
+	);
 	const canView = $derived(
 		playlist?.visibility === "public" ||
 			isOwner ||
@@ -867,7 +873,7 @@
 								: ""}
 						</p>
 					</div>
-					{#if canEdit}
+					{#if canAddTracks}
 						<div class="flex space-x-3">
 							<button
 								onclick={() => (showMusicSearchModal = true)}
@@ -921,7 +927,7 @@
 						<p class="text-gray-500 mb-4">
 							No tracks in this playlist yet
 						</p>
-						{#if canEdit}
+						{#if canAddTracks}
 							<button
 								onclick={() => (showMusicSearchModal = true)}
 								class="bg-secondary text-white px-6 py-2 rounded-lg hover:bg-secondary/80 transition-colors"
@@ -1099,7 +1105,7 @@
 
 									</div>
 									<!-- Remove Track Button -->
-									{#if canEdit}
+									{#if canAddTracks}
 										<button class="absolute clickable right-0 top-[50%] translate-x-[50%] translate-y-[-50%] w-10 h-10 group" onclick={() => (removeTrack(track.trackId))} aria-label="remove track" title="Remove Track">
 											<svg viewBox="-8.4 -8.4 40.80 40.80" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"><path transform="translate(-8.4, -8.4), scale(2.55)" fill="#ffffff" class:group-hover:fill-secondary={index === 0} class="group-hover:fill-gray-200 transition-colors duration-200" d="M9.166.33a2.25 2.25 0 00-2.332 0l-5.25 3.182A2.25 2.25 0 00.5 5.436v5.128a2.25 2.25 0 001.084 1.924l5.25 3.182a2.25 2.25 0 002.332 0l5.25-3.182a2.25 2.25 0 001.084-1.924V5.436a2.25 2.25 0 00-1.084-1.924L9.166.33z"></path></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M4 6H20M16 6L15.7294 5.18807C15.4671 4.40125 15.3359 4.00784 15.0927 3.71698C14.8779 3.46013 14.6021 3.26132 14.2905 3.13878C13.9376 3 13.523 3 12.6936 3H11.3064C10.477 3 10.0624 3 9.70951 3.13878C9.39792 3.26132 9.12208 3.46013 8.90729 3.71698C8.66405 4.00784 8.53292 4.40125 8.27064 5.18807L8 6M18 6V16.2C18 17.8802 18 18.7202 17.673 19.362C17.3854 19.9265 16.9265 20.3854 16.362 20.673C15.7202 21 14.8802 21 13.2 21H10.8C9.11984 21 8.27976 21 7.63803 20.673C7.07354 20.3854 6.6146 19.9265 6.32698 19.362C6 18.7202 6 17.8802 6 16.2V6M14 10V17M10 10V17" stroke="#e01b24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
 										</button>

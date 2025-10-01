@@ -55,6 +55,12 @@ export class CreateEventDto {
   @MaxLength(200)
   locationName?: string;
 
+  // City-based location input (alternative to lat/lng)
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  cityName?: string;
+
   @IsOptional()
   @IsString()
   votingStartTime?: string; // Format: "HH:MM"

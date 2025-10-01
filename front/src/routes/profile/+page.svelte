@@ -192,6 +192,13 @@
 		}
 	}
 
+	// Helper function to check if user is OAuth-only (no password)
+	function isOAuthOnlyUser() {
+		if (!user) return false;
+		// Check if user has OAuth accounts - simplified logic
+		return user.connectedAccounts?.google || user.connectedAccounts?.facebook;
+	}
+
 	async function changePassword() {
 		if (!passwordChangeData.currentPassword || !passwordChangeData.newPassword) {
 			error = "Please fill in all password fields";
@@ -830,7 +837,21 @@
 							Password & Security
 						</h2>
 
-						{#if !showPasswordChange}
+						{#if isOAuthOnlyUser()}
+							<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+								<div class="flex items-start space-x-3">
+									<svg class="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+									</svg>
+									<div>
+										<h4 class="text-sm font-medium text-blue-800">OAuth Account</h4>
+										<p class="text-sm text-blue-700 mt-1">
+											You signed up using a social account. Password management is not available for OAuth accounts.
+										</p>
+									</div>
+								</div>
+							</div>
+						{:else if !showPasswordChange}
 							<div class="space-y-4">
 								<p class="text-gray-600">
 									Manage your password and account security

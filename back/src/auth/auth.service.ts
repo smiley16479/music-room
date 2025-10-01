@@ -439,6 +439,15 @@ async verifyGoogleIdToken(idToken: string) {
       throw new NotFoundException('User not found');
     }
 
+    // Check if this is an OAuth-only user (no password set)
+    if (!user.password && (user.googleId || user.facebookId)) {
+      throw new BadRequestException('Password management is not available for OAuth accounts. You signed up using a social account.');
+    }
+
+    if (!user.password) {
+      throw new BadRequestException('No password is currently set for this account');
+    }
+
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       throw new BadRequestException('Current password is incorrect');

@@ -123,6 +123,7 @@ export interface CreateEventData {
   longitude?: number;
   locationRadius?: number;
   locationName?: string;
+  cityName?: string; // City-based location input
 
   // Time constraints for location-based events
   votingStartTime?: string;
@@ -139,9 +140,17 @@ export interface CreateVoteData {
   weight?: number;
 }
 
-export async function getEvents(fetchFn?: typeof fetch): Promise<Event[]> {
+export async function getEvents(fetchFn?: typeof fetch, userLocation?: { latitude: number; longitude: number }): Promise<Event[]> {
   const fetchToUse = fetchFn || fetch;
-  const response = await fetchToUse(`${config.apiUrl}/api/events`, {
+  
+  // Build URL with location parameters if available
+  const url = new URL(`${config.apiUrl}/api/events`);
+  if (userLocation) {
+    url.searchParams.set('latitude', userLocation.latitude.toString());
+    url.searchParams.set('longitude', userLocation.longitude.toString());
+  }
+  
+  const response = await fetchToUse(url.toString(), {
     headers: {
       'Authorization': `Bearer ${authService.getAuthToken()}`,
       'Content-Type': 'application/json',
@@ -406,13 +415,16 @@ export async function deleteEvent(id: string): Promise<void> {
   }
 }
 
-export async function joinEvent(eventId: string): Promise<void> {
+export async function joinEvent(eventId: string, userLocation?: { latitude: number; longitude: number }): Promise<void> {
+  const body = userLocation ? JSON.stringify(userLocation) : '';
+  
   const response = await fetch(`${config.apiUrl}/api/events/${eventId}/join`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${authService.getAuthToken()}`,
       'Content-Type': 'application/json',
     },
+    body,
   });
 
   if (!response.ok) {

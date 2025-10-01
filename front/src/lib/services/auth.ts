@@ -285,7 +285,7 @@ export const authService = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ token, currentPassword, newPassword })
+      body: JSON.stringify({ currentPassword, newPassword })
     });
 
     if (!response.ok) {

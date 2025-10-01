@@ -210,8 +210,8 @@ export class AuthController {
     };
   }
 
-    @Public()
   @Post('change-password')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Change password',
@@ -227,7 +227,6 @@ export class AuthController {
         value: {
           currentPassword: 'OldPassword123!',
           newPassword: 'NewStrongPassword123!',
-          confirmPassword: 'NewStrongPassword123!',
         },
       },
     },

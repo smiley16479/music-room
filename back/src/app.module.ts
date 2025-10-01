@@ -12,6 +12,7 @@ import { EmailModule } from './email/email.module';
 import { EventModule } from './event/event.module';
 import { PlaylistModule } from './playlist/playlist.module';
 import { InvitationModule } from './invitation/invitation.module';
+import { CommonModule } from './common/common.module';
 import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
@@ -46,6 +47,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
     EventModule,
     PlaylistModule,
     InvitationModule,
+    CommonModule,
   ],
   controllers: [AppController],
   providers: [AppService,

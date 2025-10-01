@@ -13,6 +13,8 @@
 	import { playlistsService, type Playlist } from "$lib/services/playlists";
 	import { eventSocketService } from "$lib/services/event-socket";
 	import { goto, replaceState } from "$app/navigation";
+	import { geocodingService } from "$lib/services/geocoding";
+	import { locationService, type UserLocation } from "$lib/services/location";
 
 	let { data } = $props();
 	let events: Event[] = $state(data?.events || []);
@@ -29,6 +31,12 @@
 	const maxSocketRetries = 5;
 	let socketRetryAttempts = 0;
 
+	// Location state
+	let userLocation: UserLocation | null = $state(null);
+	let locationError = $state("");
+	let locationPermissionRequested = $state(false);
+	let showLocationPrompt = $state(false);
+
 	// Create event form
 	let newEvent = $state<CreateEventData>({
 		name: "",
@@ -44,6 +52,13 @@
 		eventDate: "",
 		eventEndDate: "",
 	});
+
+	// City input state
+	let cityInput = $state("");
+	let citySuggestions = $state<string[]>([]);
+	let showCitySuggestions = $state(false);
+	let isGeocodingCity = $state(false);
+	let cityError = $state("");
 
 	// Update tab based on URL parameter on initial load only
 	let initialTabFromURL = $derived(
@@ -163,6 +178,21 @@
 	onMount(async () => {
 		await setupSocketConnection();
 		await loadEvents();
+		
+		// Automatically try to get location for better user experience
+		if (locationService.isSupported() && !locationPermissionRequested) {
+			// Try to get location without showing prompt first
+			try {
+				userLocation = await locationService.getCurrentLocation();
+				locationPermissionRequested = true;
+				// Reload events with location data
+				await loadEvents();
+			} catch (err: any) {
+				// If location request fails, show the prompt
+				showLocationPrompt = true;
+				console.log('Location permission needed or failed:', err.message);
+			}
+		}
 	});
 
 	onDestroy(() => {
@@ -237,7 +267,8 @@
 				events = await getMyEvents();
 			} else {
 				// Use general events endpoint (includes public + accessible private events)
-				events = await getEvents();
+				// Pass user location for location-based filtering
+				events = await getEvents(undefined, userLocation || undefined);
 			}
 		} catch (err) {
 			error = "Failed to load events";
@@ -245,6 +276,31 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function requestLocation() {
+		if (!locationService.isSupported()) {
+			locationError = "Location services are not supported by your browser";
+			return;
+		}
+
+		locationPermissionRequested = true;
+		showLocationPrompt = false;
+
+		try {
+			userLocation = await locationService.getCurrentLocation();
+			locationError = "";
+			// Reload events with location filtering
+			await loadEvents();
+		} catch (err: any) {
+			locationError = err.message || "Failed to get your location";
+			console.error("Location error:", err);
+		}
+	}
+
+	function skipLocation() {
+		showLocationPrompt = false;
+		locationPermissionRequested = true;
 	}
 
 	async function createEvent(event: SubmitEvent) {
@@ -298,6 +354,23 @@
 				);
 			}
 
+			// Handle city-based geocoding for location-based events
+			if (eventDataToSend.licenseType === "location_based" && cityInput.trim()) {
+				try {
+					isGeocodingCity = true;
+					cityError = "";
+					const geocodeResult = await geocodingService.geocodeCity(cityInput.trim());
+					eventDataToSend.cityName = cityInput.trim();
+					eventDataToSend.locationName = geocodeResult.displayName;
+					// Don't set coordinates here - let the backend handle it
+				} catch (geocodeError) {
+					cityError = geocodeError instanceof Error ? geocodeError.message : "Failed to find city location";
+					return;
+				} finally {
+					isGeocodingCity = false;
+				}
+			}
+
 			const newEventResponse = await createEventAPI(eventDataToSend);
 			showCreateModal = false;
 			// Reset form
@@ -311,6 +384,10 @@
 				locationName: "",
 			};
 			formErrors = { eventDate: "", eventEndDate: "" };
+			cityInput = "";
+			citySuggestions = [];
+			showCitySuggestions = false;
+			cityError = "";
 		} catch (err: any) {
 			error =
 				err instanceof Error ? err.message : "Failed to create event";
@@ -395,6 +472,60 @@
 		const localDate = new Date(dateTimeLocal);
 		return localDate.toISOString();
 	}
+
+	// City input handling functions
+	async function handleCityInput(event: globalThis.Event & { currentTarget: EventTarget & HTMLInputElement }) {
+		const target = event.currentTarget;
+		const value = target.value;
+		cityInput = value;
+		cityError = "";
+
+		if (value.length >= 2) {
+			try {
+				citySuggestions = await geocodingService.getSuggestedCities(value);
+				showCitySuggestions = citySuggestions.length > 0;
+			} catch (error) {
+				console.error('Error getting city suggestions:', error);
+				citySuggestions = [];
+				showCitySuggestions = false;
+			}
+		} else {
+			citySuggestions = [];
+			showCitySuggestions = false;
+		}
+	}
+
+	function selectCity(city: string) {
+		cityInput = city;
+		citySuggestions = [];
+		showCitySuggestions = false;
+		cityError = "";
+	}
+
+	function hideCitySuggestions() {
+		// Delay hiding to allow for city selection
+		setTimeout(() => {
+			showCitySuggestions = false;
+		}, 150);
+	}
+
+	async function validateCityInput() {
+		if (!cityInput.trim()) {
+			cityError = "";
+			return;
+		}
+
+		try {
+			const isValid = await geocodingService.validateCity(cityInput.trim());
+			if (!isValid) {
+				cityError = `City "${cityInput}" not found. Please check the spelling or try a different city.`;
+			} else {
+				cityError = "";
+			}
+		} catch (error) {
+			cityError = "Unable to validate city. Please try again.";
+		}
+	}
 </script>
 
 <svelte:head>
@@ -439,6 +570,93 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- Location Permission Prompt -->
+	{#if showLocationPrompt}
+		<div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+			<div class="flex items-start">
+				<div class="flex-shrink-0">
+					<svg class="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+						<path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+					</svg>
+				</div>
+				<div class="ml-3 flex-1">
+					<h3 class="text-sm font-medium text-blue-800">
+						Enable Location Access
+					</h3>
+					<p class="mt-1 text-sm text-blue-600">
+						Allow location access to see location-based events near you. This helps filter events that you can actually join based on your proximity.
+					</p>
+					<div class="mt-3 flex space-x-3">
+						<button
+							onclick={requestLocation}
+							class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+						>
+							Enable Location
+						</button>
+						<button
+							onclick={skipLocation}
+							class="bg-white text-blue-600 border border-blue-200 px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-50 transition-colors"
+						>
+							Skip for Now
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- Location Status -->
+	{#if locationPermissionRequested}
+		<div class="mb-6">
+			{#if userLocation}
+				<div class="bg-green-50 border border-green-200 rounded-lg p-3">
+					<div class="flex items-center">
+						<svg class="w-4 h-4 text-green-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+							<path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+						</svg>
+						<span class="text-sm text-green-700">
+							Location enabled - showing all events including location-based ones near you
+						</span>
+					</div>
+				</div>
+			{:else if locationError}
+				<div class="bg-red-50 border border-red-200 rounded-lg p-3">
+					<div class="flex items-center justify-between">
+						<div class="flex items-center">
+							<svg class="w-4 h-4 text-red-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+							</svg>
+							<span class="text-sm text-red-700">{locationError}</span>
+						</div>
+						<button
+							onclick={requestLocation}
+							class="text-red-600 hover:text-red-800 text-sm font-medium"
+						>
+							Try Again
+						</button>
+					</div>
+				</div>
+			{:else}
+				<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+					<div class="flex items-center justify-between">
+						<div class="flex items-center">
+							<svg class="w-4 h-4 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+								<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+							</svg>
+							<span class="text-sm text-yellow-700">Location access denied - location-based events are hidden</span>
+						</div>
+						<button
+							onclick={requestLocation}
+							class="text-yellow-600 hover:text-yellow-800 text-sm font-medium"
+						>
+							Enable Location
+						</button>
+					</div>
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- Tab Navigation -->
 	<div class="flex space-x-4 mb-6">
@@ -1051,57 +1269,53 @@
 								Location-based Settings
 							</h3>
 
-							<div>
+							<div class="relative">
 								<label
-									for="event-location"
+									for="event-city"
 									class="block text-sm font-medium text-gray-700 mb-2"
-									>Location Name</label
+									>City Location</label
 								>
 								<input
-									id="event-location"
+									id="event-city"
 									type="text"
-									bind:value={newEvent.locationName}
-									class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-									placeholder="Where is your event taking place?"
+									bind:value={cityInput}
+									oninput={handleCityInput}
+									onblur={() => {
+										hideCitySuggestions();
+										validateCityInput();
+									}}
+									class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent {cityError ? 'border-red-500' : ''}"
+									placeholder="Enter city name (e.g., Paris, New York, Tokyo)"
+									required
 								/>
-							</div>
-
-							<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-								<div>
-									<label
-										for="latitude"
-										class="block text-sm font-medium text-gray-700 mb-2"
-										>Latitude</label
-									>
-									<input
-										id="latitude"
-										type="number"
-										bind:value={newEvent.latitude}
-										step="0.0001"
-										min="-90"
-										max="90"
-										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-										placeholder="e.g., 40.7128"
-									/>
-								</div>
-
-								<div>
-									<label
-										for="longitude"
-										class="block text-sm font-medium text-gray-700 mb-2"
-										>Longitude</label
-									>
-									<input
-										id="longitude"
-										type="number"
-										bind:value={newEvent.longitude}
-										step="0.0001"
-										min="-180"
-										max="180"
-										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
-										placeholder="e.g., -74.0060"
-									/>
-								</div>
+								
+								{#if showCitySuggestions && citySuggestions.length > 0}
+									<div class="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+										{#each citySuggestions as city}
+											<button
+												type="button"
+												class="w-full px-4 py-2 text-left hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+												onmousedown={() => selectCity(city)}
+											>
+												{city}
+											</button>
+										{/each}
+									</div>
+								{/if}
+								
+								{#if cityError}
+									<p class="text-red-600 text-sm mt-1">{cityError}</p>
+								{/if}
+								
+								{#if isGeocodingCity}
+									<p class="text-blue-600 text-sm mt-1">
+										🌍 Finding location for {cityInput}...
+									</p>
+								{/if}
+								
+								<p class="text-xs text-gray-500 mt-1">
+									We'll automatically get the coordinates for your city
+								</p>
 							</div>
 
 							<div>

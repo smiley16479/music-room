@@ -54,11 +54,39 @@ export class EventController {
   @Public()
   @ApiOperation({
     summary: 'Get all events',
-    description: 'Returns a paginated list of all accessible events',
+    description: 'Returns a paginated list of all accessible events. Location-based events are filtered by user location.',
   })
   @ApiQuery({ type: PaginationDto })
-  async findAll(@Query() paginationDto: PaginationDto, @CurrentUser() user?: User) {
-    return this.eventService.findAll(paginationDto, user?.id);
+  @ApiQuery({
+    name: 'latitude',
+    type: Number,
+    description: 'User latitude for location-based event filtering',
+    required: false,
+  })
+  @ApiQuery({
+    name: 'longitude',
+    type: Number,
+    description: 'User longitude for location-based event filtering',
+    required: false,
+  })
+  async findAll(
+    @Query() paginationDto: PaginationDto,
+    @Query('latitude') latitude?: string,
+    @Query('longitude') longitude?: string,
+    @CurrentUser() user?: User
+  ) {
+    let userLocation: LocationDto | undefined;
+    
+    if (latitude && longitude) {
+      const lat = parseFloat(latitude);
+      const lng = parseFloat(longitude);
+      
+      if (!isNaN(lat) && !isNaN(lng)) {
+        userLocation = { latitude: lat, longitude: lng };
+      }
+    }
+    
+    return this.eventService.findAll(paginationDto, user?.id, userLocation);
   }
 
   @Get('nearby')
@@ -216,7 +244,7 @@ export class EventController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Join event',
-    description: 'Adds the current user as a participant to the event',
+    description: 'Adds the current user as a participant to the event. Location is required for location-based events.',
   })
   @ApiParam({
     name: 'id',
@@ -224,8 +252,28 @@ export class EventController {
     description: 'The ID of the event to join',
     required: true
   })
-  async joinEvent(@Param('id') id: string, @CurrentUser() user: User) {
-    await this.eventService.addParticipant(id, user.id);
+  @ApiBody({
+    description: 'User location (required for location-based events)',
+    schema: {
+      type: 'object',
+      properties: {
+        latitude: { type: 'number', description: 'User latitude' },
+        longitude: { type: 'number', description: 'User longitude' }
+      }
+    },
+    required: false
+  })
+  async joinEvent(@Param('id') id: string, @CurrentUser() user: User, @Body() body?: any) {
+    let locationDto: LocationDto | undefined;
+    
+    // Only validate location if body is provided and has location data
+    if (body && typeof body.latitude === 'number' && typeof body.longitude === 'number') {
+      locationDto = {
+        latitude: body.latitude,
+        longitude: body.longitude
+      };
+    }
+    await this.eventService.addParticipant(id, user.id, locationDto);
     return {
       success: true,
       message: 'Successfully joined the event',
@@ -569,8 +617,9 @@ export class EventController {
   async checkLocationPermission(
     @Param('id') id: string,
     @Body() locationDto: LocationDto,
+    @CurrentUser() user: User,
   ) {
-    const hasPermission = await this.eventService.checkLocationPermission(id, locationDto);
+    const hasPermission = await this.eventService.checkLocationPermission(id, locationDto, user.id);
     return {
       success: true,
       data: { hasPermission },
