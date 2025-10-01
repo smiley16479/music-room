@@ -19,7 +19,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
     // Don't show error for API unavailability during development
     if (e.message !== 'Authentication required') {
       error = null; // Suppress API errors for now
-      console.warn('Friends API not available:', e.message);
+      
     } else {
       error = e.message;
     }

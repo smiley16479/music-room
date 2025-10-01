@@ -465,7 +465,7 @@ export async function voteForTrackInEvent(eventId: string, trackId: string, vote
   try {
     const results = await voteForTrack(eventId, { trackId, type: voteType, weight: 1 });
   } catch (error) {
-    console.error('Failed to vote for track:', error);
+    
     throw error;
   }
 }
@@ -791,7 +791,7 @@ export async function addTracksToEvent(eventId: string, tracks: Partial<Track>[]
       try {
         await playlistsService.addTrackToPlaylist(playlistId, processedTrackData);
       } catch (error) {
-        console.error(`Failed to add track "${processedTrackData.title}":`, error);
+        
       }
     }
   } catch (error) {
@@ -852,7 +852,7 @@ export async function canUserAccessEvent(event: Event, userId: string): Promise<
       const playlist = await playlistsService.getPlaylist(event.playlistId);
       return playlist.collaborators?.some(collaborator => collaborator.id === userId) || false;
     } catch (error) {
-      console.error('Failed to check playlist collaborators:', error);
+      
       return false;
     }
   }
@@ -863,7 +863,7 @@ export async function canUserAccessEvent(event: Event, userId: string): Promise<
       const playlist = await playlistsService.getPlaylist(event.playlistId);
       return playlist.collaborators?.some(collaborator => collaborator.id === userId) || false;
     } catch (error) {
-      console.error('Failed to check playlist collaborators:', error);
+      
       return false;
     }
   }

@@ -55,14 +55,14 @@ class DeviceSocketService {
       });
 
       this.socket.on('connect', () => {
-        console.log('Connected to devices socket');
+        
         this.reconnectAttempts = 0;
         this.authFailures = 0; // Reset auth failures on successful connection
         resolve(this.socket!);
       });
 
       this.socket.on('connect_error', (error) => {
-        console.error('Devices socket connection error:', error);
+        
         
         // Check if it's an authentication error
         if (error.message && (
@@ -71,10 +71,10 @@ class DeviceSocketService {
           error.message.includes('secret or public key must be provided')
         )) {
           this.authFailures++;
-          console.warn(`Authentication failure ${this.authFailures}/${this.maxAuthFailures}`);
+          
           
           if (this.authFailures >= this.maxAuthFailures) {
-            console.error('Max authentication failures reached, stopping reconnection attempts');
+            
             this.disconnect();
             reject(new Error('Authentication failed too many times'));
             return;
@@ -85,7 +85,7 @@ class DeviceSocketService {
       });
 
       this.socket.on('disconnect', (reason) => {
-        console.log('Devices socket disconnected:', reason);
+        
         
         // Only reconnect for non-auth related disconnections
         if (reason === 'io server disconnect' && this.authFailures < this.maxAuthFailures) {
@@ -96,29 +96,29 @@ class DeviceSocketService {
 
       // Set up error handler
       this.socket.on('error', (error) => {
-        console.error('Devices socket error:', error);
+        
       });
     });
   }
 
   private reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      
       return;
     }
     
     // Don't reconnect if we have too many auth failures
     if (this.authFailures >= this.maxAuthFailures) {
-      console.error('Too many authentication failures, not attempting to reconnect');
+      
       return;
     }
 
     this.reconnectAttempts++;
-    console.log(`Attempting to reconnect devices socket (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    
     
     setTimeout(() => {
       this.connect().catch((error) => {
-        console.error('Reconnection failed:', error);
+        
       });
     }, 1000 * this.reconnectAttempts);
   }

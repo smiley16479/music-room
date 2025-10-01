@@ -141,7 +141,6 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     try {
 
       const eventId = Array.isArray(data) && data.length > 0 ? data[0]?.eventId : data?.eventId;
-      console.log('join-events-room data:', data);
       this.logger.debug(`User ${client.userId} is joining global & event room ${eventId}`);
 
       if (!client.userId) {
@@ -162,7 +161,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       @ConnectedSocket() client: AuthenticatedSocket,
       @MessageBody() data: any,
     ) {
-      console.log('Test event received with data:', data);
+      // Test event handler
     }
 
   // Event Room Management
@@ -253,25 +252,30 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       // Send current playback state if event is live and has a current track
       try {
         const eventWithStats = await this.eventService.findById(eventId);
-        if (eventWithStats && eventWithStats.status === 'live' && eventWithStats.currentTrackId && eventWithStats.currentTrackStartedAt) {
-          // Calculate elapsed time since track started
-          const elapsedTime = Math.floor((Date.now() - eventWithStats.currentTrackStartedAt.getTime()) / 1000);
+        if (eventWithStats && eventWithStats.status === 'live' && eventWithStats.currentTrackId) {
+          // Get accurate current playback position and state
+          const playbackState = await this.eventService.getCurrentPlaybackPosition(eventId);
           
-          client.emit('playback-sync', {
-            eventId,
-            currentTrackId: eventWithStats.currentTrackId,
-            currentTrack: eventWithStats.currentTrack,
-            startTime: elapsedTime,
-            isPlaying: true,
-            timestamp: new Date().toISOString(),
-          });
-          
-          this.logger.log(`Sent playback sync to user ${client.userId} - track: ${eventWithStats.currentTrackId}, elapsed: ${elapsedTime}s`);
+          // Only send sync if there's actually a track playing
+          if (playbackState.trackId && eventWithStats.currentTrack) {
+            client.emit('playback-sync', {
+              eventId,
+              currentTrackId: playbackState.trackId,
+              currentTrack: eventWithStats.currentTrack,
+              startTime: playbackState.position,
+              isPlaying: playbackState.isPlaying,
+              timestamp: new Date().toISOString(),
+              syncType: 'initial-join'
+            });
+          }
         }
       } catch (syncError) {
         this.logger.warn(`Failed to send playback sync to user ${client.userId}: ${syncError.message}`);
         // Don't fail the join process if sync fails
       }
+
+      // Start periodic time sync for live events
+      this.startTimeSyncForEvent(eventId);
 
       // Confirm to the client that they joined
       client.emit('joined-event', { eventId, room });
@@ -291,6 +295,13 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       this.logger.debug(`User ${client.userId} is leaving event room ${eventId}`);
       const room = SOCKET_ROOMS.EVENT(eventId);
       await client.leave(room);
+
+      // Check if this was the last user in the event room
+      const remainingSockets = await this.server.in(room).fetchSockets();
+      if (remainingSockets.length === 0) {
+        // No users left in event, stop time sync
+        this.stopTimeSyncForEvent(eventId);
+      }
 
       // Notify other participants that user left
       this.server.to(room).emit('user-left', {
@@ -706,25 +717,44 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast play command to all participants
-      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-play', {
-        eventId,
-        trackId,
-        startTime: startTime || 0,
-        controlledBy: client.userId,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Update current track in database if trackId is provided
+      // Get current playback position if startTime is not provided (resuming after pause)
+      let currentStartTime = startTime;
+        if (currentStartTime === undefined || currentStartTime === null) {
+        try {
+          const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+          currentStartTime = currentState.position;
+        } catch (error) {
+          this.logger.warn(`Failed to get current position, defaulting to 0: ${error.message}`);
+          currentStartTime = 0;
+        }
+      }      // Update playback state in database first
+      await this.eventService.updatePlaybackState(eventId, true, currentStartTime);
+      
       if (trackId) {
         try {
-          await this.eventService.updateCurrentTrack(eventId, trackId);
-          this.logger.log(`Updated current track in database: ${trackId} for event ${eventId}`);
+          const currentEvent = await this.eventService.findById(eventId);
+          
+          if (currentEvent.currentTrackId !== trackId) {
+            await this.eventService.updateCurrentTrack(eventId, trackId);
+          }
         } catch (dbError) {
           this.logger.warn(`Failed to update current track in database: ${dbError.message}`);
         }
       }
 
+      this.startTimeSyncForEvent(eventId);
+
+      const playbackState = {
+        eventId,
+        ...(trackId && { trackId }),
+        startTime: currentStartTime,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+        syncType: 'admin-play'
+      };
+      
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-play', playbackState);
+      
       this.logger.log(`User ${client.userId} played track ${trackId} in event ${eventId}`);
     } catch (error) {
       this.logger.error(`Play track error: ${error.message}`);
@@ -735,7 +765,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   @SubscribeMessage('pause-track')
   async handlePauseTrack(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId }: { eventId: string }
+    @MessageBody() { eventId, currentTime }: { eventId: string; currentTime?: number }
   ) {
     try {
       if (!client.userId) {
@@ -750,13 +780,21 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast pause command to all participants
-      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-pause', {
+      const pausePosition = currentTime || 0;
+      await this.eventService.updatePlaybackState(eventId, false, pausePosition);
+
+      this.stopTimeSyncForEvent(eventId);
+
+      const pauseState = {
         eventId,
         controlledBy: client.userId,
+        currentTime: pausePosition,
         timestamp: new Date().toISOString(),
-      });
-
+        syncType: 'admin-pause'
+      };
+      
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-pause', pauseState);
+      
       this.logger.log(`User ${client.userId} paused playback in event ${eventId}`);
     } catch (error) {
       this.logger.error(`Pause track error: ${error.message}`);
@@ -782,14 +820,20 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast seek command to all participants
-      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-seek', {
+      const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+      
+      await this.eventService.updatePlaybackState(eventId, currentState.isPlaying, seekTime);
+
+      const seekState = {
         eventId,
         seekTime,
         controlledBy: client.userId,
         timestamp: new Date().toISOString(),
-      });
-
+        syncType: 'admin-seek'
+      };
+      
+      this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-seek', seekState);
+      
       this.logger.log(`User ${client.userId} seeked to ${seekTime}s in event ${eventId}`);
     } catch (error) {
       this.logger.error(`Seek track error: ${error.message}`);
@@ -815,7 +859,6 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast track change to all participants
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-track-changed', {
         eventId,
         trackId,
@@ -824,10 +867,8 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         timestamp: new Date().toISOString(),
       });
 
-      // Update current track in database
       try {
         await this.eventService.updateCurrentTrack(eventId, trackId);
-        this.logger.log(`Updated current track in database: ${trackId} for event ${eventId}`);
       } catch (dbError) {
         this.logger.warn(`Failed to update current track in database: ${dbError.message}`);
       }
@@ -857,10 +898,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast volume change to all participants
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-volume', {
         eventId,
-        volume: Math.max(0, Math.min(100, volume)), // Clamp between 0-100
+        volume: Math.max(0, Math.min(100, volume)),
         controlledBy: client.userId,
         timestamp: new Date().toISOString(),
       });
@@ -890,7 +930,6 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Broadcast skip to all participants
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('track-skipped', {
         eventId,
         controlledBy: client.userId,
@@ -937,30 +976,22 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       this.logger.log(`User ${client.userId} reported track ${trackId} accessibility: ${canPlay ? 'playable' : 'unplayable'} ${reason ? `(${reason})` : ''}`);
 
-      // Get current participants in the event to check consensus
       const participants = await this.getEventParticipants(eventId);
       const participantCount = participants.length;
       
-      // If we have enough reports, check consensus
       if (trackReports.size >= Math.min(3, Math.ceil(participantCount * 0.6))) {
         const canPlayCount = Array.from(trackReports.values()).filter(report => report.canPlay).length;
         const cannotPlayCount = trackReports.size - canPlayCount;
         
-        // If majority cannot play the track, auto-skip it
         if (cannotPlayCount > canPlayCount && cannotPlayCount >= 2) {
-          this.logger.log(`Majority cannot play track ${trackId} (${cannotPlayCount}/${trackReports.size}), auto-skipping`);
-          
-          // Only admins/creators can trigger the skip
           const event = await this.eventService.findById(eventId, client.userId);
           
-          // Find an admin user to trigger the skip
           let adminUserId = event.creatorId;
           if (!adminUserId && event.admins && event.admins.length > 0) {
             adminUserId = event.admins[0].id;
           }
           
           if (adminUserId) {
-            // Trigger auto-skip from admin perspective
             await this.handleTrackSkipDueToAccessibility(eventId, trackId, adminUserId, 'majority_cannot_play');
           }
         }
@@ -978,17 +1009,13 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       const event = await this.eventService.findById(eventId, adminUserId);
       
       if (event.playlist && event.playlist.id) {
-        // Remove the problematic track
         await this.playlistService.removeTrack(event.playlist.id, trackId, adminUserId);
-        this.logger.log(`Auto-removed inaccessible track ${trackId} from event ${eventId} (reason: ${reason})`);
         
-        // Find next playable track
         const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
         
         if (updatedPlaylist.length > 0) {
           const nextTrack = updatedPlaylist[0];
           
-          // Broadcast track change
           this.server.to(room).emit('music-track-changed', {
             eventId,
             trackId: nextTrack.track.id,
@@ -996,19 +1023,14 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
             controlledBy: adminUserId,
             autoSkipped: true,
             skipReason: reason,
-            continuePlaying: true, // Maintain playing state during auto-skip
+            continuePlaying: true,
             timestamp: new Date().toISOString(),
           });
           
-          // Clear accessibility reports for the skipped track
           this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
           
-          // Update current track in database
           await this.eventService.updateCurrentTrack(eventId, nextTrack.track.id);
-          
-          this.logger.log(`Auto-advanced to next track ${nextTrack.track.id} for event ${eventId}`);
         } else {
-          // No more tracks available
           this.server.to(room).emit('music-pause', {
             eventId,
             controlledBy: adminUserId,
@@ -1034,10 +1056,8 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      // Only allow participants to notify about track ending
       const room = SOCKET_ROOMS.EVENT(eventId);
       
-      // Broadcast track ended notification to all participants first
       this.server.to(room).emit('track-ended', {
         eventId,
         trackId,
@@ -1047,81 +1067,105 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       this.logger.log(`User ${client.userId} notified that track ${trackId} ended in event ${eventId}`);
 
-      // Check if the user is an admin or creator - only they can control track progression
       const event = await this.eventService.findById(eventId, client.userId);
       const isCreator = event.creatorId === client.userId;
       const isAdmin = event.admins?.some(admin => admin.id === client.userId) || false;
 
       if (isCreator || isAdmin) {
-        this.logger.log(`Admin ${client.userId} handling track progression for event ${eventId}`);
-        
-        // Remove the finished track from the event playlist
         try {
-          // Get the event playlist
           if (event.playlist && event.playlist.id) {
-            // Remove track from playlist (this will automatically update the event)
             await this.playlistService.removeTrack(event.playlist.id, trackId, client.userId);
-            this.logger.log(`Removed finished track ${trackId} from event ${eventId} playlist`);
             
-            // Clear accessibility reports for the finished track
             this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
             
-            // Get updated playlist to find next track
             const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
             
             if (updatedPlaylist.length > 0) {
-              // Find the first playable track
-              const nextTrack = updatedPlaylist[0]; // After removal, first track becomes the next track
+              const nextTrack = updatedPlaylist[0];
               
               if (nextTrack && nextTrack.track) {
-                // Broadcast the next track to all participants
                 this.server.to(room).emit('music-track-changed', {
                   eventId,
                   trackId: nextTrack.track.id,
                   trackIndex: 0,
                   controlledBy: client.userId,
-                  continuePlaying: true, // Indicate that playback should continue
+                  continuePlaying: true,
                   timestamp: new Date().toISOString(),
                 });
 
-                // Update current track in database
                 await this.eventService.updateCurrentTrack(eventId, nextTrack.track.id);
-                
-                this.logger.log(`Next track ${nextTrack.track.id} set for event ${eventId}`);
               } else {
-                // No more tracks, pause playback
                 this.server.to(room).emit('music-pause', {
                   eventId,
                   pausedBy: client.userId,
                   timestamp: new Date().toISOString(),
                 });
-                this.logger.log(`No more tracks in event ${eventId}, paused playback`);
               }
             } else {
-              // Playlist is empty, pause playback
               this.server.to(room).emit('music-pause', {
                 eventId,
                 pausedBy: client.userId,
                 timestamp: new Date().toISOString(),
               });
-              this.logger.log(`Event ${eventId} playlist is empty, paused playback`);
             }
           }
         } catch (playlistError) {
           this.logger.error(`Failed to handle track progression for event ${eventId}: ${playlistError.message}`);
-          // Pause playback on error
           this.server.to(room).emit('music-pause', {
             eventId,
             pausedBy: client.userId,
             timestamp: new Date().toISOString(),
           });
         }
-      } else {
-        this.logger.log(`User ${client.userId} is not an admin, cannot control track progression for event ${eventId}`);
       }
     } catch (error) {
       this.logger.error(`Track ended notification error: ${error.message}`);
       client.emit('error', { message: 'Failed to notify track ended', details: error.message });
+    }
+  }
+
+  // Periodic time sync for live events to keep all users in perfect sync
+  private syncIntervals = new Map<string, NodeJS.Timeout>();
+
+  private async startTimeSyncForEvent(eventId: string) {
+    // Don't start if already running
+    if (this.syncIntervals.has(eventId)) {
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      try {
+        const playbackState = await this.eventService.getCurrentPlaybackPosition(eventId);
+        
+        if (playbackState.isPlaying && playbackState.trackId) {
+          const room = SOCKET_ROOMS.EVENT(eventId);
+          
+          const roomSockets = await this.server.in(room).fetchSockets();
+          if (roomSockets.length > 0) {
+            this.server.to(room).emit('time-sync', {
+              eventId,
+              trackId: playbackState.trackId,
+              currentTime: playbackState.position,
+              timestamp: new Date().toISOString(),
+              syncType: 'periodic-sync'
+            });
+          }
+        }
+      } catch (error) {
+        this.logger.error(`Time sync error for event ${eventId}: ${error.message}`);
+      }
+    }, 1000); // Sync every second during playback
+
+    this.syncIntervals.set(eventId, interval);
+    this.logger.log(`Started time sync broadcasts for event ${eventId}`);
+  }
+
+  private stopTimeSyncForEvent(eventId: string) {
+    const interval = this.syncIntervals.get(eventId);
+    if (interval) {
+      clearInterval(interval);
+      this.syncIntervals.delete(eventId);
+      this.logger.log(`Stopped time sync broadcasts for event ${eventId}`);
     }
   }
 
@@ -1154,7 +1198,6 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     @MessageBody() { eventId, state }: { eventId: string; state: any }
   ) {
     if (!client.userId) return;
-    // Broadcast à tous les participants
     this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('playback-state-updated', {
       eventId,
       state,

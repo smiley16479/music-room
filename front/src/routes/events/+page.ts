@@ -15,7 +15,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
       events
     };
   } catch (error) {
-    console.error('Failed to load events:', error);
+    
     return {
       events: []
     };

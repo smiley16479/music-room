@@ -156,8 +156,12 @@ music-room-frontend/
 ### Deezer API
 - Recherche de musique
 - Métadonnées des tracks
-- Aperçus audio (30 secondes)
-- Gestion des playlists
+- Informations sur les albums et artistes
+
+### YouTube API
+- Recherche de vidéos musicales
+- Lecture complète des tracks (vs 30s previews)
+- Intégration du lecteur YouTube IFrame API
 
 ### Services d'authentification
 - Google OAuth 2.0
@@ -207,6 +211,7 @@ FACEBOOK_APP_ID=...
 # External APIs
 DEEZER_APP_ID=...
 DEEZER_SECRET=...
+YOUTUBE_API_KEY=...
 ```
 
 ## Scalabilité

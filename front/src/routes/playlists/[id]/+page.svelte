@@ -127,30 +127,30 @@
 
 	async function setupSocketConnection(playlistId: string) {
 		try {
-			console.log("🔌 Setting up socket connection for playlist:", playlistId);
+			
 			if (!socketService.isConnected()) {
-				console.log("🔌 Socket not connected, connecting...");
+				
 				await socketService.connect();
 			}
 
 			// Join the specific playlist room for collaborative editing
-			console.log("🏠 Joining playlist room:", playlistId);
+			
 			socketService.joinPlaylist(playlistId);
 
 			// Set up playlist-specific collaboration listeners
-			console.log("👂 Setting up socket listeners");
+			
 			setupPlaylistSocketListeners();
 
 			isSocketConnected = true;
-			console.log("✅ Socket connection setup complete");
+			
 		} catch (err) {
-			console.error("❌ Failed to set up socket connection:", err);
+			
 			error = "Failed to connect to real-time updates";
 		}
 	}
 
 	function setupPlaylistSocketListeners() {
-		console.log("👂 Setting up playlist socket listeners");
+		
 		// Listen for real-time playlist updates (metadata changes)
 		socketService.on("playlist-updated", handlePlaylistUpdated);
 
@@ -163,7 +163,7 @@
 		socketService.on("collaborator-added", handleCollaboratorAdded);
 		socketService.on("collaborator-removed", handleCollaboratorRemoved);
 		
-		console.log("✅ Socket listeners set up");
+		
 	}
 
 	function cleanupSocketConnection(playlistId: string) {
@@ -184,7 +184,7 @@
 
 			isSocketConnected = false;
 		} catch (err) {
-			console.error("Failed to clean up socket connection:", err);
+			
 		}
 	}
 
@@ -250,12 +250,12 @@
 		addedBy: string;
 		timestamp: string;
 	}) {
-		console.log("🎵 Track added event received:", data);
+		
 		if (data.playlistId === playlistId && playlist) {
 			// Check if this track already exists to prevent duplicates
 			const existingTrack = playlist.tracks?.find(t => t.id === data.track.id);
 			if (existingTrack) {
-				console.log("🔍 Track already exists, skipping duplicate:", data.track.id);
+				
 				return;
 			}
 
@@ -297,9 +297,7 @@
 				);
 			}
 		} else {
-			console.log(
-				"❌ Track added event ignored - playlist ID mismatch or no playlist",
-			);
+			
 		}
 	}
 
@@ -309,7 +307,7 @@
 		removedBy: string;
 		timestamp: string;
 	}) {
-		console.log("🗑️ Track removed event received:", data);
+		
 		if (data.playlistId === playlistId && playlist?.tracks) {
 			const removedTrackIndex = playlist.tracks.findIndex(
 				(t) => t.trackId === data.trackId,
@@ -348,9 +346,7 @@
 				);
 			}
 		} else {
-			console.log(
-				"❌ Track removed event ignored - playlist ID mismatch or no playlist",
-			);
+			
 		}
 	}
 
@@ -360,7 +356,7 @@
 		reorderedBy: string;
 		timestamp: string;
 	}) {
-		console.log("🔄 Tracks reordered event received:", data);
+		
 		if (data.playlistId === playlistId && playlist?.tracks) {
 			// Reorder tracks based on the trackIds array from backend
 			const reorderedTracks: PlaylistTrack[] = [];
@@ -400,9 +396,7 @@
 				musicPlayerStore.setPlaylist(reorderedTracks, newCurrentIndex);
 			}
 		} else {
-			console.log(
-				"❌ Tracks reordered event ignored - playlist ID mismatch or no playlist",
-			);
+			
 		}
 	}
 
@@ -483,7 +477,7 @@
 
 			loading = false;
 		} catch (err) {
-			console.error("Failed to load playlist:", err);
+			
 			error =
 				err instanceof Error ? err.message : "Failed to load playlist";
 			loading = false;
@@ -504,8 +498,8 @@
 				visibility: playlist.visibility,
 			};
 
-			console.log("Initializing music player with context:", roomContext);
-			console.log("Playlist tracks:", playlist.tracks?.length || 0);
+			
+			
 
 			// Initialize music player with playlist tracks (or empty array if no tracks)
 			await musicPlayerService.initializeForRoom(
@@ -514,10 +508,10 @@
 			);
 			isMusicPlayerInitialized = true;
 
-			console.log("Music player initialized successfully");
-			console.log("Current player state:", $musicPlayerStore);
+			
+			
 		} catch (err) {
-			console.error("Failed to initialize music player:", err);
+			
 		}
 	}
 
@@ -530,15 +524,11 @@
 		try {
 			// Don't try to play if music player isn't initialized
 			if (!isMusicPlayerInitialized) {
-				console.warn(
-					"Music player not initialized, attempting to initialize first...",
-				);
+				
 				await initializeMusicPlayer();
 
 				if (!isMusicPlayerInitialized) {
-					console.error(
-						"Failed to initialize music player before playing track",
-					);
+					
 					error =
 						"Music player not available. Please refresh the page.";
 					setTimeout(() => (error = ""), 3000);
@@ -552,21 +542,18 @@
 				trackIndex >= playlist.tracks.length ||
 				trackIndex < 0
 			) {
-				console.error("Invalid track index:", {
-					trackIndex,
-					playlistLength: playlist?.tracks?.length,
-				});
+				
 				error = `Cannot play track: invalid track position (${trackIndex + 1})`;
 				setTimeout(() => (error = ""), 3000);
 				return;
 			}
 
-			console.log("Playing track at index:", trackIndex);
-			console.log("Track data:", playlist.tracks[trackIndex]);
+			
+			
 
 			await musicPlayerService.playTrack(trackIndex);
 		} catch (err) {
-			console.error("Play track error:", err);
+			
 			error = err instanceof Error ? err.message : "Failed to play track";
 			setTimeout(() => (error = ""), 3000);
 		}

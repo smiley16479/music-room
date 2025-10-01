@@ -32,7 +32,7 @@ function createAuthStore() {
             }
           })
           .catch((error) => {
-            console.error('Failed to refresh user data:', error);
+            
             // Check if we still have tokens after the error
             const stillHasTokens = authService.getAuthToken();
             if (!stillHasTokens) {

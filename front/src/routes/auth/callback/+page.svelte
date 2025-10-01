@@ -33,7 +33,7 @@
             localStorage.setItem('user', JSON.stringify(userData));
             authStore.set(userData);
           } catch (parseError) {
-            console.warn('Failed to parse user data from URL:', parseError);
+            
           }
         }
         
@@ -42,14 +42,14 @@
         try {
           await authStore.refreshUser();
         } catch (refreshError) {
-          console.warn('Failed to refresh user data from server, keeping existing data:', refreshError);
+          
           // If refresh fails but we have user data from URL, keep it
           if (userParam) {
             try {
               const userData = JSON.parse(decodeURIComponent(userParam));
               authStore.set(userData);
             } catch (parseError) {
-              console.warn('Failed to restore user data from URL after refresh failure:', parseError);
+              
             }
           }
         }

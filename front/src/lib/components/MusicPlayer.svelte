@@ -8,20 +8,18 @@
   import { removeTrackFromEvent } from '$lib/services/events';
   import { page } from '$app/stores';
   import { globalAudioManager } from '$lib/stores/globalAudio';
+  import YouTubePlayer from '$lib/components/YouTubePlayer.svelte';
   
-  let audioElement = $state<HTMLAudioElement>();
+  let youtubePlayer = $state<any>(null);
   let isDragging = $state(false);
   let showVolumeControl = $state(false);
   let skipMessage = $state<string | null>(null);
   let skipMessageTimeout: NodeJS.Timeout | null = null;
+  let isSyncing = $state(false);
   
-  // Generate unique audio ID for this instance
   const audioId = `music-player-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Subscribe to stores using Svelte 5 runes - break down into specific reactive values to avoid cycles
   let playerState = $derived($musicPlayerStore);
-  
-  // Create specific derived values to avoid reactivity cycles
   let currentTrack = $derived(playerState.currentTrack);
   let isPlaying = $derived(playerState.isPlaying);
   let volume = $derived(playerState.volume);
@@ -34,114 +32,94 @@
   let currentTrackIndex = $derived(playerState.currentTrackIndex);
   let isInEvent = $derived(playerState.isInEvent);
   
-  // Check if we're on an event or playlist page where music player should always be visible
   let currentPage = $derived($page);
   let isOnEventPage = $derived(currentPage?.route?.id?.includes('/events/[id]') || false);
   let isOnPlaylistPage = $derived(currentPage?.route?.id?.includes('/playlists/[id]') || false);
   let shouldAlwaysShow = $derived(isOnEventPage || isOnPlaylistPage);
   
-  let currentAudioSrc = '';
+  let currentVideoUrl = '';
   let loadTimeout: NodeJS.Timeout | null = null;
   
-  // Update audio source when track changes using Svelte 5 effect
+  function isYouTubeUrl(url: string): boolean {
+    return url.includes('youtube.com') || url.includes('youtu.be');
+  }
+  
   $effect(() => {
-    if (audioElement && currentTrack?.previewUrl && currentAudioSrc !== currentTrack.previewUrl) {
-      
-      // Clear any existing timeout
+    if (currentTrack?.previewUrl && currentVideoUrl !== currentTrack.previewUrl) {
       if (loadTimeout) {
         clearTimeout(loadTimeout);
         loadTimeout = null;
       }
       
-      currentAudioSrc = currentTrack.previewUrl;
+      currentVideoUrl = currentTrack.previewUrl;
       
-      // Validate URL before setting it
-      try {
-        new URL(currentAudioSrc); // This will throw if URL is invalid
+      if (isYouTubeUrl(currentVideoUrl)) {
+        musicPlayerStore.setLoading(true);
         
-        audioElement.src = currentAudioSrc;
-        audioElement.load(); // Force reload of the audio
-        
-        // Auto-play if the player is in playing state
-        if (isPlaying) {
-          // Small delay to ensure audio is loaded
-          setTimeout(() => {
-            if (audioElement && globalAudioManager.isCurrentAudio(audioElement)) {
-              audioElement?.play().catch(error => {
-                console.warn('Auto-play failed after track change:', error);
-                musicPlayerStore.pause();
-              });
-            } else if (audioElement) {
-              // Register this audio and play it
-              globalAudioManager.registerAudio(audioElement, audioId);
-              audioElement?.play().catch(error => {
-                console.warn('Auto-play failed after track change:', error);
-                musicPlayerStore.pause();
-              });
-            }
-          }, 100);
-        }
-        
-        // Set a timeout to clear loading state if audio doesn't load
-        loadTimeout = setTimeout(() => {
-          // Use a more specific check to avoid reading playerState during effect
+        setTimeout(() => {
           musicPlayerStore.setLoading(false);
-          loadTimeout = null;
-          
-          // Mark the track as failed due to timeout
-          if (currentTrack) {
+        }, 500);
+        
+        loadTimeout = setTimeout(() => {
+          if (musicPlayerStore && currentTrack && currentVideoUrl === currentTrack.previewUrl && duration === 0) {
             musicPlayerStore.markTrackAsFailed(currentTrack.id);
+            
+            if (isPlaying) {
+              showSkipMessage('Track failed to load, skipping...');
+              setTimeout(() => {
+                musicPlayerStore.nextTrack();
+              }, 500);
+            }
           }
-          
-          // If we're playing and this track timed out, auto-skip to next track
-          if (isPlaying && currentTrack) {
-            showSkipMessage('Skipping unplayable track...');
-            setTimeout(() => {
-              musicPlayerStore.nextTrack();
-            }, 500);
-          }
-        }, 3000); // Reduced timeout to 3 seconds for faster skipping
-        
-        // Clear timeout when audio loads successfully
-        const handleLoadSuccess = () => {
-          if (loadTimeout) {
-            clearTimeout(loadTimeout);
-            loadTimeout = null;
-          }
-        };
-        
-        audioElement.addEventListener('canplay', handleLoadSuccess, { once: true });
-        audioElement.addEventListener('loadeddata', handleLoadSuccess, { once: true });
-        
-      } catch (urlError) {
+        }, 30000);
+      } else {
         musicPlayerStore.setLoading(false);
-        // Don't set the invalid URL, keep the previous state
+        if (currentTrack) {
+          musicPlayerStore.markTrackAsFailed(currentTrack.id);
+        }
       }
     }
   });
 
-  // Handle the case where currentTrack is set but has no previewUrl using Svelte 5 effect
   $effect(() => {
-    if (currentTrack && !currentTrack.previewUrl) {
+    if (currentTrack && (!currentTrack.previewUrl || !isYouTubeUrl(currentTrack.previewUrl))) {
+      if (loadTimeout) {
+        clearTimeout(loadTimeout);
+        loadTimeout = null;
+      }
       musicPlayerStore.setLoading(false);
+      
+      if (currentTrack && !currentTrack.previewUrl) {
+        musicPlayerStore.markTrackAsFailed(currentTrack.id);
+      } else if (currentTrack?.previewUrl && !isYouTubeUrl(currentTrack.previewUrl)) {
+        musicPlayerStore.markTrackAsFailed(currentTrack.id);
+      }
     }
   });
 
-  // Sync audio element play/pause state with store and global audio manager
   $effect(() => {
-    if (audioElement && audioElement.src) {
-      if (isPlaying && audioElement.paused) {
-        // Register this audio element as the active one before playing
-        globalAudioManager.registerAudio(audioElement, audioId);
-        audioElement.play().catch(error => {
-          console.warn('Failed to play audio:', error);
-          musicPlayerStore.pause();
-        });
-      } else if (!isPlaying && !audioElement.paused) {
-        audioElement.pause();
-        // Unregister when paused
-        globalAudioManager.unregisterAudio(audioElement, audioId);
+    const shouldBeActive = shouldAlwaysShow || currentTrack || playlist.length > 0;
+    
+    if (youtubePlayer && currentTrack?.previewUrl && isYouTubeUrl(currentTrack.previewUrl) && shouldBeActive) {
+      if (isPlaying) {
+        globalAudioManager.registerAudio(youtubePlayer, audioId);
+      } else {
+        globalAudioManager.unregisterAudio(youtubePlayer, audioId);
       }
+    } else if (!shouldBeActive && youtubePlayer) {
+      globalAudioManager.unregisterAudio(youtubePlayer, audioId);
+    }
+  });
+
+  $effect(() => {
+    if (isLoading && currentTrack?.previewUrl && isYouTubeUrl(currentTrack.previewUrl)) {
+      const fallbackTimeout = setTimeout(() => {
+        if (isLoading) {
+          musicPlayerStore.setLoading(false);
+        }
+      }, 5000);
+      
+      return () => clearTimeout(fallbackTimeout);
     }
   });
   
@@ -166,123 +144,88 @@
     }, 3000);
   }
   
-  function handleLoadedMetadata() {
-    if (audioElement && currentTrack) {
+  function handleYouTubeReady() {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout);
+      loadTimeout = null;
+    }
+    
+    musicPlayerStore.setLoading(false);
+    
+    if (currentTrack) {
       musicPlayerStore.setCurrentTime(0);
+    }
+  }
+  
+  function handleYouTubeTimeUpdate(time: number) {
+    if (isInEvent && isSyncing) {
+      return;
+    }
+    
+    if (duration > 0 && time > duration + 5) {
+      if (youtubePlayer && youtubePlayer.getDuration) {
+        const actualDuration = youtubePlayer.getDuration();
+        if (actualDuration > duration) {
+          musicPlayerStore.setDuration(actualDuration);
+        }
+      }
+    }
+    
+    if (!isDragging && !isSyncing) {
+      musicPlayerStore.setCurrentTime(time);
+    }
+  }
+  
+  function handleYouTubeDurationChange(newDuration: number) {
+    musicPlayerStore.setDuration(newDuration);
+    
+    if (newDuration > 0) {
+      if (loadTimeout) {
+        clearTimeout(loadTimeout);
+        loadTimeout = null;
+      }
+      
       musicPlayerStore.setLoading(false);
     }
   }
   
-  function handleTimeUpdate() {
-    if (audioElement && !isDragging) {
-      musicPlayerStore.setCurrentTime(audioElement.currentTime);
-    }
-  }
-  
   function handleEnded() {
-    // If we're in an event, handle track ending differently
     if (isInEvent && currentTrack && playerState.eventId) {
       const finishedTrackId = currentTrack.id;
       
-      // Notify all participants that the track has ended
-      // The backend will handle track progression for admin users
-      eventSocketService.notifyTrackEnded(playerState.eventId, finishedTrackId);
-      
-      // Show message and let backend handle the progression
       if (canControl) {
+        eventSocketService.notifyTrackEnded(playerState.eventId, finishedTrackId);
         showSkipMessage('Track finished, selecting next track...');
         
-        // For admins, request playlist sync to ensure we have the current order
-        // before the backend selects the next track
         setTimeout(() => {
           eventSocketService.requestPlaylistSync(playerState.eventId!);
         }, 100);
       } else {
-        showSkipMessage('Track finished, waiting for next track...');
+        showSkipMessage('Track finished, waiting for admin to select next track...');
       }
       
-      // For events, return early - backend handles track progression
       return;
     } else {
-      // For regular playlists, advance to the next track locally
       musicPlayerStore.nextTrack();
       
-      // Auto-play the next track after a brief delay, with better error handling
       setTimeout(async () => {
         const newPlayerState = $musicPlayerStore;
         
-        // Only auto-play if we were playing and we have a valid next track
-        if (isPlaying && audioElement && newPlayerState.currentTrack) {
-          try {
-            // Check if the audio source is properly loaded before playing
-            if (audioElement.error) {
-              // Try to skip unplayable tracks, but with a limit to avoid infinite loops
-              let skipAttempts = 0;
-              const maxSkipAttempts = playlist.length; // Don't skip more than the total playlist length
-              
-              while (audioElement.error && skipAttempts < maxSkipAttempts) {
-                musicPlayerStore.nextTrack();
-                skipAttempts++;
-                
-                // Wait a bit for the new track to load
-                await new Promise(resolve => setTimeout(resolve, 200));
-                
-                // If we've come full circle and still have errors, stop
-                if (skipAttempts >= maxSkipAttempts) {
-                  musicPlayerStore.pause();
-                  return;
-                }
-              }
-            }
-            
-            // Try to play the current track
-            if (audioElement && !audioElement.error) {
-              globalAudioManager.registerAudio(audioElement, audioId);
-              await audioElement.play();
-            }
-            
-          } catch (error) {
-            // Try to skip to the next available track, but limit attempts
-            let skipAttempts = 0;
-            const maxSkipAttempts = Math.min(5, playlist.length); // Limit to 5 attempts or playlist length
-            
-            while (skipAttempts < maxSkipAttempts) {
-              musicPlayerStore.nextTrack();
-              skipAttempts++;
-              
-              // Wait a bit and try to play
-              await new Promise(resolve => setTimeout(resolve, 300));
-              
-              try {
-                if (audioElement && !audioElement.error) {
-                  // Only play if this is still the current active audio
-                  if (globalAudioManager.isCurrentAudio(audioElement)) {
-                    await audioElement.play();
-                    return; // Success, stop trying
-                  } else {
-                    // Register this audio as active and try to play
-                    globalAudioManager.registerAudio(audioElement, audioId);
-                    await audioElement.play();
-                    return; // Success, stop trying
-                  }
-                }
-              } catch (retryError) {
-                // Continue to next attempt
-              }
-            }
-            
-            // If we've exhausted our skip attempts, stop playing
-            musicPlayerStore.pause();
-          }
+        if (isPlaying && newPlayerState.currentTrack) {
+          // Reactive effects will handle audio registration
         }
       }, 100);
     }
   }
   
-  function handleCanPlay() {
+  function handleYouTubeCanPlay() {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout);
+      loadTimeout = null;
+    }
+    
     musicPlayerStore.setLoading(false);
     
-    // For events, report that this track is playable for synchronization
     if (isInEvent && currentTrack && playerState.eventId) {
       eventSocketService.reportTrackAccessibility(
         playerState.eventId, 
@@ -293,86 +236,65 @@
     }
   }
   
-  function handleLoadStart() {
+  function handleYouTubeLoadStart() {
     musicPlayerStore.setLoading(true);
   }
   
-  function handleError(event: Event) {
-    const audioError = audioElement?.error;
-    if (audioError) {  
-      // For events, report accessibility issues to maintain synchronization
-      if (isInEvent && currentTrack && playerState.eventId) {
-        const errorReason = audioError.code === 4 ? 'network_error' :
-                           audioError.code === 2 ? 'loading_failed' :
-                           audioError.code === 3 ? 'decode_error' : 'unknown_error';
-        
-        // Report that this user cannot play the track
-        eventSocketService.reportTrackAccessibility(
-          playerState.eventId, 
-          currentTrack.id, 
-          false, 
-          errorReason
-        );
-        
-        // Show message but don't remove track - let backend handle consensus
-        showSkipMessage('Track unavailable on your device, checking with other users...');
-        
-        // Stop loading state
-        musicPlayerStore.setLoading(false);
-        
-        // For events, don't automatically skip - wait for backend consensus
-        return;
-      }
+  function handleYouTubeError(error: any) {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout);
+      loadTimeout = null;
+    }
+    
+    musicPlayerStore.setLoading(false);
+    
+    if (isInEvent && currentTrack && playerState.eventId) {
+      const errorReason = 'youtube_playback_error';
       
-      // For non-event playlists, handle locally as before
-      if (currentTrack && 
-          (audioError.code === 4 || // MEDIA_ELEMENT_ERROR: Media loading aborted
-           audioError.code === 2 || // MEDIA_ELEMENT_ERROR: Network error
-           audioError.code === 3)) { // MEDIA_ELEMENT_ERROR: Decode error
-        musicPlayerStore.markTrackAsFailed(currentTrack.id);
-      }
+      eventSocketService.reportTrackAccessibility(
+        playerState.eventId, 
+        currentTrack.id, 
+        false, 
+        errorReason
+      );
       
-      // Show skip message
-      showSkipMessage('Track unavailable, removing...');
+      showSkipMessage('Track unavailable on your device, checking with other users...');
+      return;
+    }
+    
+    const errorCode = error?.code || error?.data;
+    const isUnrecoverableError = errorCode === 100 || errorCode === 101 || errorCode === 150;
+    
+    if (currentTrack && isUnrecoverableError) {
+      musicPlayerStore.markTrackAsFailed(currentTrack.id);
+      showSkipMessage('Track unavailable, skipping...');
       
-      // Stop loading state
-      musicPlayerStore.setLoading(false);
-      
-      // For playlists: let the store handle finding the next valid track
-      // Use a timeout to avoid immediate recursive calls
       setTimeout(() => {
-        // Check if all tracks are failed
-        const currentPlayerState = $musicPlayerStore;
-        const validTracks = playlist.filter(track => 
-          track.track.previewUrl && !currentPlayerState.failedTrackIds.has(track.track.id)
-        );
-        
-        if (validTracks.length === 0) {
-          showSkipMessage('No playable tracks in playlist');
-          musicPlayerStore.pause();
-          return;
-        }
-        
-        // Let the store's nextTrack handle finding the next valid track
         musicPlayerStore.nextTrack();
-        
-      }, 200);
+      }, 1000);
+    } else {
+      showSkipMessage('Playback issue detected, try seeking or skipping manually');
     }
   }
 
-    async function handlePlayPause() {
-    if (!canControl) return;
+  async function handlePlayPause() {
+    if (!canControl) {
+      return;
+    }
     
     try {
       if (isInEvent && playerState.eventId) {
-        // Use event socket for synchronized playback
+        let currentTimestamp = playerState.currentTime;
+        if (youtubePlayer && youtubePlayer.getCurrentTime) {
+          currentTimestamp = youtubePlayer.getCurrentTime();
+        }
+        
         if (playerState.isPlaying) {
-          eventSocketService.pauseTrack(playerState.eventId);
+          eventSocketService.pauseTrack(playerState.eventId, currentTimestamp);
         } else {
-          eventSocketService.playTrack(playerState.eventId, playerState.currentTrack?.id, playerState.currentTime);
+          eventSocketService.playTrack(playerState.eventId, playerState.currentTrack?.id);
         }
       } else if (playerState.deviceId) {
-        // Send command to device
         if (playerState.isPlaying) {
           await devicesService.pauseDevice(playerState.deviceId);
         } else {
@@ -381,36 +303,23 @@
           });
         }
       } else {
-        if (audioElement && playerState.currentTrack?.previewUrl) {
+        if (playerState.currentTrack?.previewUrl && isYouTubeUrl(playerState.currentTrack.previewUrl)) {
           if (playerState.isPlaying) {
-            audioElement.pause();
-            globalAudioManager.unregisterAudio(audioElement, audioId);
             musicPlayerStore.pause();
           } else {
-            // Check if audio has failed to load before trying to play
-            if (audioElement.error) {
-              showSkipMessage('Track unavailable, skipping...');
-              setTimeout(() => {
-                musicPlayerStore.nextTrack();
-              }, 500);
-              return;
-            }
-            
-            // Register this audio as the active one and pause any others
-            globalAudioManager.registerAudio(audioElement, audioId);
-            await audioElement.play();
             musicPlayerStore.play();
           }
-        } else if (!playerState.currentTrack?.previewUrl) {
-          // Track has no preview URL available
+        } else if (!playerState.currentTrack?.previewUrl || !isYouTubeUrl(playerState.currentTrack.previewUrl)) {
+          showSkipMessage('Track not available for playback');
+          setTimeout(() => {
+            musicPlayerStore.nextTrack();
+          }, 1000);
         }
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
       showSkipMessage('Track unavailable, skipping...');
       musicPlayerStore.setLoading(false);
       
-      // Auto-skip to next track on any playback error
       setTimeout(() => {
         musicPlayerStore.nextTrack();
       }, 500);
@@ -422,7 +331,6 @@
     
     try {
       if (isInEvent && playerState.eventId) {
-        // For events, find the next track and send it via socket
         const nextIndex = playerState.currentTrackIndex + 1;
         if (nextIndex < playlist.length) {
           const nextTrack = playlist[nextIndex];
@@ -433,14 +341,13 @@
       }
       musicPlayerStore.nextTrack();
     } catch (error) {
-      console.error('Next track error:', error);
+      // Error handling without logging
     }
   }
   
   async function handlePrevious() {
     if (!canControl) return;
     
-    // Prevent manual track skipping during events
     if (isInEvent) {
       return;
     }
@@ -451,30 +358,26 @@
       }
       musicPlayerStore.previousTrack();
     } catch (error) {
-      console.error('Previous track error:', error);
+      // Error handling without logging
     }
   }
   
   async function handleVolumeChange(event: Event) {
-    if (!canControl) return;
-    
     const target = event.target as HTMLInputElement;
     const volume = parseInt(target.value);
     
     try {
       if (playerState.deviceId) {
         await devicesService.setDeviceVolume(playerState.deviceId, volume);
-      } else if (audioElement) {
-        audioElement.volume = volume / 100;
       }
       musicPlayerStore.setVolume(volume);
     } catch (error) {
-      console.error('Volume change error:', error);
+      // Error handling without logging
     }
   }
   
   function handleSeek(event: Event) {
-    if (!canControl || !audioElement) return;
+    if (!canControl) return;
     
     const target = event.target as HTMLInputElement;
     const time = parseFloat(target.value);
@@ -482,14 +385,19 @@
     try {
       if (isInEvent && playerState.eventId) {
         eventSocketService.seekTrack(playerState.eventId, time);
+        if (youtubePlayer) {
+          youtubePlayer.seekTo(time, true);
+        }
+        musicPlayerStore.seekTo(time);
       } else if (playerState.deviceId) {
         devicesService.seekDevice(playerState.deviceId, time);
-      } else {
-        audioElement.currentTime = time;
+        musicPlayerStore.seekTo(time);
+      } else if (youtubePlayer) {
+        youtubePlayer.seekTo(time);
+        musicPlayerStore.seekTo(time);
       }
-      musicPlayerStore.seekTo(time);
     } catch (error) {
-      console.error('Seek error:', error);
+      // Error handling without logging
     }
   }
   
@@ -501,194 +409,257 @@
     isDragging = false;
   }
   
-  // Socket event handlers for real-time sync
   function setupSocketListeners() {
-    if (!socketService.isConnected()) return;
-    
-    socketService.on('music-play', () => {
-      musicPlayerStore.play();
-      if (audioElement && !audioElement.paused) {
-        globalAudioManager.registerAudio(audioElement, audioId);
-        audioElement.play().catch(console.error);
-      }
-    });
-    
-    socketService.on('music-pause', () => {
-      musicPlayerStore.pause();
-      if (audioElement && !audioElement.paused) {
-        audioElement.pause();
-        globalAudioManager.unregisterAudio(audioElement, audioId);
-      }
-    });
-    
-    socketService.on('music-seek', (data: { time: number }) => {
-      musicPlayerStore.seekTo(data.time);
-      if (audioElement) {
-        audioElement.currentTime = data.time;
-      }
-    });
-    
-    socketService.on('music-volume', (data: { volume: number }) => {
-      musicPlayerStore.setVolume(data.volume);
-      if (audioElement) {
-        audioElement.volume = data.volume / 100;
-      }
-    });
-    
-    socketService.on('track-changed', (data: any) => {
-      musicPlayerStore.setCurrentTrack(data.track, data.playlist, data.index);
-    });
+    // Regular socket service handlers are not needed in event context
+  }
+
+  function cleanupEventSocketListeners() {
+    if (eventSocketService.isConnected()) {
+      eventSocketService.off('music-play');
+      eventSocketService.off('music-pause');
+      eventSocketService.off('music-seek');
+      eventSocketService.off('music-track-changed');
+      eventSocketService.off('music-volume');
+      eventSocketService.off('playback-sync');
+      eventSocketService.off('time-sync');
+    }
   }
 
   function setupEventSocketListeners() {
-    if (!eventSocketService.isConnected()) return;
+    cleanupEventSocketListeners();
     
-    // Event-specific music synchronization
     eventSocketService.on('music-play', (data) => {
+      isSyncing = true;
+      
       if (data.trackId && data.trackId !== playerState.currentTrack?.id) {
-        // Different track, sync the track change first
+        if (youtubePlayer && youtubePlayer.resetPlayerState) {
+          youtubePlayer.resetPlayerState();
+        }
+        
         musicPlayerStore.syncWithEvent(data.trackId, true, data.startTime || 0);
+        
+        setTimeout(() => {
+          if (youtubePlayer && youtubePlayer.seekTo) {
+            youtubePlayer.seekTo(data.startTime || 0, true);
+          }
+        }, 300);
       } else {
         musicPlayerStore.play();
+        
+        if (data.startTime !== undefined) {
+          musicPlayerStore.seekTo(data.startTime);
+          
+          if (youtubePlayer && youtubePlayer.seekTo) {
+            youtubePlayer.seekTo(data.startTime, true);
+          }
+        }
       }
       
-      if (audioElement) {
-        if (data.startTime) {
-          audioElement.currentTime = data.startTime;
-        }
-        globalAudioManager.registerAudio(audioElement, audioId);
-        audioElement.play().catch(console.error);
-      }
+      setTimeout(() => {
+        isSyncing = false;
+      }, 2000);
     });
     
-    eventSocketService.on('music-pause', () => {
-      musicPlayerStore.pause();
-      if (audioElement && !audioElement.paused) {
-        audioElement.pause();
-        globalAudioManager.unregisterAudio(audioElement, audioId);
+    eventSocketService.on('music-pause', (data) => {
+      isSyncing = true;
+      
+      if (data.currentTime !== undefined) {
+        musicPlayerStore.seekTo(data.currentTime);
+        if (youtubePlayer && youtubePlayer.seekTo) {
+          youtubePlayer.seekTo(data.currentTime, true);
+        }
       }
+      
+      musicPlayerStore.pause();
+      
+      setTimeout(() => {
+        isSyncing = false;
+      }, 1500);
     });
     
     eventSocketService.on('music-seek', (data) => {
+      isSyncing = true;
+      
       musicPlayerStore.seekTo(data.seekTime);
-      if (audioElement) {
-        audioElement.currentTime = data.seekTime;
+      
+      if (youtubePlayer && youtubePlayer.seekTo) {
+        youtubePlayer.seekTo(data.seekTime, true);
       }
+      
+      setTimeout(() => {
+        isSyncing = false;
+      }, 2000);
     });
     
     eventSocketService.on('music-volume', (data) => {
       musicPlayerStore.setVolume(data.volume);
-      if (audioElement) {
-        audioElement.volume = data.volume / 100;
-      }
     });
 
     eventSocketService.on('playback-sync', (data) => {
-      console.log('Received playback sync:', data);
-      
+      // Only sync if there's actually a track to sync with
       if (data.currentTrackId && data.currentTrack) {
-        // Sync to the current track and position
-        musicPlayerStore.syncWithEvent(data.currentTrackId, data.isPlaying, data.startTime);
-        
-        // Update audio element to sync position
-        if (audioElement && data.isPlaying) {
-          audioElement.currentTime = data.startTime;
-          globalAudioManager.registerAudio(audioElement, audioId);
-          audioElement.play().catch(error => {
-            console.warn('Failed to sync audio playback:', error);
-          });
+        if (youtubePlayer && data.syncType === 'initial-join') {
+          if (youtubePlayer.resetPlayerState) {
+            youtubePlayer.resetPlayerState();
+          }
+          
+          setTimeout(() => {
+            performInitialSync();
+          }, 300);
+        } else {
+          performInitialSync();
+        }
+
+        function performInitialSync() {
+          isSyncing = true;
+          
+          musicPlayerStore.syncWithEvent(data.currentTrackId, data.isPlaying, data.startTime);
+          
+          const waitForPlayerReady = (attempts = 0) => {
+            const maxAttempts = 10;
+            
+            if (!youtubePlayer) {
+              if (attempts < maxAttempts) {
+                setTimeout(() => waitForPlayerReady(attempts + 1), 200);
+              }
+              return;
+            }
+            
+            const playerState = youtubePlayer.getPlayerState ? youtubePlayer.getPlayerState() : -1;
+            const duration = youtubePlayer.getDuration ? youtubePlayer.getDuration() : 0;
+            
+            if (playerState === -1 || duration <= 0) {
+              if (attempts < maxAttempts) {
+                setTimeout(() => waitForPlayerReady(attempts + 1), 300);
+              } else {
+                performSeekOperation();
+              }
+              return;
+            }
+            
+            performSeekOperation();
+          };
+          
+          const performSeekOperation = () => {
+            if (youtubePlayer && youtubePlayer.seekTo) {
+              let seekAttempts = 0;
+              const maxSeekAttempts = 3;
+              
+              const attemptSeek = () => {
+                seekAttempts++;
+                youtubePlayer.seekTo(data.startTime, true);
+                
+                setTimeout(() => {
+                  const actualTime = youtubePlayer.getCurrentTime ? youtubePlayer.getCurrentTime() : 0;
+                  const timeDiff = Math.abs(actualTime - data.startTime);
+                  
+                  if (timeDiff > 2 && seekAttempts < maxSeekAttempts) {
+                    setTimeout(attemptSeek, 500);
+                  }
+                }, 300);
+              };
+              
+              attemptSeek();
+            }
+            
+            if (!data.isPlaying && youtubePlayer.pauseVideo) {
+              youtubePlayer.pauseVideo();
+            }
+          };
+          
+          waitForPlayerReady();
         }
         
-        console.log(`Synced to ongoing stream - track: ${data.currentTrackId}, position: ${data.startTime}s`);
+        setTimeout(() => {
+          isSyncing = false;
+        }, 3000);
+      } else {
+        // If there's no current track but sync data was received, ensure player is paused
+        musicPlayerStore.pause();
+        musicPlayerStore.setCurrentTime(0);
       }
     });
 
-    // Handle auto-skipped tracks due to accessibility issues
+    eventSocketService.on('time-sync', (data) => {
+      if (isInEvent && data.trackId === playerState.currentTrack?.id) {
+        musicPlayerStore.setCurrentTime(data.currentTime);
+      }
+    });
+
     eventSocketService.on('music-track-changed', (data) => {
       if (data.autoSkipped) {
         showSkipMessage(`Track auto-skipped: ${data.skipReason === 'majority_cannot_play' ? 'Most users cannot play this track' : 'Track issue detected'}`);
       }
       
-      // Use backend signal for playing state, fallback to current state
+      isSyncing = false;
+      
+      if (youtubePlayer && youtubePlayer.resetPlayerState) {
+        youtubePlayer.resetPlayerState();
+      }
+      
       const shouldContinuePlaying = data.continuePlaying !== undefined ? 
         data.continuePlaying : 
-        (playerState.isPlaying || (audioElement && !audioElement.paused));
+        playerState.isPlaying;
       
       musicPlayerStore.syncWithEvent(data.trackId, shouldContinuePlaying, 0);
-      
-      // If we should continue playing, make sure to start the new track
-      if (shouldContinuePlaying && audioElement) {
-        setTimeout(() => {
-          if (audioElement && audioElement.src && !audioElement.error) {
-            globalAudioManager.registerAudio(audioElement, audioId);
-            audioElement.play().catch(error => {
-              console.warn('Failed to auto-play next track:', error);
-            });
-          }
-        }, 100);
-      }
     });
   }
   
-  // Reactive updates using Svelte 5 effect
+  // Volume is handled by the YouTube player through reactive props
+  // No need for a separate effect
+  
+  let eventListenersSetup = $state(false);
+
   $effect(() => {
-    if (audioElement) {
-      audioElement.volume = (isMuted ? 0 : volume) / 100;
+    if (isInEvent && !eventListenersSetup) {
+      if (eventSocketService.isConnected()) {
+        setupEventSocketListeners();
+        eventListenersSetup = true;
+      } else {
+        const handleConnect = () => {
+          if (isInEvent && !eventListenersSetup) {
+            setupEventSocketListeners();
+            eventListenersSetup = true;
+          }
+          (eventSocketService as any).off('connect', handleConnect);
+        };
+        (eventSocketService as any).on('connect', handleConnect);
+      }
+    } else if (!isInEvent && eventListenersSetup) {
+      cleanupEventSocketListeners();
+      eventListenersSetup = false;
     }
   });
-  
-  onMount(() => {
-    console.log('MusicPlayer mounted with audio ID:', audioId);
-    setupSocketListeners();
-    
-    // Set up event socket listeners if in event mode
-    if (isInEvent) {
-      setupEventSocketListeners();
-    }
-    
-    // Set initial audio properties
-    if (audioElement) {
-      audioElement.volume = playerState.volume / 100;
-      
-      // If the music is supposed to be playing, register this audio
-      if (isPlaying && currentTrack?.previewUrl) {
-        globalAudioManager.registerAudio(audioElement, audioId);
-      }
-    }
 
-    // Add page visibility change listener to pause audio when tab becomes hidden
+  onMount(() => {
+    setupSocketListeners();
+
     const handleVisibilityChange = () => {
-      if (document.hidden && audioElement && !audioElement.paused) {
-        audioElement.pause();
-        globalAudioManager.unregisterAudio(audioElement, audioId);
+      if (document.hidden && isPlaying) {
         musicPlayerStore.pause();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Cleanup function
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   });
   
   onDestroy(() => {
-    // Clear any pending timeout
     if (loadTimeout) {
       clearTimeout(loadTimeout);
       loadTimeout = null;
     }
     
-    // Clear skip message timeout
     if (skipMessageTimeout) {
       clearTimeout(skipMessageTimeout);
       skipMessageTimeout = null;
     }
     
-    // Unregister audio element from global manager
-    if (audioElement) {
-      globalAudioManager.unregisterAudio(audioElement, audioId);
+    if (youtubePlayer) {
+      globalAudioManager.unregisterAudio(youtubePlayer, audioId);
     }
     
     if (socketService.isConnected()) {
@@ -706,22 +677,31 @@
       eventSocketService.off('music-track-changed');
       eventSocketService.off('music-volume');
       eventSocketService.off('playback-sync');
+      eventSocketService.off('time-sync');
     }
   });
 </script>
 
-<!-- Audio element for local playback -->
-<audio 
-  bind:this={audioElement}
-  onloadedmetadata={handleLoadedMetadata}
-  ontimeupdate={handleTimeUpdate}
-  onended={handleEnded}
-  oncanplay={handleCanPlay}
-  onloadstart={handleLoadStart}
-  onerror={handleError}
-  preload="metadata"
-  class="hidden"
-></audio>
+<!-- YouTube Player for playback (with improved safeguards) -->
+{#if currentTrack?.previewUrl && isYouTubeUrl(currentTrack.previewUrl)}
+<YouTubePlayer
+  bind:this={youtubePlayer}
+  videoUrl={currentTrack.previewUrl}
+  isPlaying={isPlaying}
+  volume={isMuted ? 0 : volume}
+  currentTime={currentTime}
+  duration={duration}
+  isEventStream={isInEvent}
+  isSyncing={isSyncing}
+  onTimeUpdate={handleYouTubeTimeUpdate}
+  onDurationChange={handleYouTubeDurationChange}
+  onEnded={handleEnded}
+  onReady={handleYouTubeReady}
+  onError={handleYouTubeError}
+  onCanPlay={handleYouTubeCanPlay}
+  onLoadStart={handleYouTubeLoadStart}
+/>
+{/if}
 
 <!-- Skip Message Notification -->
 {#if skipMessage}
@@ -751,8 +731,10 @@
         onmousedown={handleProgressMouseDown}
         onmouseup={handleProgressMouseUp}
         disabled={!canControl}
+        readonly={isInEvent && !canControl}
         class="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
         class:disabled={!canControl}
+        class:readonly={isInEvent && !canControl}
       />
       <div class="flex justify-between text-xs text-gray-500 mt-1">
         <span>{formatTime(currentTime)}</span>
@@ -820,13 +802,14 @@
 
         <button
           onclick={handlePlayPause}
-          disabled={!canControl || isLoading || (!currentTrack && playlist.length === 0) || (!!audioElement?.error && !!currentTrack?.previewUrl)}
+          disabled={!canControl || (!currentTrack && playlist.length === 0) || (!!currentTrack?.previewUrl && !isYouTubeUrl(currentTrack.previewUrl))}
           class="p-3 bg-secondary text-white rounded-full hover:bg-secondary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           title={
             !currentTrack ? 'Select a track to play' :
-            audioElement?.error && currentTrack?.previewUrl ? 'Preview unavailable due to licensing restrictions' :
-            !currentTrack?.previewUrl ? 'No preview available for this track' :
-            isPlaying ? 'Pause preview' : 'Play preview'
+            currentTrack?.previewUrl && !isYouTubeUrl(currentTrack.previewUrl) ? 'Only YouTube videos are supported' :
+            !currentTrack?.previewUrl ? 'No video available for this track' :
+            isLoading ? 'Loading video...' :
+            isPlaying ? 'Pause video' : 'Play video'
           }
         >
           {#if isLoading}
@@ -888,9 +871,7 @@
               max="100"
               value={volume}
               oninput={handleVolumeChange}
-              disabled={!canControl}
               class="w-20 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
-              class:disabled={!canControl}
             />
             <span class="text-xs text-gray-500 w-8">{volume}%</span>
           </div>

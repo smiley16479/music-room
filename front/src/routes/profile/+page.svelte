@@ -102,7 +102,7 @@
 				populateFormData(user);
 			}
 		} catch (err) {
-			console.error("Failed to load user data:", err);
+			
 		}
 	});
 
@@ -365,7 +365,7 @@
 			pendingInvitations = pendingData;
 			sentInvitations = sentData;
 		} catch (err) {
-			console.error('Failed to load friends data:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to load friends data';
 		} finally {
 			loading = false;
@@ -382,7 +382,7 @@
 		try {
 			searchResults = await userService.searchUsers(searchQuery.trim());
 		} catch (err) {
-			console.error('Failed to search users:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to search users';
 		} finally {
 			searchLoading = false;
@@ -399,7 +399,7 @@
 			// Reload sent invitations
 			sentInvitations = await friendsService.getSentInvitations();
 		} catch (err) {
-			console.error('Failed to send invitation:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to send friend invitation';
 		} finally {
 			loading = false;
@@ -416,7 +416,7 @@
 			// Reload data
 			await loadFriendsData();
 		} catch (err) {
-			console.error('Failed to respond to invitation:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to respond to invitation';
 		} finally {
 			loading = false;
@@ -433,7 +433,7 @@
 			// Reload sent invitations
 			sentInvitations = await friendsService.getSentInvitations();
 		} catch (err) {
-			console.error('Failed to cancel invitation:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to cancel invitation';
 		} finally {
 			loading = false;
@@ -452,7 +452,7 @@
 			// Reload friends list
 			friends = await friendsService.getFriends();
 		} catch (err) {
-			console.error('Failed to remove friend:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to remove friend';
 		} finally {
 			loading = false;

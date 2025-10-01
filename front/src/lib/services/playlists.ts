@@ -237,7 +237,7 @@ export const playlistsService = {
         socketService.emitTrackAdded(playlistId, result.data);
       }
     } catch (error) {
-      console.warn('Failed to emit track added event:', error);
+      
     }
     
     return result.data;
@@ -265,7 +265,7 @@ export const playlistsService = {
         socketService.emitTrackRemoved(playlistId, trackId);
       }
     } catch (error) {
-      console.warn('Failed to emit track removed event:', error);
+      
     }
   },
 
@@ -293,7 +293,7 @@ export const playlistsService = {
         socketService.emitTracksReordered(playlistId, trackIds);
       }
     } catch (error) {
-      console.warn('Failed to emit tracks reordered event:', error);
+      
     }
   },
 
@@ -319,7 +319,7 @@ export const playlistsService = {
         socketService.emitCollaboratorAdded(playlistId, userId);
       }
     } catch (error) {
-      console.warn('Failed to emit collaborator added event:', error);
+      
     }
   },
 
@@ -345,7 +345,7 @@ export const playlistsService = {
         socketService.emitCollaboratorRemoved(playlistId, userId);
       }
     } catch (error) {
-      console.warn('Failed to emit collaborator removed event:', error);
+      
     }
   }
 };

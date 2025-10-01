@@ -76,7 +76,7 @@
 			const response = await deezerService.getTopTracks(20);
 			topTracks = response?.data || [];
 		} catch (error) {
-			console.error('Failed to load top tracks:', error);
+			
 			topTracks = [];
 		} finally {
 			isLoadingTop = false;
@@ -215,7 +215,7 @@
 			} else if (playlistId && playlist?.tracks) {
 				// For playlists, skip optimistic update to prevent duplicates
 				// Real update will come via socket event
-				console.log('🎵 Skipping optimistic update for playlist - will be handled by socket event');
+				
 			}
 
 			// Add to event or playlist based on which ID was provided

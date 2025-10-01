@@ -55,7 +55,7 @@ export const userService = {
       const users = await this.searchUsers(email, 1);
       return users.find(user => user.email.toLowerCase() === email.toLowerCase()) || null;
     } catch (error) {
-      console.error('Error searching user by email:', error);
+      
       return null;
     }
   }

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 
 import { DeezerService } from './deezer.service';
+import { YouTubeService } from './youtube.service';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 
@@ -37,6 +38,7 @@ export class MusicService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly deezerService: DeezerService,
+    private readonly youtubeService: YouTubeService,
   ) {}
 
   // Search Methods
@@ -47,9 +49,9 @@ export class MusicService {
       // Search on Deezer
       const deezerResults = await this.searchOnDeezer(query, artist, album, limit);
       
-      // Convert Deezer tracks to our Track entities
-      const deezerTracks = await Promise.all(
-        deezerResults.data.map(deezerTrack => this.convertDeezerTrack(deezerTrack))
+      // Convert Deezer tracks for search results (keeps original preview URLs)
+      const deezerTracks = deezerResults.data.map(deezerTrack => 
+        this.convertDeezerTrackForSearch(deezerTrack)
       );
 
       // Search local tracks if requested
@@ -118,8 +120,8 @@ export class MusicService {
         limit,
       });
 
-      const tracks = await Promise.all(
-        deezerResults.data.map(deezerTrack => this.convertDeezerTrack(deezerTrack))
+      const tracks = deezerResults.data.map(deezerTrack => 
+        this.convertDeezerTrackForSearch(deezerTrack)
       );
 
       return {
@@ -327,8 +329,8 @@ export class MusicService {
     try {
       const deezerResults = await this.deezerService.getTopTracks(limit);
       
-      const tracks = await Promise.all(
-        deezerResults.data.map(deezerTrack => this.convertDeezerTrack(deezerTrack))
+      const tracks = deezerResults.data.map(deezerTrack => 
+        this.convertDeezerTrackForSearch(deezerTrack)
       );
 
       return {
@@ -369,8 +371,8 @@ export class MusicService {
     try {
       const deezerResults = await this.deezerService.searchByGenre(genreId, limit);
       
-      const tracks = await Promise.all(
-        deezerResults.data.map(deezerTrack => this.convertDeezerTrack(deezerTrack))
+      const tracks = deezerResults.data.map(deezerTrack => 
+        this.convertDeezerTrackForSearch(deezerTrack)
       );
 
       return {
@@ -441,14 +443,53 @@ export class MusicService {
       return track;
     }
 
-    // Create new track from Deezer data
+    // Search for YouTube link for full playback
+    const youtubeUrl = await this.youtubeService.searchTrack(
+      deezerTrack.title,
+      deezerTrack.artist.name
+    );
+
+    // Create new track from Deezer data with YouTube URL for full playback
     track = this.trackRepository.create({
       deezerId: deezerTrack.id,
       title: deezerTrack.title,
       artist: deezerTrack.artist.name,
       album: deezerTrack.album.title,
       duration: deezerTrack.duration,
-      previewUrl: deezerTrack.preview,
+      previewUrl: youtubeUrl || deezerTrack.preview || undefined, // Prefer YouTube, fallback to Deezer preview
+      albumCoverUrl: deezerTrack.album.cover,
+      albumCoverSmallUrl: deezerTrack.album.cover_small,
+      albumCoverMediumUrl: deezerTrack.album.cover_medium,
+      albumCoverBigUrl: deezerTrack.album.cover_big,
+      deezerUrl: deezerTrack.preview || deezerTrack.link, // Store Deezer preview URL as fallback
+      releaseDate: deezerTrack.album.release_date ? new Date(deezerTrack.album.release_date) : null,
+      available: true,
+    });
+
+    // Log the result
+    if (youtubeUrl) {
+      this.logger.debug(`Found YouTube URL for "${deezerTrack.title}" by ${deezerTrack.artist.name}: ${youtubeUrl}`);
+    } else {
+      this.logger.warn(`No YouTube URL found for "${deezerTrack.title}" by ${deezerTrack.artist.name}, using Deezer preview`);
+    }
+
+    // Save and return
+    return this.trackRepository.save(track);
+  }
+
+  /**
+   * Convert Deezer track for search results - keeps original Deezer preview URL for 30s previews
+   */
+  private convertDeezerTrackForSearch(deezerTrack: DeezerTrack): Track {
+    // Create track object without saving to database (for search preview only)
+    return {
+      id: `deezer-${deezerTrack.id}`, // Temporary ID for frontend
+      deezerId: deezerTrack.id,
+      title: deezerTrack.title,
+      artist: deezerTrack.artist.name,
+      album: deezerTrack.album.title,
+      duration: deezerTrack.duration,
+      previewUrl: deezerTrack.preview, // Keep Deezer preview URL for 30s previews
       albumCoverUrl: deezerTrack.album.cover,
       albumCoverSmallUrl: deezerTrack.album.cover_small,
       albumCoverMediumUrl: deezerTrack.album.cover_medium,
@@ -456,10 +497,9 @@ export class MusicService {
       deezerUrl: deezerTrack.link,
       releaseDate: deezerTrack.album.release_date ? new Date(deezerTrack.album.release_date) : null,
       available: true,
-    });
-
-    // Save and return
-    return this.trackRepository.save(track);
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as Track;
   }
 
   private combineAndDeduplicateTracks(localTracks: Track[], deezerTracks: Track[]): Track[] {
@@ -544,5 +584,13 @@ export class MusicService {
   async clearMusicCache(): Promise<void> {
     await this.deezerService.clearCache();
     this.logger.log('Music cache cleared');
+  }
+
+  /**
+   * Get or create track from Deezer data - ensures YouTube search is performed
+   */
+  async getOrCreateTrackFromDeezer(deezerTrack: DeezerTrack): Promise<Track> {
+    this.logger.debug(`🎵 getOrCreateTrackFromDeezer called for: "${deezerTrack.title}" by ${deezerTrack.artist.name}`);
+    return this.convertDeezerTrack(deezerTrack);
   }
 }

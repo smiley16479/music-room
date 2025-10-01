@@ -51,6 +51,11 @@ function createMusicPlayerStore() {
   // Store reference for internal access
   let currentState: PlayerState = initialState;
 
+  // Helper function to check if URL is a YouTube URL
+  const isYouTubeUrl = (url: string | undefined): boolean => {
+    return !!url && (url.includes('youtube.com') || url.includes('youtu.be'));
+  };
+
   // Helper function to find next valid track with preview URL
   const findNextValidTrack = (playlist: PlaylistTrack[], startIndex: number): number => {
     if (playlist.length === 0) return -1;
@@ -72,9 +77,11 @@ function createMusicPlayerStore() {
       
       checkedIndices.add(currentIndex);
       
-      // Check if this track has a valid preview URL and is not marked as failed
-      if (playlist[currentIndex].track.previewUrl && 
-          !currentState.failedTrackIds.has(playlist[currentIndex].track.id)) {
+      // Check if this track has a valid YouTube URL and is not marked as failed
+      const track = playlist[currentIndex].track;
+      if (track.previewUrl && 
+          isYouTubeUrl(track.previewUrl) &&
+          !currentState.failedTrackIds.has(track.id)) {
         return currentIndex;
       }
       
@@ -105,9 +112,11 @@ function createMusicPlayerStore() {
       
       checkedIndices.add(currentIndex);
       
-      // Check if this track has a valid preview URL and is not marked as failed
-      if (playlist[currentIndex].track.previewUrl && 
-          !currentState.failedTrackIds.has(playlist[currentIndex].track.id)) {
+      // Check if this track has a valid YouTube URL and is not marked as failed
+      const track = playlist[currentIndex].track;
+      if (track.previewUrl && 
+          isYouTubeUrl(track.previewUrl) &&
+          !currentState.failedTrackIds.has(track.id)) {
         return currentIndex;
       }
       
@@ -128,7 +137,9 @@ function createMusicPlayerStore() {
           currentTrack: track,
           playlist,
           currentTrackIndex: index,
-          duration: track.duration || 30 // Default to 30 seconds for previews
+          // Don't set duration here - let YouTube player provide the accurate duration
+          // This prevents Deezer duration from conflicting with actual YouTube video length
+          duration: 0 // Will be updated by YouTube player when video loads
         };
         return currentState;
       });
@@ -241,7 +252,7 @@ function createMusicPlayerStore() {
             
             if (validFromStart === -1) {
               // Really no valid tracks anywhere, stop playing
-              console.warn('No tracks with valid preview URLs available in entire playlist');
+              // No tracks with valid YouTube URLs available
               currentState = { ...state, isPlaying: false };
               return currentState;
             } else {
@@ -290,7 +301,7 @@ function createMusicPlayerStore() {
           
           if (prevIndex === -1) {
             // No valid tracks found, stay on current track
-            console.warn('No previous tracks with valid preview URLs available');
+            // No previous tracks with valid preview URLs available
             return state;
           }
         } else {
@@ -335,6 +346,17 @@ function createMusicPlayerStore() {
       update(state => ({ ...state, currentTime: time }));
     },
 
+    setDuration: (duration: number) => {
+      update(state => {
+        const newDuration = Math.max(0, duration);
+        // Log significant duration changes to help debug Deezer vs YouTube duration mismatches
+        if (Math.abs(state.duration - newDuration) > 5) {
+          // Duration updated
+        }
+        return { ...state, duration: newDuration };
+      });
+    },
+
     seekTo: (time: number) => {
       update(state => ({ 
         ...state, 
@@ -368,7 +390,10 @@ function createMusicPlayerStore() {
           ...state, 
           isInEvent, 
           eventId,
-          failedTrackIds: isInEvent ? new Set() : new Set()
+          failedTrackIds: isInEvent ? new Set() : new Set(),
+          // When entering an event, reset playing state until proper sync
+          isPlaying: isInEvent ? false : state.isPlaying,
+          currentTime: isInEvent ? 0 : state.currentTime
         };
         return currentState;
       });
@@ -394,6 +419,13 @@ function createMusicPlayerStore() {
             currentTrackIndex: trackIndex,
             isPlaying: isPlaying !== undefined ? isPlaying : state.isPlaying,
             currentTime
+          };
+        } else {
+          // If track not found in playlist, ensure player is in stopped state
+          currentState = {
+            ...state,
+            isPlaying: false,
+            currentTime: 0
           };
         }
         return currentState;

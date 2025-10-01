@@ -103,6 +103,16 @@ export class Event {
   @Column({ name: 'current_track_started_at', type: 'timestamp', nullable: true })
   currentTrackStartedAt: Date;
 
+  // Playback state tracking for accurate synchronization
+  @Column({ name: 'is_playing', type: 'boolean', default: false })
+  isPlaying: boolean;
+
+  @Column({ name: 'current_position', type: 'decimal', precision: 10, scale: 3, default: 0 })
+  currentPosition: number; // Current position in seconds when paused
+
+  @Column({ name: 'last_position_update', type: 'timestamp', nullable: true })
+  lastPositionUpdate: Date; // When position was last updated
+
   @Column({ name: 'max_votes_per_user', type: 'int', default: 1 })
   maxVotesPerUser: number;
 

@@ -26,11 +26,11 @@
 		if (!playlist?.id) return;
 
 		try {
-			console.log("Removing collaborator with userId:", userId);
+			
 			await playlistsService.removeCollaborator(playlist.id, userId);
 			onCollaboratorRemoved?.();
 		} catch (err) {
-			console.error("Failed to remove collaborator:", err);
+			
 		}
 	}
 </script>

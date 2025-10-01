@@ -60,7 +60,7 @@ class SocketService {
       const token = authService.getAuthToken();
       
       if (!token) {
-        console.error('❌ No authentication token available');
+        
         reject(new Error('No authentication token available'));
         return;
       }
@@ -80,12 +80,12 @@ class SocketService {
       });
 
       this.socket.on('connect_error', (error) => {
-        console.error('❌ Socket connection error:', error);
+        
         reject(error);
       });
 
       this.socket.on('disconnect', (reason) => {
-        console.log('❌ Socket disconnected:', reason);
+        
         
         if (reason === 'io server disconnect') {
           // Server disconnected us, reconnect manually
@@ -95,14 +95,14 @@ class SocketService {
 
       // Set up error handler
       this.socket.on('error', (error) => {
-        console.error('❌ Socket error:', error);
+        
       });
     });
   }
 
   private reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      
       return;
     }
 
@@ -129,11 +129,11 @@ class SocketService {
     
     // Listen for join confirmation
     this.socket.once('joined-playlist', (data) => {
-      console.log('✅ Successfully joined playlist room:', data);
+      
     });
 
     this.socket.once('error', (error) => {
-      console.error('❌ Error joining playlist:', error);
+      
     });
   }
 

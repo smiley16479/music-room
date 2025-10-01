@@ -33,13 +33,14 @@ export interface EventSocketEvents {
   'track-ended': (data: { eventId: string; trackId: string; timestamp: string }) => void;
 
   // Music synchronization events
-  'music-play': (data: { eventId: string; trackId?: string; startTime?: number; controlledBy: string; timestamp: string }) => void;
-  'music-pause': (data: { eventId: string; controlledBy: string; timestamp: string }) => void;
-  'music-seek': (data: { eventId: string; seekTime: number; controlledBy: string; timestamp: string }) => void;
-  'music-track-changed': (data: { eventId: string; trackId: string; trackIndex?: number; controlledBy: string; autoSkipped?: boolean; skipReason?: string; continuePlaying?: boolean; playlistOrder?: string[]; timestamp: string }) => void;
-  'music-volume': (data: { eventId: string; volume: number; controlledBy: string; timestamp: string }) => void;
-  'playback-state-updated': (data: { eventId: string; state: any; timestamp: string }) => void;
-  'playback-sync': (data: { eventId: string; currentTrackId: string; currentTrack: Track | null; startTime: number; isPlaying: boolean; timestamp: string }) => void;
+  'music-play': (data: { eventId: string; trackId?: string; startTime?: number; controlledBy: string; timestamp: string; syncType?: string }) => void;
+  'music-pause': (data: { eventId: string; controlledBy: string; currentTime?: number; timestamp: string; syncType?: string }) => void;
+  'music-seek': (data: { eventId: string; seekTime: number; controlledBy: string; timestamp: string; syncType?: string }) => void;
+  'music-track-changed': (data: { eventId: string; trackId: string; trackIndex?: number; controlledBy: string; autoSkipped?: boolean; skipReason?: string; continuePlaying?: boolean; playlistOrder?: string[]; timestamp: string; syncType?: string }) => void;
+  'music-volume': (data: { eventId: string; volume: number; controlledBy: string; timestamp: string; syncType?: string }) => void;
+  'playback-state-updated': (data: { eventId: string; state: any; timestamp: string; syncType?: string }) => void;
+  'playback-sync': (data: { eventId: string; currentTrackId: string; currentTrack: Track | null; startTime: number; isPlaying: boolean; timestamp: string; syncType?: string }) => void;
+  'time-sync': (data: { eventId: string; trackId: string; currentTime: number; timestamp: string; syncType: string }) => void;
 
   // Error handling
   'error': (data: { message: string; details?: string }) => void;
@@ -47,11 +48,14 @@ export interface EventSocketEvents {
 
 class EventSocketService {
   private socket: Socket | null = null;
+  private isConnecting = false;
+  private seekThrottle: NodeJS.Timeout | null = null;
+  private lastSeekTime: number = 0;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
-  private currentEventId: string | null = null;
   private authFailures = 0;
   private maxAuthFailures = 3;
+  private currentEventId: string | null = null;
 
   connect(): Promise<Socket> {
     return new Promise((resolve, reject) => {
@@ -77,14 +81,14 @@ class EventSocketService {
       });
 
       this.socket.on('connect', () => {
-        console.log('Connected to events socket');
+        // Connected to events socket
         this.reconnectAttempts = 0;
         this.authFailures = 0; // Reset auth failures on successful connection
         resolve(this.socket!);
       });
 
       this.socket.on('connect_error', (error) => {
-        console.error('Events socket connection error:', error);
+        // Events socket connection error
 
         // Check if it's an authentication error
         if (error.message && (
@@ -93,10 +97,8 @@ class EventSocketService {
           error.message.includes('secret or public key must be provided')
         )) {
           this.authFailures++;
-          console.warn(`Authentication failure ${this.authFailures}/${this.maxAuthFailures}`);
 
           if (this.authFailures >= this.maxAuthFailures) {
-            console.error('Max authentication failures reached, stopping reconnection attempts');
             this.disconnect();
             reject(new Error('Authentication failed too many times'));
             return;
@@ -107,7 +109,7 @@ class EventSocketService {
       });
 
       this.socket.on('disconnect', (reason) => {
-        console.log('Events socket disconnected:', reason);
+        // Events socket disconnected
 
         // Only reconnect for non-auth related disconnections
         if (reason === 'io server disconnect' && this.authFailures < this.maxAuthFailures) {
@@ -118,29 +120,29 @@ class EventSocketService {
 
       // Set up error handler
       this.socket.on('error', (error) => {
-        console.error('Events socket error:', error);
+        // Events socket error
       });
     });
   }
 
   private reconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      // Max reconnection attempts reached
       return;
     }
 
     // Don't reconnect if we have too many auth failures
     if (this.authFailures >= this.maxAuthFailures) {
-      console.error('Too many authentication failures, not attempting to reconnect');
+      // Too many authentication failures
       return;
     }
 
     this.reconnectAttempts++;
-    console.log(`Attempting to reconnect events socket (${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    // Attempting to reconnect events socket
 
     setTimeout(() => {
       this.connect().catch((error) => {
-        console.error('Reconnection failed:', error);
+        // Reconnection failed
       });
     }, 1000 * this.reconnectAttempts);
   }
@@ -150,7 +152,12 @@ class EventSocketService {
       this.socket.disconnect();
       this.socket = null;
     }
+    if (this.seekThrottle) {
+      clearTimeout(this.seekThrottle);
+      this.seekThrottle = null;
+    }
     this.currentEventId = null;
+    this.isConnecting = false;
   }
 
   // Method to reset auth failures when user logs in again
@@ -214,19 +221,17 @@ class EventSocketService {
 
   // Control playback (for event creators/admins)
   playTrack(eventId: string, trackId?: string, startTime?: number) {
-    if (!this.socket) {
-      throw new Error('Socket not connected');
+    if (!this.socket?.connected) {
+      return;
     }
-
+    
     this.socket.emit('play-track', { eventId, trackId, startTime });
-  }
-
-  pauseTrack(eventId: string) {
-    if (!this.socket) {
-      throw new Error('Socket not connected');
+  }  pauseTrack(eventId: string, currentTime?: number) {
+    if (!this.socket?.connected) {
+      return;
     }
-
-    this.socket.emit('pause-track', { eventId });
+    
+    this.socket.emit('pause-track', { eventId, currentTime });
   }
 
   seekTrack(eventId: string, seekTime: number) {
@@ -234,7 +239,26 @@ class EventSocketService {
       throw new Error('Socket not connected');
     }
 
-    this.socket.emit('seek-track', { eventId, seekTime });
+    // Throttle seek operations to reduce server load during event streaming
+    const now = Date.now();
+    const minSeekInterval = 500; // Minimum 500ms between seek operations
+    
+    if (now - this.lastSeekTime < minSeekInterval) {
+      // Clear any existing throttled seek
+      if (this.seekThrottle) {
+        clearTimeout(this.seekThrottle);
+      }
+      
+      // Schedule a throttled seek
+      this.seekThrottle = setTimeout(() => {
+        this.socket?.emit('seek-track', { eventId, seekTime });
+        this.lastSeekTime = Date.now();
+      }, minSeekInterval - (now - this.lastSeekTime));
+    } else {
+      // Execute immediately
+      this.socket.emit('seek-track', { eventId, seekTime });
+      this.lastSeekTime = now;
+    }
   }
 
   changeTrack(eventId: string, trackId: string, trackIndex?: number) {

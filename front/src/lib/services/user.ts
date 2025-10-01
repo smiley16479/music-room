@@ -45,7 +45,7 @@ export const userService = {
 			
 			if (!response.ok) {
 				if (response.status === 404) {
-					console.warn('User search API not available, returning empty list');
+					
 					return [];
 				}
 				throw new Error('Failed to search users');
@@ -54,7 +54,7 @@ export const userService = {
 			const result = await response.json();
 			return result.data || [];
 		} catch (error) {
-			console.error('Error searching users:', error);
+			
 			return [];
 		}
 	},
@@ -83,7 +83,7 @@ export const userService = {
 			const result = await response.json();
 			return result.data;
 		} catch (error) {
-			console.error('Error fetching user profile:', error);
+			
 			throw error;
 		}
 	}

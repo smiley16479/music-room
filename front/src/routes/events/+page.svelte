@@ -182,7 +182,7 @@
 			isSocketConnected = true;
 			socketRetryAttempts = 0;
 		} catch (err) {
-			console.error("Failed to set up socket connection:", err);
+			
 			isSocketConnected = false;
 
 			if (socketRetryAttempts < maxSocketRetries) {
@@ -191,9 +191,7 @@
 					setupSocketConnection();
 				}, 3000);
 			} else {
-				console.error(
-					"Max socket retry attempts reached. Operating in offline mode.",
-				);
+				
 				error =
 					"Real-time updates unavailable. Please refresh the page to retry.";
 			}
@@ -243,7 +241,7 @@
 			}
 		} catch (err) {
 			error = "Failed to load events";
-			console.error(err);
+			
 		} finally {
 			loading = false;
 		}

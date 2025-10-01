@@ -33,6 +33,7 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 
 import { EventService } from '../event/event.service';
 import { MusicService } from '../music/music.service';
+import { DeezerTrack } from '../music/interfaces/deezer.interface';
 import { EmailService } from '../email/email.service';
 import { PlaylistGateway } from './playlist.gateway';
 import { EventGateway } from '../event/event.gateway';
@@ -272,22 +273,61 @@ export class PlaylistService {
       throw new BadRequestException('Playlist ID is required');
     }
 
-    // Get or create track
+    // Get or create track using music service to ensure YouTube search is performed
     let track = await this.trackRepository.findOne({
       where: { deezerId: addTrackDto.deezerId },
     });
 
     if (!track) {
-      track = this.trackRepository.create({
-        deezerId: addTrackDto.deezerId,
+      // Use music service to create track with YouTube search
+      console.log(`🎵 Creating new track with YouTube search for: "${addTrackDto.title}" by ${addTrackDto.artist}`);
+      const deezerTrack: DeezerTrack = {
+        id: addTrackDto.deezerId,
         title: addTrackDto.title,
-        artist: addTrackDto.artist,
-        album: addTrackDto.album,
-        duration: addTrackDto.duration,
-        previewUrl: addTrackDto.previewUrl,
-        albumCoverUrl: addTrackDto.albumCoverUrl,
-      });
-      track = await this.trackRepository.save(track);
+        title_short: addTrackDto.title,
+        title_version: '',
+        link: '',
+        duration: addTrackDto.duration || 0,
+        rank: 0,
+        explicit_lyrics: false,
+        explicit_content_lyrics: 0,
+        explicit_content_cover: 0,
+        preview: addTrackDto.previewUrl || '',
+        md5_image: '',
+        artist: {
+          id: '0',
+          name: addTrackDto.artist,
+          link: '',
+          picture: '',
+          picture_small: '',
+          picture_medium: '',
+          picture_big: '',
+          picture_xl: '',
+          tracklist: '',
+          type: 'artist'
+        },
+        album: {
+          id: '0',
+          title: addTrackDto.album,
+          cover: addTrackDto.albumCoverUrl || '',
+          cover_small: addTrackDto.albumCoverUrl || '',
+          cover_medium: addTrackDto.albumCoverUrl || '',
+          cover_big: addTrackDto.albumCoverUrl || '',
+          cover_xl: addTrackDto.albumCoverUrl || '',
+          md5_image: '',
+          release_date: '',
+          tracklist: '',
+          type: 'album'
+        },
+        type: 'track'
+      };
+      
+      track = await this.musicService.getOrCreateTrackFromDeezer(deezerTrack);
+      console.log(`🎵 Track created with Deezer preview: ${track.title}, previewUrl: ${track.previewUrl}`);
+    }
+
+    if (!track) {
+      throw new BadRequestException('Failed to create or retrieve track');
     }
 
     // Check if track already exists in playlist
@@ -784,27 +824,20 @@ export class PlaylistService {
         const isCollaborator = playlist.collaborators?.some(collaborator => collaborator.id === userId);
 
         if (isCollaborator) {
-          console.log('✅ Collaborator - allowing edit');
           return; // Collaborator can edit
         }
 
         // If playlist is associated with an event, check if user is an admin of that event
         if (playlist.eventId) {
-          console.log(`🔍 Checking event admin for eventId: ${playlist.eventId}`);
           try {
             const isEventAdmin = await this.isUserEventAdmin(playlist.eventId, userId);
-            console.log(`🔍 IsEventAdmin: ${isEventAdmin}`);
             if (isEventAdmin) {
-              console.log('✅ Event admin - allowing edit');
               return; // Event admin can edit
             }
           } catch (error) {
             // If we can't check event admin status, continue with other checks
-            console.warn('❌ Error checking event admin status:', error);
           }
         }
-
-        console.log('❌ Permission denied - not creator, collaborator, or event admin');
         throw new ForbiddenException('Only invited users can edit this playlist');
         break;
     }
@@ -812,8 +845,6 @@ export class PlaylistService {
 
   private async isUserEventAdmin(eventId: string, userId: string): Promise<boolean> {
     try {
-      console.log(`🔍 Checking if user ${userId} is admin of event ${eventId}`);
-      
       // Get the event with admins relation directly using EventRepository
       const event = await this.eventRepository.findOne({
         where: { id: eventId },
@@ -821,25 +852,19 @@ export class PlaylistService {
       });
 
       if (!event) {
-        console.log('❌ Event not found');
         return false;
       }
       
-      console.log(`🔍 Event found: creatorId=${event.creatorId}, admins count=${event.admins?.length || 0}`);
-      
       // Check if user is creator (creators are admins by default)
       if (event.creatorId === userId) {
-        console.log('✅ User is event creator');
         return true;
       }
 
       // Check if user is in the admins list
       const isAdmin = event.admins?.some(admin => admin.id === userId) || false;
-      console.log(`🔍 User in admins list: ${isAdmin}`);
       
       return isAdmin;
     } catch (error) {
-      console.error('❌ Error checking event admin status:', error);
       return false;
     }
   }

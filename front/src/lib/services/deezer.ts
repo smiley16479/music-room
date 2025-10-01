@@ -132,7 +132,7 @@ class DeezerService {
         source: result.data?.source || 'deezer'
       };
     } catch (error) {
-      console.error('Error searching tracks:', error);
+      
       throw new Error('Failed to search tracks');
     }
   }
@@ -176,7 +176,7 @@ class DeezerService {
         source: result.data?.source || 'deezer'
       };
     } catch (error) {
-      console.error('Error in advanced search:', error);
+      
       throw new Error('Failed to perform advanced search');
     }
   }
@@ -210,7 +210,7 @@ class DeezerService {
         source: result.data?.source || 'deezer'
       };
     } catch (error) {
-      console.error('Error getting top tracks:', error);
+      
       throw new Error('Failed to get top tracks');
     }
   }
@@ -237,7 +237,7 @@ class DeezerService {
       const result = await response.json();
       return result.data;
     } catch (error) {
-      console.error('Error getting genres:', error);
+      
       throw new Error('Failed to get genres');
     }
   }
@@ -264,7 +264,7 @@ class DeezerService {
       const result = await response.json();
       return result.data;
     } catch (error) {
-      console.error('Error fetching track:', error);
+      
       throw new Error('Failed to fetch track');
     }
   }
@@ -291,7 +291,7 @@ class DeezerService {
       const result = await response.json();
       return result.data;
     } catch (error) {
-      console.error('Error fetching artist:', error);
+      
       throw new Error('Failed to fetch artist');
     }
   }
@@ -318,7 +318,7 @@ class DeezerService {
       const result = await response.json();
       return result.data;
     } catch (error) {
-      console.error('Error fetching album:', error);
+      
       throw new Error('Failed to fetch album');
     }
   }

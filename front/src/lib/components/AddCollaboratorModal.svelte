@@ -59,7 +59,7 @@
 		try {
 			friends = await friendsService.getFriends();
 		} catch (err) {
-			console.error('Failed to load friends:', err);
+			
 			friends = [];
 		} finally {
 			loadingFriends = false;
@@ -76,7 +76,7 @@
 		try {
 			searchResults = await userService.searchUsers(query.trim(), 10);
 		} catch (err) {
-			console.error('Failed to search users:', err);
+			
 			searchResults = [];
 		} finally {
 			loadingSearch = false;

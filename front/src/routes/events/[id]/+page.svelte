@@ -38,7 +38,6 @@
 	import EnhancedMusicSearchModal from "$lib/components/EnhancedMusicSearchModal.svelte";
 	import AddCollaboratorModal from "$lib/components/AddCollaboratorModal.svelte";
 	import BackNavBtn from "$lib/components/BackNavBtn.svelte";
-	import MusicPlayer from "$lib/components/MusicPlayer.svelte";
 	import { getAvatarColor, getAvatarLetter } from "$lib/utils/avatar";
 	import { flip } from 'svelte/animate';
 
@@ -195,6 +194,13 @@
 		}
 	});
 
+	// Automatically set licenseType to 'invited' when visibility is 'private'
+	$effect(() => {
+		if (editEventData.visibility === 'private') {
+			editEventData.licenseType = 'invited';
+		}
+	});
+
 	// Check playlist collaborator status when user or event changes
 	$effect(() => {
 		if (user && event?.playlistId) {
@@ -271,7 +277,7 @@
 						body: data,
 						keepalive: true, // This ensures the request continues even if page is closing
 					}).catch(error => {
-						console.warn('Failed to leave event during page unload:', error);
+						// Failed to leave event during page unload
 					});
 				}
 			}
@@ -381,14 +387,14 @@
 					await eventSocketService.connect();
 					eventSocketService.joinEvent(eventId);
 				} catch (error) {
-					console.error('Failed to connect to event socket:', error);
+					// Failed to connect to event socket
 				}
 			}
 
 			isMusicPlayerInitialized = true;
-			console.log('Music player initialized for event:', event.id);
+			// Music player initialized for event
 		} catch (error) {
-			console.error('Failed to initialize music player:', error);
+			// Failed to initialize music player
 		}
 	}
 
@@ -455,7 +461,7 @@
 						event = { ...event };
 					}
 				} catch (err) {
-					console.error('Failed to load voting results during initialization:', err);
+					
 				}
 			}
 		} else {
@@ -514,7 +520,7 @@
 			if (isParticipant) {
 				// Try to leave gracefully, but don't wait for it
 				leaveEventAPI(eventId).catch(error => {
-					console.warn('Failed to leave event during component destroy:', error);
+					
 				});
 			}
 		}
@@ -951,7 +957,7 @@
 			const playlist = await playlistsService.getPlaylist(event.playlistId);
 			isPlaylistCollaborator = playlist.collaborators?.some(collaborator => collaborator.id === user.id) || false;
 		} catch (error) {
-			console.error('Failed to check playlist collaborator status:', error);
+			
 			isPlaylistCollaborator = false;
 		}
 	}
@@ -981,7 +987,7 @@
 				const playlist = await playlistsService.getPlaylist(event.playlistId);
 				hasEventAccess = playlist.collaborators?.some(collaborator => collaborator.id === user.id) || false;
 			} catch (error) {
-				console.error('Failed to check event access:', error);
+				
 				hasEventAccess = false;
 			}
 		} else {
@@ -1003,7 +1009,7 @@
 		
 		refreshVotingResultsTimeout = setTimeout(async () => {
 			try {
-				console.log('Refreshing voting results after participant left...');
+				
 				const rawVotingResults = await getVotingResults(eventId);
 				
 				// Process raw voting results to calculate vote counts per track
@@ -1037,9 +1043,9 @@
 					}
 				}
 				
-				console.log('Voting results refreshed successfully');
+				
 			} catch (err) {
-				console.error('Failed to refresh voting results after participant left:', err);
+				
 			} finally {
 				refreshVotingResultsTimeout = null;
 			}
@@ -1076,7 +1082,7 @@
 				event = { ...event };
 			}
 		} catch (err) {
-			console.error('Failed to load voting data for user:', err);
+			
 		}
 	}
 
@@ -1093,7 +1099,7 @@
 					}
 				} catch (error) {
 					// If joining fails, still try to connect to socket for read-only access
-					console.warn(`Failed to join event as participant: ${error}`);
+					
 				}
 			}
 
@@ -1106,7 +1112,7 @@
 
 			isSocketConnected = true;
 		} catch (err) {
-			console.error("Failed to set up socket connection:", err);
+			
 			error = "Failed to connect to real-time updates";
 		}
 	}
@@ -1172,7 +1178,7 @@
 
 			isSocketConnected = false;
 		} catch (err) {
-			console.error("Failed to clean up socket connection:", err);
+			
 		}
 	}
 
@@ -1367,7 +1373,7 @@
 							}
 							
 						} catch (error) {
-							console.error('Failed to auto-start playback for track:', error);
+							
 						}
 					}, 100); // Small delay to ensure DOM updates
 				}
@@ -1454,7 +1460,7 @@
 								// Continue playback
 								musicPlayerStore.play();
 							} catch (error) {
-								console.error('Failed to continue playback after track removal:', error);
+								
 							}
 						}, 100);
 					}
@@ -1479,7 +1485,7 @@
 		playlistOrder?: string[]; // Add playlist order from server for synchronization
 	}) {
 		if (event && data.eventId === event.id && isMusicPlayerInitialized) {
-			console.log(`Track changed to ${data.trackId} by ${data.controlledBy}`);
+			
 			
 			// If server provides playlist order, use it to ensure all clients have same order
 			if (data.playlistOrder && event.playlist && Array.isArray(event.playlist)) {
@@ -1648,7 +1654,7 @@
 	
 	function handleTracksReordered(data: { eventId: string; trackOrder: string[]; playlistOrder?: string[] }) {
 		if (event && data.eventId === event.id && event.playlist && Array.isArray(event.playlist)) {
-			console.log('Tracks reordered by server:', data.trackOrder);
+			
 			
 			// Use server-provided playlist order if available, otherwise use trackOrder
 			const serverOrder = data.playlistOrder || data.trackOrder;
@@ -1835,7 +1841,7 @@
 			goto("/events");
 		} catch (err) {
 			error = err instanceof Error ? err.message : "Failed to leave event";
-			console.error("Failed to leave event:", err);
+			
 		}
 	}
 
@@ -1985,7 +1991,7 @@
 						event = { ...event };
 					}
 				} catch (err) {
-					console.error('Failed to load voting results in loadEvent:', err);
+					
 				}
 			}
 
@@ -2018,7 +2024,7 @@
 			searchResults = response?.data || [];
 		} catch (err) {
 			searchError = "Failed to search tracks. Please try again.";
-			console.error("Search error:", err);
+			
 		} finally {
 			isSearching = false;
 		}
@@ -2030,7 +2036,7 @@
 			const response = await deezerService.getTopTracks(20);
 			topTracks = response?.data || [];
 		} catch (error) {
-			console.error("Failed to load top tracks:", error);
+			
 		} finally {
 			isLoadingTop = false;
 		}
@@ -2109,10 +2115,10 @@
 		if (!eventId || !isSocketConnected) return;
 		
 		try {
-			console.log('Requesting playlist synchronization from server...');
+			
 			eventSocketService.requestPlaylistSync(eventId);
 		} catch (error) {
-			console.error('Failed to request playlist synchronization:', error);
+			
 		}
 	}
 
@@ -2204,15 +2210,11 @@
 	async function playTrack(trackIndex: number) {
 		try {
 			if (!isMusicPlayerInitialized) {
-				console.warn(
-					"Music player not initialized, attempting to initialize first...",
-				);
+				
 				await initializeMusicPlayer();
 
 				if (!isMusicPlayerInitialized) {
-					console.error(
-						"Failed to initialize music player before playing track",
-					);
+					
 					error =
 						"Music player not available. Please refresh the page.";
 					setTimeout(() => (error = ""), 3000);
@@ -2227,11 +2229,7 @@
 				trackIndex >= event.playlist.length ||
 				trackIndex < 0
 			) {
-				console.error("Invalid track index:", {
-					trackIndex,
-					playlistLength: event?.playlist?.length,
-					isArray: Array.isArray(event?.playlist),
-				});
+				
 				error = `Cannot play track: invalid track position (${trackIndex + 1})`;
 				setTimeout(() => (error = ""), 3000);
 				return;
@@ -2239,7 +2237,7 @@
 
 			await musicPlayerService.playTrack(trackIndex);
 		} catch (err) {
-			console.error("Play track error:", err);
+			
 			error = err instanceof Error ? err.message : "Failed to play track";
 			setTimeout(() => (error = ""), 3000);
 		}
@@ -2282,7 +2280,7 @@
 				event = { ...event };
 			}
 			
-			console.error('Error removing track:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to remove track from event';
 			setTimeout(() => (error = ""), 3000);
 		}
@@ -2409,7 +2407,7 @@
 			// Revert local vote count
 			updateLocalVoteCount(trackId, previousVoteType, voteType);
 			
-			console.error('Error voting for track:', err);
+			
 			error = err instanceof Error ? err.message : 'Failed to vote for track';
 			setTimeout(() => (error = ""), 3000);
 		}
@@ -2561,7 +2559,7 @@
 				locationError = "You're not in the correct location or time to vote for this event.";
 			}
 		} catch (err) {
-			console.error('Location permission check failed:', err);
+			
 			hasLocationPermission = false;
 			locationStatus = 'unavailable';
 			locationError = err instanceof Error ? err.message : 'Location check failed';
@@ -2587,7 +2585,7 @@
 				}
 			},
 			(error) => {
-				console.error('Location watch error:', error);
+				
 				locationStatus = 'unavailable';
 				locationError = 'Unable to track location changes';
 			},
@@ -2887,10 +2885,7 @@
 			</div>
 		{/if}
 
-		<!-- Music Player -->
-		{#if isMusicPlayerInitialized && event?.playlist && event.playlist.length > 0}
-			<MusicPlayer />
-		{/if}
+		<!-- Music Player handled by global layout -->
 
 		<!-- Playlist -->
 		<div class="flex flex-col lg:flex-row gap-8">
@@ -3474,7 +3469,7 @@
 										bind:value={editEventData.licenseType}
 										class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-secondary focus:border-transparent"
 									>
-										<option value="open">Open</option>
+										<option value="open" disabled={editEventData.visibility === "private"}>Open</option>
 										<option value="invited"
 											>Invited Only</option
 										>

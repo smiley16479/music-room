@@ -143,7 +143,7 @@ class MusicPlayerService {
       
       this.socketConnected = true;
     } catch (error) {
-      console.error('Failed to connect to room socket:', error);
+      
     }
   }
 
@@ -219,7 +219,7 @@ class MusicPlayerService {
     }
 
     if (trackIndex < 0 || trackIndex >= playerState.playlist.length) {
-      console.error('Invalid track index. Index:', trackIndex, 'Playlist length:', playerState.playlist.length);
+      
       throw new Error('Invalid track index');
     }
 
@@ -301,7 +301,7 @@ class MusicPlayerService {
       });
       // The socket event will update the UI
     } catch (error) {
-      console.error('Failed to add track:', error);
+      
       throw error;
     }
   }
@@ -321,7 +321,7 @@ class MusicPlayerService {
       
       musicPlayerStore.setCanControl(hasPermission);
     } catch (error) {
-      console.error('Failed to connect to device:', error);
+      
       throw error;
     }
   }

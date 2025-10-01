@@ -6,6 +6,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { MusicController } from './music.controller';
 import { MusicService } from './music.service';
 import { DeezerService } from './deezer.service';
+import { YouTubeService } from './youtube.service';
 
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -23,7 +24,7 @@ import { User } from 'src/user/entities/user.entity';
     }),
   ],
   controllers: [MusicController],
-  providers: [MusicService, DeezerService],
-  exports: [MusicService, DeezerService],
+  providers: [MusicService, DeezerService, YouTubeService],
+  exports: [MusicService, DeezerService, YouTubeService],
 })
 export class MusicModule {}

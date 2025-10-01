@@ -42,7 +42,7 @@ export const friendsService = {
 			});
 			if (!response.ok) {
 				if (response.status === 404) {
-					console.warn('Friends API not available, returning empty list');
+					
 					return [];
 				}
 				throw new Error('Failed to fetch friends');
@@ -50,7 +50,7 @@ export const friendsService = {
 			const result = await response.json();
 			return result.data || [];
 		} catch (error) {
-			console.error('Error fetching friends:', error);
+			
 			return [];
 		}
 	},
@@ -66,7 +66,7 @@ export const friendsService = {
 			});
 			if (!response.ok) {
 				if (response.status === 404) {
-					console.warn('Invitations API not available, returning empty list');
+					
 					return [];
 				}
 				throw new Error('Failed to fetch pending invitations');
@@ -74,7 +74,7 @@ export const friendsService = {
 			const result = await response.json();
 			return result.data || [];
 		} catch (error) {
-			console.error('Error fetching pending invitations:', error);
+			
 			return [];
 		}
 	},
@@ -90,7 +90,7 @@ export const friendsService = {
 			});
 			if (!response.ok) {
 				if (response.status === 404) {
-					console.warn('Invitations API not available, returning empty list');
+					
 					return [];
 				}
 				throw new Error('Failed to fetch sent invitations');
@@ -98,7 +98,7 @@ export const friendsService = {
 			const result = await response.json();
 			return result.data || [];
 		} catch (error) {
-			console.error('Error fetching sent invitations:', error);
+			
 			return [];
 		}
 	},

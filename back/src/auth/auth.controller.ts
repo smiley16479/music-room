@@ -638,7 +638,7 @@ export class AuthController {
   async googleLink(@Query('token') token: string, @Req() req: any) {
     // The token will be passed through the OAuth state parameter
     // The guard will handle the OAuth flow initiation
-    console.log('Google link endpoint reached with token:', token ? 'token present' : 'no token');
+    
   }
 
   @Public()
@@ -649,34 +649,34 @@ export class AuthController {
     description: 'Handles the Google OAuth callback for account linking',
   })
   async googleLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
-    console.log('Google link callback reached');
+    
     try {
       const user = req.user;
-      console.log('User object:', user);
+      
       
       if (!user.linkingToken) {
-        console.log('Missing linking token');
+        
         throw new UnauthorizedException('Missing authentication token for linking');
       }
       
       // Verify the user token
-      console.log('Verifying linking token...');
+      
       const payload = this.jwtService.verify(user.linkingToken, { 
         secret: this.configService.get<string>('JWT_SECRET') 
       });
-      console.log('Token payload:', payload);
+      
       const currentUser = await this.userService.findByEmail(payload.email);
       
       if (!currentUser) {
-        console.log('User not found for email:', payload.email);
+        
         throw new UnauthorizedException('User not found');
       }
       
       // Link the Google account
-      console.log('Linking Google account...');
+      
       await this.authService.linkGoogleProfile(currentUser, user);
-      console.log('Google account linked successfully');
-      console.log('Google account linked successfully');
+      
+      
       
       // Send success message to parent window (popup)
       res.send(`
@@ -689,7 +689,7 @@ export class AuthController {
         </script>
       `);
     } catch (error) {
-      console.log('Google link callback error:', error);
+      
       // Send error message to parent window (popup)
       res.send(`
         <script>
@@ -713,7 +713,7 @@ export class AuthController {
   async facebookLink(@Query('token') token: string, @Req() req: any) {
     // The token will be passed through the OAuth state parameter
     // The guard will handle the OAuth flow initiation
-    console.log('Facebook link endpoint reached with token:', token ? 'token present' : 'no token');
+    
   }
 
   @Public()
@@ -724,34 +724,34 @@ export class AuthController {
     description: 'Handles the Facebook OAuth callback for account linking',
   })
   async facebookLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
-    console.log('Facebook link callback reached');
+    
     try {
       const user = req.user;
-      console.log('User object:', user);
+      
       
       if (!user.linkingToken) {
-        console.log('Missing linking token');
+        
         throw new UnauthorizedException('Missing authentication token for linking');
       }
       
       // Verify the user token
-      console.log('Verifying linking token...');
+      
       const payload = this.jwtService.verify(user.linkingToken, { 
         secret: this.configService.get<string>('JWT_SECRET') 
       });
-      console.log('Token payload:', payload);
+      
       const currentUser = await this.userService.findByEmail(payload.email);
       
       if (!currentUser) {
-        console.log('User not found for email:', payload.email);
+        
         throw new UnauthorizedException('User not found');
       }
       
       // Link the Facebook account
-      console.log('Linking Facebook account...');
+      
       await this.authService.linkFacebookProfile(currentUser, user);
-      console.log('Facebook account linked successfully');
-      console.log('Facebook account linked successfully');
+      
+      
       
       // Send success message to parent window (popup)
       res.send(`
@@ -764,7 +764,7 @@ export class AuthController {
         </script>
       `);
     } catch (error) {
-      console.log('Facebook link callback error:', error);
+      
       // Send error message to parent window (popup)
       res.send(`
         <script>

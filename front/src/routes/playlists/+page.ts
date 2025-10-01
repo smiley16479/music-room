@@ -19,7 +19,7 @@ export const load: PageLoad = async ({ url, fetch }) => {
       };
     }
   } catch (error) {
-    console.error('Failed to load playlists:', error);
+    
     return {
       playlists: []
     };

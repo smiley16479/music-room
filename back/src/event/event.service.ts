@@ -787,10 +787,63 @@ export class EventService {
       throw new NotFoundException('Track not found');
     }
 
-    // Update current track and timestamp
+    // Update current track and reset playback position to start
     event.currentTrackId = trackId;
     event.currentTrackStartedAt = new Date();
+    // CRITICAL: Reset position to 0 when changing tracks
+    event.currentPosition = 0;
+    event.lastPositionUpdate = new Date();
     await this.eventRepository.save(event);
+  }
+
+  // Update playback state for precise synchronization
+  async updatePlaybackState(eventId: string, isPlaying: boolean, currentPosition: number): Promise<void> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    // Update playback state with precise timing
+    event.isPlaying = isPlaying;
+    event.currentPosition = currentPosition;
+    event.lastPositionUpdate = new Date();
+    
+    // If resuming playback, adjust start time to account for current position
+    if (isPlaying && event.currentTrackStartedAt) {
+      event.currentTrackStartedAt = new Date(Date.now() - (currentPosition * 1000));
+    }
+    
+    await this.eventRepository.save(event);
+  }
+
+  // Calculate current playback position accounting for paused state
+  async getCurrentPlaybackPosition(eventId: string): Promise<{ position: number; isPlaying: boolean; trackId: string | null }> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event || !event.currentTrackId) {
+      return { position: 0, isPlaying: false, trackId: null };
+    }
+
+    if (!event.isPlaying) {
+      // If paused, return the stored position
+      return { 
+        position: parseFloat(event.currentPosition?.toString() || '0'), 
+        isPlaying: false, 
+        trackId: event.currentTrackId 
+      };
+    }
+
+    // If playing, calculate current position = stored position + elapsed time since resumed
+    const storedPosition = parseFloat(event.currentPosition?.toString() || '0');
+    const elapsedTime = event.lastPositionUpdate ? 
+      Math.floor((Date.now() - event.lastPositionUpdate.getTime()) / 1000) : 0;
+    
+    const currentPosition = storedPosition + elapsedTime;
+    
+    return { 
+      position: currentPosition, 
+      isPlaying: true, 
+      trackId: event.currentTrackId 
+    };
   }
 
   /** Récupère tous les events où l'utilisateur est créateur, participant, ou collaborateur de playlist, avec les admins */

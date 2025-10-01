@@ -93,7 +93,7 @@ export const authService = {
       
       return result;
     } catch (error) {
-      console.error('Registration error:', error);
+      
       throw error;
     }
   },
@@ -120,7 +120,7 @@ export const authService = {
       
       return result;
     } catch (error) {
-      console.error('Login error:', error);
+      
       throw error;
     }
   },
@@ -190,7 +190,7 @@ export const authService = {
         return null;
       }
     } catch (error) {
-      console.error('Get current user error:', error);
+      
       return null;
     }
   },
@@ -227,7 +227,7 @@ export const authService = {
 
       return false;
     } catch (error) {
-      console.error('Token refresh error:', error);
+      
       return false;
     }
   },
@@ -370,7 +370,7 @@ export const authService = {
       }
       return user;
     } catch (error) {
-      console.error('Failed to parse user data from localStorage:', error);
+      
       return null;
     }
   },

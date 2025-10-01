@@ -13,7 +13,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
       event
     };
   } catch (err) {
-    console.error('Failed to load event:', err);
+    
     throw error(404, 'Event not found');
   }
 };

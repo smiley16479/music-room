@@ -78,19 +78,19 @@
 			
 			isSocketConnected = true;
 			socketRetryAttempts = 0;
-			console.log('Socket connected for playlists page - listening for global playlist events');
+			
 		} catch (err) {
-			console.error('Failed to set up socket connection:', err);
+			
 			isSocketConnected = false;
 			
 			if (socketRetryAttempts < maxSocketRetries) {
 				socketRetryAttempts++;
-				console.log(`Retrying socket connection (${socketRetryAttempts}/${maxSocketRetries}) in 3 seconds...`);
+				
 				setTimeout(() => {
 					setupSocketConnection();
 				}, 3000);
 			} else {
-				console.error('Max socket retry attempts reached. Operating in offline mode.');
+				
 				error = 'Real-time updates unavailable. Please refresh the page to retry.';
 			}
 		}
@@ -110,25 +110,25 @@
 			socketService.off('playlist-updated', handlePlaylistUpdated);
 			socketService.off('playlist-deleted', handlePlaylistDeleted);
 			isSocketConnected = false;
-			console.log('Cleaned up socket connection for playlists page');
+			
 		}
 	}
 
 	// Socket event handlers for real-time updates
 	function handlePlaylistCreated(data: { playlist: Playlist }) {
-		console.log('Playlist created:', data.playlist);
+		
 		// Add the playlist - filtering will be handled by the effect
 		playlists = [...playlists, data.playlist];
 	}
 
 	function handlePlaylistUpdated(data: { playlist: Playlist }) {
-		console.log('Playlist updated:', data.playlist);
+		
 		// Update the playlist - filtering will be handled by the effect
 		playlists = playlists.map(p => p.id === data.playlist.id ? data.playlist : p);
 	}
 
 	function handlePlaylistDeleted(data: { playlistId: string }) {
-		console.log('Playlist deleted:', data.playlistId);
+		
 		playlists = playlists.filter(p => p.id !== data.playlistId);
 	}
 
@@ -216,7 +216,7 @@
 			}
 		} catch (err) {
 			error = "Failed to load playlists";
-			console.error(err);
+			
 		} finally {
 			loading = false;
 		}
