@@ -1026,11 +1026,11 @@ export class EventService {
   }
 
   // Invitation System
-  async inviteUsers(eventId: string, inviterUserId: string, inviteeEmails: string[]): Promise<void> {
+  async inviteUsers(eventId: string, inviterUserId: string, inviteeIds: string[], message?: string): Promise<any> {
     const event = await this.findById(eventId, inviterUserId);
 
     // Only creator or participants can invite (depending on license)
-    const canInvite = event.creatorId === inviterUserId || 
+    const canInvite = event.creatorId === inviterUserId ||
       event.participants?.some(p => p.id === inviterUserId);
 
     if (!canInvite) {
@@ -1039,33 +1039,86 @@ export class EventService {
 
     const inviter = await this.userRepository.findOne({ where: { id: inviterUserId } });
 
-    for (const email of inviteeEmails) {
-      // Check if user exists
-      const invitee = await this.userRepository.findOne({ where: { email } });
+    const createdInvitations: Invitation[] = [];
+    const skipped: { userId: string; reason: string }[] = [];
+    const uniqueInviteeIds = Array.from(new Set(inviteeIds));
 
-      if (invitee) {
-        // Create invitation record
+    for (const inviteeId of uniqueInviteeIds) {
+      if (inviteeId === inviterUserId) {
+        skipped.push({ userId: inviteeId, reason: 'cannot_invite_self' });
+        continue;
+      }
+
+      const invitee = await this.userRepository.findOne({ where: { id: inviteeId } });
+
+      if (!invitee) {
+        skipped.push({ userId: inviteeId, reason: 'user_not_found' });
+        continue;
+      }
+
+      if (event.participants?.some(p => p.id === inviteeId)) {
+        skipped.push({ userId: inviteeId, reason: 'already_participant' });
+        continue;
+      }
+
+      if (event.admins?.some(a => a.id === inviteeId) || event.creatorId === inviteeId) {
+        skipped.push({ userId: inviteeId, reason: 'already_admin' });
+        continue;
+      }
+
+      const existingInvitation = await this.invitationRepository.findOne({
+        where: {
+          eventId,
+          inviteeId,
+          type: InvitationType.EVENT,
+        },
+        order: { createdAt: 'DESC' },
+      });
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      if (existingInvitation && existingInvitation.status === InvitationStatus.PENDING) {
+        skipped.push({ userId: inviteeId, reason: 'already_invited' });
+        continue;
+      }
+
+      let savedInvitation: Invitation;
+
+      if (existingInvitation) {
+        existingInvitation.status = InvitationStatus.PENDING;
+        existingInvitation.message = message;
+        existingInvitation.inviterId = inviterUserId;
+        existingInvitation.expiresAt = expiresAt;
+        savedInvitation = await this.invitationRepository.save(existingInvitation);
+      } else {
         const invitation = this.invitationRepository.create({
           inviterId: inviterUserId,
-          inviteeId: invitee.id,
+          inviteeId,
           eventId,
           type: InvitationType.EVENT,
           status: InvitationStatus.PENDING,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          message,
+          expiresAt,
         });
 
-        await this.invitationRepository.save(invitation);
+        savedInvitation = await this.invitationRepository.save(invitation);
       }
 
-      // Send invitation email
-      const eventUrl = `${process.env.FRONTEND_URL}/events/${eventId}`;
-      await this.emailService.sendEventInvitation(
-        email,
-        event.name,
-        inviter?.displayName || 'A friend',
-        eventUrl,
-      );
+      createdInvitations.push(savedInvitation);
+
+      if (invitee.email) {
+        const baseUrl = process.env.FRONTEND_URL || 'https://music-room.com';
+        const eventUrl = `${baseUrl}/events/${eventId}`;
+        await this.emailService.sendEventInvitation(
+          invitee.email,
+          event.name,
+          inviter?.displayName || 'A friend',
+          eventUrl,
+        );
+      }
     }
+
+    return { invitations: createdInvitations, skipped };
   }
 
   // Helper Methods

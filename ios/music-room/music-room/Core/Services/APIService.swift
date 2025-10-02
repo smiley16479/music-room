@@ -115,6 +115,11 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: privacySettings)
     }
 
+    func updatePassword(_ passwordData: [String: Any]) async throws -> EmptyResponse {
+        let endpoint = "/users/me/password"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: passwordData)
+    }
+
     func searchUsers(query: String) async throws -> [User] {
         let endpoint = "/users/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
@@ -223,21 +228,26 @@ class APIService {
     }
     
     func inviteUserToEvent(eventId: String, userId: String, message: String? = nil) async throws {
-        let endpoint = "/invitations"
-        let body: [String: Any] = [
-            "inviteeId": userId,
-            "type": "event",
-            "eventId": eventId,
-            "message": message as Any
+        let endpoint = "/events/\(eventId)/invite"
+        var body: [String: Any] = [
+            "userIds": [userId]
         ]
+        if let message = message {
+            body["message"] = message
+        }
+
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
     }
-    
-    // Legacy method for backward compatibility
-    func inviteUsersToEvent(eventId: String, _ usersEmails: [String]) async throws {
-        // This method is deprecated - use inviteUserToEvent with userId instead
+
+    func inviteUsersToEvent(eventId: String, userIds: [String], message: String? = nil) async throws {
         let endpoint = "/events/\(eventId)/invite"
-        let body = ["emails": usersEmails]
+        var body: [String: Any] = [
+            "userIds": userIds
+        ]
+        if let message = message {
+            body["message"] = message
+        }
+
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
     }
     
@@ -281,6 +291,33 @@ class APIService {
     func removeMusicFromPlaylist(_ playlistId: String, trackId: String) async throws {
         let endpoint = "/playlists/\(playlistId)/tracks/\(trackId)"
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
+    
+    // MARK: - Playlist Invitations
+    func inviteUserToPlaylist(playlistId: String, userId: String, message: String? = nil) async throws {
+        let endpoint = "/playlists/\(playlistId)/invite"
+        var body: [String: Any] = [
+            "userId": userId
+        ]
+        if let message = message {
+            body["message"] = message
+        }
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    func getPlaylistInvitations() async throws -> [Invitation] {
+        let endpoint = "/playlists/invitations/received"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
+    func acceptPlaylistInvitation(invitationId: String) async throws -> Invitation {
+        let endpoint = "/playlists/invitations/\(invitationId)/accept"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH")
+    }
+    
+    func declinePlaylistInvitation(invitationId: String) async throws -> Invitation {
+        let endpoint = "/playlists/invitations/\(invitationId)/decline"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH")
     }
     
     // MARK: - Event Voting & Music Management

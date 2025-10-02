@@ -399,6 +399,156 @@ struct CreatePlaylistView: View {
 }
 
 // MARK: - Edit Playlist Sheet
+struct PlaylistInviteView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    let playlist: Playlist?
+    
+    @State private var friends: [User] = []
+    @State private var selectedFriends: Set<String> = []
+    @State private var searchText = ""
+    @State private var isLoading = false
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    init(playlist: Playlist? = nil) {
+        self.playlist = playlist
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack {
+                inviteFriendsView
+            }
+            .navigationTitle("Invite Friends")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Send") {
+                        sendInvitations()
+                    }
+                    .disabled(selectedFriends.isEmpty || isLoading)
+                }
+            }
+        }
+        .onAppear {
+            loadFriends()
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+    
+    // MARK: - Invite Friends View
+    private var inviteFriendsView: some View {
+        VStack(spacing: 0) {
+            SearchBar(text: $searchText)
+                .padding(.horizontal)
+            
+            if isLoading {
+                ProgressView("Loading friends...")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if friends.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "person.2.slash")
+                        .font(.largeTitle)
+                        .foregroundColor(.gray)
+                    Text("No friends found")
+                        .font(.headline)
+                        .foregroundColor(.gray)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    Section("Friends") {
+                        ForEach(filteredFriends, id: \.id) { friend in
+                            FriendRowView(
+                                user: friend,
+                                isSelected: selectedFriends.contains(friend.id)
+                            ) {
+                                toggleSelection(for: friend)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Helper Views
+    private var filteredFriends: [User] {
+        if searchText.isEmpty {
+            return friends
+        }
+        return friends.filter { user in
+            user.displayName.localizedCaseInsensitiveContains(searchText) ||
+            (user.email?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+    }
+    
+    // MARK: - Actions
+    private func loadFriends() {
+        isLoading = true
+        Task {
+            do {
+                let loadedFriends = try await APIService.shared.getUserFriends()
+                await MainActor.run {
+                    friends = loadedFriends.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    toastMessage = "Failed to load friends"
+                    showToast = true
+                }
+            }
+        }
+    }
+    
+    private func toggleSelection(for user: User) {
+        if selectedFriends.contains(user.id) {
+            selectedFriends.remove(user.id)
+        } else {
+            selectedFriends.insert(user.id)
+        }
+    }
+    
+    private func sendInvitations() {
+        guard let playlist = playlist else { return }
+        
+        isLoading = true
+        Task {
+            do {
+                for friendId in selectedFriends {
+                    try await APIService.shared.inviteUserToPlaylist(
+                        playlistId: playlist.id,
+                        userId: friendId,
+                        message: nil
+                    )
+                }
+                
+                await MainActor.run {
+                    isLoading = false
+                    let count = selectedFriends.count
+                    toastMessage = "Sent \(count) invitation\(count == 1 ? "" : "s")"
+                    showToast = true
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    toastMessage = "Failed to send invitations"
+                    showToast = true
+                }
+            }
+        }
+    }
+}
+
 struct EditPlaylistSheet: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -408,6 +558,7 @@ struct EditPlaylistSheet: View {
     @State private var isSaving = false
     @State private var isDeleting = false
     @State private var errorMessage: String?
+    @State private var showingInviteView = false
     var playlist: Playlist
     var onDelete: (Playlist) -> Void
     var onInvite: (Playlist) -> Void
@@ -440,7 +591,7 @@ struct EditPlaylistSheet: View {
                 }
                 Section {
                     Button("Invite Friends") {
-                        onInvite(playlist)
+                        showingInviteView = true
                     }
                 }
                 if let error = errorMessage {
@@ -499,6 +650,50 @@ struct EditPlaylistSheet: View {
             }
             // Les champs sont initialisés via l'init personnalisé, donc plus besoin de onAppear/onChange
         }
+        .sheet(isPresented: $showingInviteView) {
+            PlaylistInviteView(playlist: playlist)
+        }
+    }
+}
+
+struct FriendRowView: View {
+    let user: User
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 12) {
+                AsyncImage(url: URL(string: user.avatarUrl ?? "")) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Image(systemName: "person.circle.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundColor(.musicSecondary)
+                }
+                .frame(width: 40, height: 40)
+                .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(user.displayName)
+                        .font(.subheadline)
+                        .foregroundColor(.textPrimary)
+                    if let email = user.email, !email.isEmpty {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundColor(.textSecondary)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? .musicPrimary : .textSecondary)
+            }
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
     }
 }
 

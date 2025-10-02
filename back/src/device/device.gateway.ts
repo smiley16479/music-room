@@ -1,4 +1,3 @@
-import { DeviceConnectionRedisService } from './device-connection-redis.service';
 import {
   WebSocketGateway,
   SubscribeMessage,
@@ -46,7 +45,6 @@ interface DeviceConnectionInfo {
 export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
-  private deviceConnectionRedis: DeviceConnectionRedisService;
   private readonly logger = new Logger(DeviceGateway.name);
 
   constructor(
@@ -55,7 +53,7 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     @Inject(forwardRef(() => DeviceService))
     private deviceService: DeviceService,
   ) {
-    this.deviceConnectionRedis = new DeviceConnectionRedisService();
+
   }
 
   afterInit(server: Server) {
@@ -137,9 +135,6 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       // client.data.deviceInfo = deviceInfo;
       client.data.connectedAt = new Date().toISOString();
 
-      // Ajout dans Redis
-      // await this.deviceConnectionRedis.addUserToDevice(deviceIdentifier, client.userId);
-
       client.emit('device-connected', {
         deviceIdentifier,
         message: 'Successfully connected to device',
@@ -180,9 +175,6 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       delete client.data.deviceInfo;
       delete client.data.connectedAt;
 
-      // Retrait dans Redis
-      await this.deviceConnectionRedis.removeUserFromDevice(deviceId, client.userId);
-
       client.emit('device-disconnected', {
         deviceId,
         message: 'Successfully disconnected from device',
@@ -204,10 +196,6 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     try {
       if (client.deviceId && deviceId && client.deviceId === deviceId) {
         await this.deviceService.updateLastActivity(client.id);
-        // Nettoyage Redis
-        if (client.userId) {
-          await this.deviceConnectionRedis.removeUserFromDevice(client.deviceId, client.userId);
-        }
         client.emit('heartbeat-ack', { timestamp: new Date().toISOString() });
       }
     } catch (error) {
