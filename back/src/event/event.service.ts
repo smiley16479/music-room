@@ -28,7 +28,7 @@ import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
 import { GeocodingService } from '../common/services/geocoding.service';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { toZonedTime } from 'date-fns-tz';
 
 export interface EventWithStats extends Event {
   stats: {
@@ -267,9 +267,9 @@ export class EventService {
   async update(id: string, updateEventDto: UpdateEventDto, userId: string): Promise<Event> {
     const event = await this.findById(id, userId);
 
-    // Only creator or admin can update event
-    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
-      throw new ForbiddenException('Only the creator or admin can update this event');
+    // Only creator can update event
+    if (event.creatorId !== userId) {
+      throw new ForbiddenException('Only the creator can update this event');
     }
 
     // Handle city-based geocoding for location-based events
@@ -512,11 +512,18 @@ export class EventService {
       throw new ConflictException('User has already voted for this track');
     }
 
+    const playlistTrackId = event.playlist?.playlistTracks?.find(pt => pt.trackId === voteDto.trackId)?.id;
+    if (!playlistTrackId) {
+      throw new BadRequestException('Track is not in the event playlist');
+    }
+
+
     // Create vote
     const vote = this.voteRepository.create({
       eventId,
       userId,
       trackId: voteDto.trackId,
+      playlistTrackId,
       type: voteDto.type || VoteType.UPVOTE,
       weight: voteDto.weight || 1,
     });
@@ -865,6 +872,64 @@ export class EventService {
     return nextTrack;
   } */
 
+  async setCurrentTrack(eventId: string, trackId: string, userId: string): Promise<void> {
+    console.log("🎵 setCurrentTrack called with:", { eventId, trackId, userId });
+    try {
+      
+
+      const event = await this.findById(eventId, userId);
+
+      if (!event) {
+        throw new NotFoundException('Event not found');
+      }
+
+      console.log("🎵 Current event currentTrackId before update:", event.currentTrackId);
+      console.log("🎵 Requested trackId:", trackId);
+      console.log("🎵 Available tracks in playlist:");
+      event.playlist?.playlistTracks.forEach(element => {
+        console.log("  - trackId:", element.trackId, "position:", element.position);
+      });
+
+      // Vérifier que la track existe dans la playlist de l'event
+      const trackExists = event.playlist?.playlistTracks.some(pt => pt.trackId === trackId);
+      if (!trackExists) {
+        throw new NotFoundException(`Track ${trackId} not found in event playlist`);
+      }
+
+      // Vérifier que la track existe vraiment dans la DB (crucial pour la relation)
+      const track = await this.trackRepository.findOne({ where: { id: trackId } });
+      if (!track) {
+        throw new NotFoundException(`Track ${trackId} does not exist in database`);
+      }
+      console.log("🎵 Track found in DB:", track.title, "by", track.artist);
+
+      // Only creator or existing admin can set current track
+      if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
+        throw new ForbiddenException('Only creator and admins can set current track');
+      }
+
+      /* A vérifier (chatGPT) ⚠️
+      Si tu mets à jour currentTrackId et recharges l’entité avec la relation, tu obtiens bien l’entité Track correspondante dans currentTrack.
+      La synchronisation se fait à la lecture, pas à l’écriture. NON C FAUX
+      */
+      // SOLUTION: Assigner directement la relation ET l'ID pour éviter les problèmes de cohérence
+      event.currentTrack = track;  // ✅ Assigne la relation directement
+      event.currentTrackId = trackId;  // ✅ Assigne aussi l'ID pour la cohérence
+      event.currentTrackStartedAt = new Date();
+      
+      const savedEvent = await this.eventRepository.save(event);
+      
+      console.log("🎵 Event saved with currentTrackId:", savedEvent.currentTrackId);
+      console.log("🎵 Event saved with currentTrackStartedAt:", savedEvent.currentTrackStartedAt);
+
+      // Notify participants
+      this.eventGateway.notifyNowPlaying(eventId, trackId);
+    } catch (error) {
+      console.error('ERROR:', error);
+      
+    }
+  }
+
   // Update current track for an event (for music synchronization)
   async updateCurrentTrack(eventId: string, trackId: string): Promise<void> {
     const event = await this.eventRepository.findOne({ where: { id: eventId } });
@@ -950,7 +1015,14 @@ export class EventService {
       .orWhere('participant.id = :userId', { userId })
       .orWhere('playlistCollaborators.id = :userId', { userId })
       .getMany();
-    return events;
+
+    const timeZone = 'Europe/Paris';
+    return events.map(event => ({
+      ...event,
+      // eventDate: toZonedTime(new Date(event.eventDate), timeZone),
+      // eventEndDate: toZonedTime(new Date(event.eventEndDate), timeZone),
+      status: this.computeStatus(event),
+    }));
   }
 
   // Invitation System
@@ -1004,12 +1076,15 @@ export class EventService {
     // Get unique tracks from votes
     const uniqueTrackIds = new Set(event.votes?.map(v => v.trackId) || []);
     const trackCount = uniqueTrackIds.size;
-
+    const timeZone = 'Europe/Paris';
     const isUserParticipating = userId ? 
       event.participants?.some(p => p.id === userId) || false : false;
 
     return {
       ...event,
+      // eventDate: toZonedTime(new Date(event.eventDate), timeZone),
+      // eventEndDate: toZonedTime(new Date(event.eventEndDate), timeZone),
+      status: this.computeStatus(event),
       stats: {
         participantCount,
         voteCount,
@@ -1210,5 +1285,18 @@ export class EventService {
       .where('status = :status', { status: EventStatus.LIVE })
       .andWhere('eventEndDate <= :now', { now })
       .execute();
+  }
+
+  computeStatus(event: Event): EventStatus {
+    // Convertit la date courante en heure de Paris
+    const timeZone = 'Europe/Paris';
+    const now = toZonedTime(new Date(), timeZone);
+
+    const start = toZonedTime(new Date(event.eventDate), timeZone);
+    const end = toZonedTime(new Date(event.eventEndDate), timeZone);
+
+    if (now < start) return EventStatus.UPCOMING;
+    if (now >= start && now <= end) return EventStatus.LIVE;
+    return EventStatus.ENDED;
   }
 }

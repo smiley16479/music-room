@@ -1,3 +1,4 @@
+import { DeviceConnectionRedisService } from './device-connection-redis.service';
 import {
   WebSocketGateway,
   SubscribeMessage,
@@ -18,10 +19,12 @@ import { User } from 'src/user/entities/user.entity';
 import { PlaybackCommand, DeviceService } from './device.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
+import { log } from 'console';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
   deviceId?: string;
+  deviceIdentifier?: string;
   user?: User;
 }
 
@@ -43,7 +46,7 @@ interface DeviceConnectionInfo {
 export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
-
+  private deviceConnectionRedis: DeviceConnectionRedisService;
   private readonly logger = new Logger(DeviceGateway.name);
 
   constructor(
@@ -51,7 +54,9 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private configService: ConfigService,
     @Inject(forwardRef(() => DeviceService))
     private deviceService: DeviceService,
-  ) {}
+  ) {
+    this.deviceConnectionRedis = new DeviceConnectionRedisService();
+  }
 
   afterInit(server: Server) {
     this.logger.log('Devices WebSocket Gateway initialized');
@@ -98,40 +103,53 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('connect-device')
   async handleConnectDevice(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { deviceId, deviceInfo }: { deviceId: string; deviceInfo?: any },
+    // @MessageBody() { deviceId, deviceInfo }: { deviceId: string; deviceInfo?: any },
+    @MessageBody() data?: any,
   ) {
+    const deviceIdentifier = data[0]?.deviceIdentifier;
+    console.log('handleConnectDevice called', deviceIdentifier, client.id);
+
     try {
       if (!client.userId) {
         client.emit('error', { message: 'Authentication required' });
+        console.error('handleConnectDevice unauthorized: no userId', { clientUserId: client.userId });
         return;
       }
 
       // Register connection with device service
       await this.deviceService.registerConnection(
-        deviceId,
         client.userId,
         client.id,
-        deviceInfo?.userAgent,
+        undefined, // je ne sais pas comment avoir le deviceId sans faire d'appel API superflux depuis le client
+        deviceIdentifier,
+        // deviceInfo?.userAgent,
       );
 
       // Join device room
-      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
+      this.logger.debug(`Joining DEVICE room ${room} for device ${deviceIdentifier}`);
       await client.join(room);
+      const userRoom = SOCKET_ROOMS.USER(client.userId);
+      await client.join(userRoom);
       
       // Store device info in client
-      client.deviceId = deviceId;
-      client.data.deviceInfo = deviceInfo;
+      client.deviceIdentifier = deviceIdentifier;
+      // client.data.deviceInfo = deviceInfo;
       client.data.connectedAt = new Date().toISOString();
 
+      // Ajout dans Redis
+      // await this.deviceConnectionRedis.addUserToDevice(deviceIdentifier, client.userId);
+
       client.emit('device-connected', {
-        deviceId,
+        deviceIdentifier,
         message: 'Successfully connected to device',
         timestamp: new Date().toISOString(),
       });
 
-      this.logger.log(`User ${client.userId} connected to device ${deviceId}`);
+      this.logger.log(`User ${client.userId} connected to device ${deviceIdentifier}`);
     } catch (error) {
       client.emit('error', { message: 'Failed to connect to device', details: error.message });
+      this.logger.error(`device ${deviceIdentifier} Error: ${error.message}`);
     }
   }
 
@@ -139,9 +157,13 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   async handleDisconnectDevice(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() { deviceId }: { deviceId: string },
+    @MessageBody() data?: any,
   ) {
+    console.log('handle disconnect-device called', { deviceId, data });
+
     try {
       if (!client.userId || client.deviceId !== deviceId) {
+        console.log('handle disconnect-device unauthorized', { clientUserId: client.userId, clientDeviceId: client.deviceId, deviceId });
         client.emit('error', { message: 'Not connected to this device' });
         return;
       }
@@ -157,6 +179,9 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       delete client.deviceId;
       delete client.data.deviceInfo;
       delete client.data.connectedAt;
+
+      // Retrait dans Redis
+      await this.deviceConnectionRedis.removeUserFromDevice(deviceId, client.userId);
 
       client.emit('device-disconnected', {
         deviceId,
@@ -179,6 +204,10 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     try {
       if (client.deviceId && deviceId && client.deviceId === deviceId) {
         await this.deviceService.updateLastActivity(client.id);
+        // Nettoyage Redis
+        if (client.userId) {
+          await this.deviceConnectionRedis.removeUserFromDevice(client.deviceId, client.userId);
+        }
         client.emit('heartbeat-ack', { timestamp: new Date().toISOString() });
       }
     } catch (error) {
@@ -225,34 +254,41 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('playback-state')
   async handlePlaybackState(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { 
-      deviceId, 
+/*     @MessageBody() { 
+      deviceIdentifier, 
       state 
     }: { 
-      deviceId: string; 
+      deviceIdentifier: string; 
       state: {
-        isPlaying: boolean;
-        currentTrack?: any;
-        position: number;
-        volume: number;
-        shuffle: boolean;
-        repeat: string;
+        isPlaying?: boolean;
+        volume?: number;
+        prevNext?: number;
+        // currentTrack?: any;
+        // position: number;
+        // shuffle: boolean;
+        // repeat: string;
       };
-    },
+    }, */
+      @MessageBody() data?: any,
   ) {
+
+    const { deviceIdentifier, command } = data[0];  // Extraction depuis l'array
+
+    this.logger.debug(`SubscribeMessage('playback-state') Device ${deviceIdentifier} state comand: ${command}`);
+
     try {
-      if (!client.userId || client.deviceId !== deviceId) {
-        return;
-      }
+      // if (!client.userId || client.deviceIdentifier !== deviceIdentifier) {
+      //   return;
+      // }
 
       // Update last activity
       await this.deviceService.updateLastActivity(client.id);
 
       // Broadcast playback state to device room
-      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
       client.to(room).emit('playback-state-updated', {
-        deviceId,
-        state,
+        deviceIdentifier,
+        command,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -309,6 +345,36 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     } catch (error) {
       // Silently handle response errors
     }
+  }
+
+  // Récupérer les connexions en temps réel pour un device
+  @SubscribeMessage('get-device-connections')
+  async handleGetDeviceConnections(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    // @MessageBody() { deviceId }: { deviceId: string },
+    @MessageBody() data?: any,
+  ) {
+    const deviceId = data[0]?.deviceId;
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+      const connections = await this.getDeviceConnections(deviceId);
+      console.log('handleGetDeviceConnections called', { deviceId, connections });
+      client.emit('device-connections', { deviceId, connections });
+    } catch (error) {
+      client.emit('error', { message: 'Failed to get device connections', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('which-rooms')
+  async handleGetwhichRooms(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    // @MessageBody() { deviceId }: { deviceId: string },
+    @MessageBody() data?: any,
+  ) {
+    console.log('Rooms du client:', Array.from(client.rooms));
   }
 
   // Server-side notification methods (called by DeviceService)
@@ -397,14 +463,18 @@ export class DeviceGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     });
 
     // Also notify the previously delegated user
+    let userRoom = "";
     if (previousDelegatedTo) {
-      const userRoom = SOCKET_ROOMS.USER(previousDelegatedTo.id);
+      userRoom = SOCKET_ROOMS.USER(previousDelegatedTo.id);
       this.server.to(userRoom).emit('device-control-revoked', {
         deviceId,
         revokedBy,
         timestamp: new Date().toISOString(),
       });
     }
+
+    console.log(`Control revoked room ${userRoom} & ${room}`);
+    
   }
 
   notifyDelegationExtended(deviceId: string, newExpiresAt: Date, extendedBy: string) {

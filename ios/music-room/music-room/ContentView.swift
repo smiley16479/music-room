@@ -4,20 +4,29 @@ struct ContentView: View {
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var localizationManager: LocalizationManager
     @EnvironmentObject private var authenticationManager: AuthenticationManager
-    // init() {
-    //     _ = SocketService.shared // Initialize the socket service
-    // }
-
+    @State private var showTestView = false
+    
     var body: some View {
         NavigationView {
             if authenticationManager.isAuthenticated {
                 MainTabView()
-                // .environmentObject(SocketService.shared)
+                    /* .toolbar {
+                        #if DEBUG
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Test") {
+                                showTestView = true
+                            }
+                        }
+                        #endif
+                    } */
             } else {
                 WelcomeView()
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .sheet(isPresented: $showTestView) {
+            APITestView()
+        }
         .onAppear {
             // Initialize app services
             Task {

@@ -51,13 +51,21 @@ class EventsSocketService: NamespaceSocketService {
         socket.connect()
         print("✅ EventsSocket connection initiated")
     }
-    
+
+    func removeAllListeners() {
+        socket.removeAllHandlers()
+    }
+
     func disconnect() { 
         socket.disconnect()
         isConnected = false
         joinedRooms.removeAll()
     }
-    
+
+    func printJoinedRooms() {
+        print("🏠 Joined Rooms: \(joinedRooms)")
+    }
+
     func on(_ event: String, callback: @escaping ([Any], SocketAckEmitter) -> Void) { socket.on(event, callback: callback) }
     func emit(_ event: String, with items: [Any]) { socket.emit(event, items) }
 }
@@ -87,15 +95,69 @@ class DevicesSocketService: NamespaceSocketService {
     let manager: SocketManager
     let socket: SocketIOClient
 
+    private var isConnected = false
+    private var deviceIdentifier: String?
+    private var joinedRooms: Set<String> = []
+
     private init() {
         let url = URL(string: "http://localhost:3000/devices")!
         let token = KeychainService.shared.getAccessToken() ?? ""
         manager = SocketManager(socketURL: url, config: [.log(true), .compress, .extraHeaders(["Authorization": "Bearer \(token)"])])
         socket = manager.socket(forNamespace: "/devices")
+
+        connect()
+        setupConnectionListeners()
     }
 
-    func connect() { socket.connect() }
-    func disconnect() { socket.disconnect() }
+    private func setupConnectionListeners() {
+        socket.on("connect") { [weak self] data, ack in
+            print("✅DevicesSocket connected")
+            self?.isConnected = true
+            if let deviceIdentifier = self?.deviceIdentifier {
+                self?.connectDevice(deviceIdentifier)
+                self?.deviceIdentifier = nil
+            }
+        }
+        
+        socket.on("disconnect") { [weak self] data, ack in
+            print("❌ DevicesSocket disconnected")
+            self?.isConnected = false
+            self?.joinedRooms.removeAll()
+        }
+    }
+
+    func connect() { 
+        guard !isConnected else {
+            print("🔌 DevicesSocket already connected")
+            return
+        }
+        socket.connect()
+        print("✅ DevicesSocket connection initiated")
+    }
+
+    // Nouvelle méthode pour préparer l’envoi après connexion
+    func prepareConnectDevice(_ deviceIdentifier: String) {
+        self.deviceIdentifier = deviceIdentifier
+        if isConnected {
+            connectDevice(deviceIdentifier)
+            self.deviceIdentifier = nil
+        }
+    }
+    
+    func removeAllListeners() {
+        socket.removeAllHandlers()
+    }
+
+    func disconnect() { 
+        socket.disconnect()
+        isConnected = false
+        joinedRooms.removeAll()
+    }
+
+    func printJoinedRooms() {
+        print("🏠 Joined Rooms: \(joinedRooms)")
+    }
+
     func on(_ event: String, callback: @escaping ([Any], SocketAckEmitter) -> Void) { socket.on(event, callback: callback) }
     func emit(_ event: String, with items: [Any]) { socket.emit(event, items) }
 }
@@ -220,26 +282,32 @@ extension PlaylistsSocketService {
 
 // MARK: - DevicesSocketService: Devices Gateway Events
 extension DevicesSocketService {
-    func connectDevice(deviceId: String, deviceInfo: [String: Any]? = nil) {
-        emit("connect-device", with: [["deviceId": deviceId, "deviceInfo": deviceInfo ?? [:]]])
+    func connectDevice(_ deviceIdentifier: String, deviceInfo: [String: Any]? = nil) {
+        emit("connect-device", with: [["deviceIdentifier": deviceIdentifier, "deviceInfo": deviceInfo ?? [:]]])
     }
-    func disconnectDevice(deviceId: String) {
-        emit("disconnect-device", with: [["deviceId": deviceId]])
+    func disconnectDevice(_ deviceIdentifier: String) {
+        emit("disconnect-device", with: [["deviceIdentifier": deviceIdentifier]])
     }
     func updateDeviceStatus(deviceId: String, status: String, metadata: [String: Any]? = nil) {
         emit("update-device-status", with: [["deviceId": deviceId, "status": status, "metadata": metadata ?? [:]]])
     }
-    func sendPlaybackState(deviceId: String, state: [String: Any]) {
-        emit("playback-state", with: [["deviceId": deviceId, "state": state]])
+    func sendPlaybackCommand(deviceIdentifier: String, command: String) {
+        emit("playback-state", with: [["deviceIdentifier": deviceIdentifier, "command": command]])
     }
     func requestDeviceInfo(deviceId: String) {
         emit("request-device-info", with: [["deviceId": deviceId]])
+    }
+    func whichRoomsAmIIn() {
+        emit("which-rooms", with: [])
     }
     func onDeviceConnected(callback: @escaping ([Any], SocketAckEmitter) -> Void) {
         on("device-connected", callback: callback)
     }
     func onDeviceDisconnected(callback: @escaping ([Any], SocketAckEmitter) -> Void) {
-        on("device-disconnected", callback: callback)
+        on("device-disconnected-notification", callback: callback)
+    }
+    func onDeviceControlRevoked(callback: @escaping ([Any], SocketAckEmitter) -> Void) {
+        on("device-control-revoked", callback: callback)
     }
     func onDeviceStatusUpdated(callback: @escaping ([Any], SocketAckEmitter) -> Void) {
         on("device-status-updated", callback: callback)

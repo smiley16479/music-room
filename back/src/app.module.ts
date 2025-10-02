@@ -22,6 +22,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '/app/.env',
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

@@ -543,13 +543,11 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
-  notifyNowPlaying(eventId: string, track: TrackVoteSnapshot) {
+  notifyNowPlaying(eventId: string, trackId: string) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('now-playing', {
       eventId,
-      track: {
-        id: track.trackId,
-      },
+      trackId,
       startedAt: new Date().toISOString(),
     });
   }

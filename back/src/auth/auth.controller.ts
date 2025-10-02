@@ -281,16 +281,18 @@ export class AuthController {
   @Public()
   @ApiOperation({
     summary: 'Exchange Google OAuth code for tokens (Mobile)',
-    description: 'Exchanges authorization code from mobile app for JWT tokens',
+    description: 'Exchanges authorization code from mobile app for JWT tokens or links Google account',
   })
   async googleMobileTokenExchange(
     @Body() body: { 
       code: string; 
       redirectUri: string; 
-      platform: 'ios' | 'android' 
-    }
+      platform: 'ios' | 'android';
+      linkingMode?: 'link'
+    },
+    @Req() request: Request
   ) {
-    this.logger.log(`google/mobile-token exchange for ${body.platform}`);
+    this.logger.log(`google/mobile-token exchange for ${body.platform}, linkingMode: ${body.linkingMode}`);
     
     try {
       // Vérifier le code avec la bonne configuration selon la plateforme
@@ -299,6 +301,28 @@ export class AuthController {
         body.redirectUri,
         body.platform
       );
+      
+      // Si c'est en mode linking, lier le compte Google à l'utilisateur existant
+      if (body.linkingMode === 'link') {
+        // Récupérer l'utilisateur depuis le token d'autorisation
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          throw new UnauthorizedException('Authorization token required for linking');
+        }
+        
+        const token = authHeader.substring(7);
+        const currentUser = await this.authService.getUserFromToken(token);
+        
+        // Lier le compte Google
+        const updatedUser = await this.authService.linkGoogleAccount(currentUser.id, googleUser.id);
+        
+        return {
+          success: true,
+          message: 'Google account linked successfully',
+          data: updatedUser, // Retourner directement l'utilisateur mis à jour
+          timestamp: new Date().toISOString(),
+        };
+      }
       
       // Utiliser la même logique de login que pour le web
       const result = await this.authService.googleLogin(googleUser);
@@ -512,23 +536,48 @@ export class AuthController {
   }
 
   @Post('facebook/mobile-login')
-    @ApiOperation({
-      summary: 'Facebook OAuth callback for mobile',
-      description: 'Handles the Facebook OAuth callback for mobile and redirects to the mobileApp with authentication tokens',
-    })
-  async facebookMobileLogin(@Body('access_token') fbToken: string) {
-
+  @Public()
+  @ApiOperation({
+    summary: 'Facebook OAuth callback for mobile',
+    description: 'Handles the Facebook OAuth callback for mobile and links account or authenticates',
+  })
+  async facebookMobileLogin(
+    @Body() body: { access_token: string; linkingMode?: 'link' },
+    @Req() request: Request
+  ) {
     try {
-      this.logger.log(`facebookMobileLogin access_token ${fbToken}`);
-      const fbProfile = await this.authService.getFacebookProfile(fbToken);
+      this.logger.log(`facebookMobileLogin access_token ${body.access_token}, linkingMode: ${body.linkingMode}`);
+      const fbProfile = await this.authService.getFacebookProfile(body.access_token);
 
       const fbUserData = {
           id: fbProfile.id,
           email: fbProfile.email,
           name: fbProfile.name,
           picture: fbProfile.picture?.data?.url,
-          accessToken: fbToken,
+          accessToken: body.access_token,
       };
+
+      // Si c'est en mode linking, lier le compte Facebook à l'utilisateur existant
+      if (body.linkingMode === 'link') {
+        // Récupérer l'utilisateur depuis le token d'autorisation
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          throw new UnauthorizedException('Authorization token required for linking');
+        }
+        
+        const token = authHeader.substring(7);
+        const currentUser = await this.authService.getUserFromToken(token);
+        
+        // Lier le compte Facebook
+        const updatedUser = await this.authService.linkFacebookAccount(currentUser.id, fbUserData.id);
+        
+        return {
+          success: true,
+          message: 'Facebook account linked successfully',
+          data: updatedUser, // Retourner directement l'utilisateur mis à jour
+          timestamp: new Date().toISOString(),
+        };
+      }
 
       // const fbUserData = await this.authService.verifyFacebookToken(fbToken);
       const result = await this.authService.facebookLogin(fbUserData);
@@ -543,6 +592,48 @@ export class AuthController {
         throw new BadRequestException('Facebook authentication failed');
     }
   }
+
+  @Public()
+  @Post('facebook/limited-login')
+  @ApiOperation({
+    summary: 'Facebook Limited Login for mobile (SDK v23.0+)',
+    description: 'Handles Facebook Limited Login authentication tokens from mobile SDK v23.0+',
+  })
+  async facebookLimitedLogin(@Body('authentication_token') authToken: string) {
+    try {
+      this.logger.log(`facebookLimitedLogin authentication_token received`);
+      
+      // Le token d'authentification est un JWT signé par Facebook
+      // Décoder le token pour récupérer les infos utilisateur
+      const decoded = this.jwtService.decode(authToken) as any;
+      
+      if (!decoded) {
+        throw new BadRequestException('Invalid authentication token format');
+      }
+      
+      const fbUserData = {
+        id: decoded.sub, // Facebook user ID
+        email: decoded.email,
+        name: decoded.name,
+        picture: decoded.picture
+      };
+      
+      // Utiliser la même logique de login que pour le classic login
+      const result = await this.authService.facebookLogin(fbUserData);
+      
+      this.logger.log(`facebookLimitedLogin result`, result);
+      return {
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        user: result.user
+      };
+    } catch (error) {
+      this.logger.error('Facebook Limited Login failed:', error);
+      throw new BadRequestException('Facebook Limited Login authentication failed');
+    }
+  }
+
+
 
   @Get('me')
   @UseGuards(JwtAuthGuard)

@@ -10,38 +10,46 @@ struct AuthResponse: Codable {
 // MARK: - User Models
 struct User: Codable, Identifiable {
     let id: String
-    let email: String
+    let email: String?
     let displayName: String
     let avatarUrl: String?
     let bio: String?
     let birthDate: String?
     let location: String?
+    let googleId: String?
+    let facebookId: String?
     let emailVerified: Bool?
     let musicPreferences: MusicPreferences?
     let lastSeen: String?
     let createdAt: String?
     let updatedAt: String?
+    let friends: [User]?
+    let createdPlaylists: [Playlist]?
+    let createdEvents: [Event]?
     
     // Privacy settings
     let displayNameVisibility: VisibilityLevel?
     let bioVisibility: VisibilityLevel?
     let birthDateVisibility: VisibilityLevel?
     let locationVisibility: VisibilityLevel?
+    let musicPreferenceVisibility: VisibilityLevel?
     
     enum CodingKeys: String, CodingKey {
-        case id, email, displayName, avatarUrl, bio, birthDate, location, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt
-        case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility
+        case id, email, displayName, avatarUrl, bio, birthDate, location, googleId, facebookId, emailVerified, musicPreferences, lastSeen, createdAt, updatedAt, friends, createdPlaylists, createdEvents
+        case displayNameVisibility, bioVisibility, birthDateVisibility, locationVisibility, musicPreferenceVisibility
     }
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        email = try container.decode(String.self, forKey: .email)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? "Unknown"
         avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
         bio = try container.decodeIfPresent(String.self, forKey: .bio)
         birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate)
         location = try container.decodeIfPresent(String.self, forKey: .location)
+        googleId = try container.decodeIfPresent(String.self, forKey: .googleId)
+        facebookId = try container.decodeIfPresent(String.self, forKey: .facebookId)
         emailVerified = try container.decodeIfPresent(Bool.self, forKey: .emailVerified)
         musicPreferences = try container.decodeIfPresent(MusicPreferences.self, forKey: .musicPreferences)
         lastSeen = try container.decodeIfPresent(String.self, forKey: .lastSeen)
@@ -51,17 +59,23 @@ struct User: Codable, Identifiable {
         bioVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .bioVisibility)
         birthDateVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .birthDateVisibility)
         locationVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .locationVisibility)
+        musicPreferenceVisibility = try container.decodeIfPresent(VisibilityLevel.self, forKey: .musicPreferenceVisibility)
+        friends = try container.decodeIfPresent([User].self, forKey: .friends)
+        createdPlaylists = try container.decodeIfPresent([Playlist].self, forKey: .createdPlaylists)
+        createdEvents = try container.decodeIfPresent([Event].self, forKey: .createdEvents)
     }
 
     // Public initializer for manual instantiation and mocks
     init(
         id: String,
-        email: String,
+        email: String?,
         displayName: String,
         avatarUrl: String? = nil,
         bio: String? = nil,
         birthDate: String? = nil,
         location: String? = nil,
+        googleId: String? = nil,
+        facebookId: String? = nil,
         emailVerified: Bool? = nil,
         musicPreferences: MusicPreferences? = nil,
         lastSeen: String? = nil,
@@ -70,7 +84,11 @@ struct User: Codable, Identifiable {
         displayNameVisibility: VisibilityLevel? = nil,
         bioVisibility: VisibilityLevel? = nil,
         birthDateVisibility: VisibilityLevel? = nil,
-        locationVisibility: VisibilityLevel? = nil
+        locationVisibility: VisibilityLevel? = nil,
+        musicPreferenceVisibility: VisibilityLevel? = nil,
+        friends: [User]? = nil,
+        createdPlaylists: [Playlist]? = nil,
+        createdEvents: [Event]? = nil
     ) {
         self.id = id
         self.email = email
@@ -79,6 +97,8 @@ struct User: Codable, Identifiable {
         self.bio = bio
         self.birthDate = birthDate
         self.location = location
+        self.googleId = googleId
+        self.facebookId = facebookId
         self.emailVerified = emailVerified
         self.musicPreferences = musicPreferences
         self.lastSeen = lastSeen
@@ -88,6 +108,10 @@ struct User: Codable, Identifiable {
         self.bioVisibility = bioVisibility
         self.birthDateVisibility = birthDateVisibility
         self.locationVisibility = locationVisibility
+        self.musicPreferenceVisibility = musicPreferenceVisibility
+        self.friends = friends
+        self.createdPlaylists = createdPlaylists
+        self.createdEvents = createdEvents
     }
 }
 
@@ -108,14 +132,14 @@ struct MusicPreferences: Codable {
 
 enum VisibilityLevel: String, Codable, CaseIterable {
     case `public` = "public"
-    case friendsOnly = "friends"
+    case friends = "friends"
     case `private` = "private"
     
     var localizedString: String {
         switch self {
         case .public:
             return "public".localized
-        case .friendsOnly:
+        case .friends:
             return "friends".localized
         case .private:
             return "private".localized
@@ -203,6 +227,36 @@ struct Track: Codable, Identifiable {
         self.hasPlayed = hasPlayed
         self.isCurrentlyPlaying = isCurrentlyPlaying
         self.preview = preview
+    }
+
+
+    init?(from dict: [String: Any]) {
+        guard let id = dict["id"] as? String,
+              let title = dict["title"] as? String,
+              let artist = dict["artist"] as? String,
+              let duration = dict["duration"] as? Int else { return nil }
+        self.id = id
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+        self.deezerId = dict["deezerId"] as? String
+        self.album = dict["album"] as? String
+        self.previewUrl = dict["previewUrl"] as? String
+        self.albumCoverUrl = dict["albumCoverUrl"] as? String
+        self.albumCoverSmallUrl = dict["albumCoverSmallUrl"] as? String
+        self.albumCoverMediumUrl = dict["albumCoverMediumUrl"] as? String
+        self.albumCoverBigUrl = dict["albumCoverBigUrl"] as? String
+        self.deezerUrl = dict["deezerUrl"] as? String
+        self.genres = dict["genres"] as? [String]
+        self.releaseDate = dict["releaseDate"] as? String
+        self.available = dict["available"] as? Bool
+        self.createdAt = dict["createdAt"] as? String
+        self.updatedAt = dict["updatedAt"] as? String
+        self.likes = dict["likes"] as? Int
+        self.dislikes = dict["dislikes"] as? Int
+        self.hasPlayed = dict["hasPlayed"] as? Bool
+        self.isCurrentlyPlaying = dict["isCurrentlyPlaying"] as? Bool
+        self.preview = dict["preview"] as? String
     }
 }
 
@@ -385,19 +439,19 @@ struct Device: Codable, Identifiable {
     let id: String
     let name: String
     let type: DeviceType
-    let status: DeviceStatus
+    var status: DeviceStatus
     let deviceInfo: String?
     let lastSeen: String
     let isActive: Bool
-    let canBeControlled: Bool
-    let delegatedToId: String?
-    let delegationExpiresAt: String?
-    let delegationPermissions: [String]?
+    var canBeControlled: Bool
+    let identifier: String?
+    var delegatedToId: String?
+    var delegationExpiresAt: String?
     let createdAt: String
     let updatedAt: String
     let ownerId: String
     let owner: User?
-    let delegatedTo: User?
+    var delegatedTo: User?
 }
 
 enum DeviceType: String, Codable, CaseIterable {

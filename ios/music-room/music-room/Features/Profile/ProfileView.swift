@@ -11,6 +11,7 @@ struct ProfileView: View {
     @State private var showingFriends = false
     @State private var showingHelp = false
     @State private var showingSignOutAlert = false
+    @State private var userStats: UserStats? = nil
     
     var body: some View {
         NavigationView {
@@ -20,7 +21,7 @@ struct ProfileView: View {
                     ProfileHeaderView()
                     
                     // Quick Stats
-                    QuickStatsView()
+                    QuickStatsView(stats: userStats)
                     
                     // Profile Sections
                     VStack(spacing: 16) {
@@ -96,6 +97,19 @@ struct ProfileView: View {
             }
             .navigationTitle("profile".localized)
             .navigationBarTitleDisplayMode(.large)
+        }.task {
+            do {
+                let userProfil = try await APIService.shared.getUserProfile()
+                await MainActor.run {
+                    userStats = UserStats(
+                        playlistsCount: userProfil.createdPlaylists?.count ?? 0,
+                        eventsCount: userProfil.createdEvents?.count ?? 0,
+                        friendsCount: userProfil.friends?.count ?? 0
+                    )
+                }
+            } catch {
+                print("Erreur chargement stats:", error)
+            }
         }
         .sheet(isPresented: $showingEditProfile) {
             EditProfileView()
@@ -371,7 +385,9 @@ struct SearchingFriendsView: View {
                             }
                             VStack(alignment: .leading) {
                                 Text(user.displayName).font(.body)
-                                Text(user.email).font(.caption).foregroundColor(.secondary)
+                                if let email = user.email {
+                                    Text(email).font(.caption).foregroundColor(.secondary)
+                                }
                             }
                             Spacer()
                             Button("Add") {
@@ -432,7 +448,7 @@ struct FriendProfileView: View {
                         Image(systemName: "person.crop.circle").foregroundColor(.gray)
                             .frame(width: 100, height: 100)
                     }
-                    // Champs selon visibilité
+                    // Champs selon visibilité ⚠️ à ajuster ne fonctionne pas encore
                     if user.displayNameVisibility != .private {
                         Text(user.displayName).font(.title2).fontWeight(.bold)
                     }
@@ -600,28 +616,36 @@ struct ProfileHeaderView: View {
 
 // MARK: - Quick Stats
 struct QuickStatsView: View {
+  let stats: UserStats?
+
     var body: some View {
         HStack(spacing: 20) {
             StatItemView(
                 icon: "music.note.list",
-                value: "12",
+                value: String(stats?.playlistsCount ?? 0),
                 label: "Playlists"
             )
             
             StatItemView(
                 icon: "calendar.badge.checkmark",
-                value: "5",
+                value: String(stats?.eventsCount ?? 0),
                 label: "Events"
             )
             
             StatItemView(
                 icon: "person.2.fill",
-                value: "24",
+                value: String(stats?.friendsCount ?? 0),
                 label: "Friends"
             )
         }
         .padding(.horizontal, 20)
     }
+}
+
+struct UserStats {
+    let playlistsCount: Int
+    let eventsCount: Int
+    let friendsCount: Int
 }
 
 struct StatItemView: View {
@@ -705,6 +729,12 @@ struct EditProfileView: View {
     
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    
+    // Social account linking states
+    @State private var isLinkingGoogle = false
+    @State private var isLinkingFacebook = false
 
     private func updateProfile() async {
         isSaving = true
@@ -730,32 +760,80 @@ struct EditProfileView: View {
 
     var body: some View {
         NavigationView {
-            VStack {
-                Text("Edit Profile")
-                    .font(.title)
-                // Form fields
-                CustomTextField(
-                    text: $displayName,
-                    title: "display_name".localized,
-                    placeholder: "Enter display name",
-                    icon: "person"
-                )
-                CustomTextField(
-                    text: $bio,
-                    title: "bio".localized,
-                    placeholder: "Tell us about yourself",
-                    icon: "text.alignleft"
-                )
-                CustomTextField(
-                    text: $location,
-                    title: "location".localized,
-                    placeholder: "Your location",
-                    icon: "location"
-                )
-                if let error = errorMessage {
-                    Text(error).foregroundColor(.red)
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Edit Profile")
+                        .font(.title)
+                        .padding(.top)
+                    
+                    // Profile Information Section
+                    VStack(spacing: 16) {
+                        CustomTextField(
+                            text: $displayName,
+                            title: "display_name".localized,
+                            placeholder: "Enter display name",
+                            icon: "person"
+                        )
+                        CustomTextField(
+                            text: $bio,
+                            title: "bio".localized,
+                            placeholder: "Tell us about yourself",
+                            icon: "text.alignleft"
+                        )
+                        CustomTextField(
+                            text: $location,
+                            title: "location".localized,
+                            placeholder: "Your location",
+                            icon: "location"
+                        )
+                    }
+                    
+                    // Social Account Linking Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Link Social Accounts")
+                            .font(.headline)
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            // Google Account Linking
+                            SocialAccountLinkRow(
+                                provider: "Google",
+                                icon: "globe",
+                                isLinked: authManager.currentUser?.googleId != nil,
+                                isLinking: isLinkingGoogle,
+                                onLink: {
+                                    Task { await linkGoogleAccount() }
+                                },
+                                onUnlink: {
+                                    Task { await unlinkGoogleAccount() }
+                                }
+                            )
+                            
+                            // Facebook Account Linking
+                            SocialAccountLinkRow(
+                                provider: "Facebook",
+                                icon: "person.2.circle",
+                                isLinked: authManager.currentUser?.facebookId != nil,
+                                isLinking: isLinkingFacebook,
+                                onLink: {
+                                    Task { await linkFacebookAccount() }
+                                },
+                                onUnlink: {
+                                    Task { await unlinkFacebookAccount() }
+                                }
+                            )
+                        }
+                        .padding(.horizontal)
+                    }
+                    
+                    if let error = errorMessage {
+                        Text(error)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
+                    }
+                    
+                    Spacer()
                 }
-                Spacer()
             }
             .padding()
             .navigationTitle("edit_profile".localized)
@@ -779,6 +857,76 @@ struct EditProfileView: View {
             displayName = authManager.currentUser?.displayName ?? ""
             bio = authManager.currentUser?.bio ?? ""
             location = authManager.currentUser?.location ?? ""
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+    
+    // MARK: - Social Account Linking Methods
+    private func linkGoogleAccount() async {
+        isLinkingGoogle = true
+        errorMessage = nil
+        
+        do {
+            // Use existing Google sign-in logic but for linking
+            try await authManager.linkGoogleAccount()
+            await MainActor.run {
+                toastMessage = "Google account linked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to link Google account: \(error.localizedDescription)"
+            }
+        }
+        
+        isLinkingGoogle = false
+    }
+    
+    private func unlinkGoogleAccount() async {
+        do {
+            try await authManager.unlinkGoogleAccount()
+            await MainActor.run {
+                toastMessage = "Google account unlinked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to unlink Google account: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    private func linkFacebookAccount() async {
+        isLinkingFacebook = true
+        errorMessage = nil
+        
+        do {
+            // Use existing Facebook sign-in logic but for linking
+            try await authManager.linkFacebookAccount()
+            await MainActor.run {
+                toastMessage = "Facebook account linked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to link Facebook account: \(error.localizedDescription)"
+            }
+        }
+        
+        isLinkingFacebook = false
+    }
+    
+    private func unlinkFacebookAccount() async {
+        do {
+            try await authManager.unlinkFacebookAccount()
+            await MainActor.run {
+                toastMessage = "Facebook account unlinked successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to unlink Facebook account: \(error.localizedDescription)"
+            }
         }
     }
 }
@@ -909,7 +1057,137 @@ struct NotificationSettingsView: View {
     }
 }
 
-// MARK: - Privacy Settings View (Placeholder)
+// MARK: - Privacy Settings View
+struct PrivacySettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authManager: AuthenticationManager
+    
+    @State private var displayNamePrivacy: PrivacyLevel = .public
+    @State private var bioPrivacy: PrivacyLevel = .friends
+    @State private var musicPreferencePrivacy: PrivacyLevel = .friends
+    @State private var locationPrivacy: PrivacyLevel = .private
+    @State private var birthDatePrivacy: PrivacyLevel = .friends
+    
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showToast = false
+    @State private var toastMessage = ""
+    @State private var hasChanges = false
+
+    var body: some View {
+        List {
+           /*  Section("Profile Visibility") {
+                NavigationLink("Display Name") {
+                    Text("Display Name Privacy Settings")
+                }
+                
+                NavigationLink("Bio") {
+                    Text("Bio Privacy Settings")
+                }
+                
+                NavigationLink("Location") {
+                    Text("Location Privacy Settings")
+                }
+            } */
+            Section("Profile Visibility") {
+                PrivacyToggleRow(
+                    title: "Display Name",
+                    selection: $displayNamePrivacy
+                )
+                .onChange(of: displayNamePrivacy) { _ in hasChanges = true }
+                
+                PrivacyToggleRow(
+                    title: "Bio",
+                    selection: $bioPrivacy
+                )
+                .onChange(of: bioPrivacy) { _ in hasChanges = true }
+                
+                PrivacyToggleRow(
+                    title: "Birth Date",
+                    selection: $birthDatePrivacy
+                )
+                .onChange(of: birthDatePrivacy) { _ in hasChanges = true }
+                
+                PrivacyToggleRow(
+                    title: "Location",
+                    selection: $locationPrivacy
+                )
+                .onChange(of: locationPrivacy) { _ in hasChanges = true }
+                
+                PrivacyToggleRow(
+                    title: "Music Preferences",
+                    selection: $musicPreferencePrivacy
+                )
+                .onChange(of: musicPreferencePrivacy) { _ in hasChanges = true }
+            }
+            
+            if let error = errorMessage {
+                Section {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+            }
+        }
+        .navigationTitle("privacy_settings".localized)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Save") {
+                    Task { await savePrivacySettings() }
+                }
+                .disabled(!hasChanges || isSaving)
+                .foregroundColor(.musicPrimary)
+            }
+        }
+        .onAppear {
+            loadCurrentPrivacySettings()
+        }
+        .toast(message: toastMessage, isShowing: $showToast, duration: 2.0)
+    }
+    
+    private func loadCurrentPrivacySettings() {
+        guard let user = authManager.currentUser else { return }
+        
+        // Convert VisibilityLevel to PrivacyLevel
+        displayNamePrivacy = PrivacyLevel(rawValue: user.displayNameVisibility?.rawValue ?? "public") ?? .public
+        bioPrivacy = PrivacyLevel(rawValue: user.bioVisibility?.rawValue ?? "friends") ?? .friends
+        birthDatePrivacy = PrivacyLevel(rawValue: user.birthDateVisibility?.rawValue ?? "friends") ?? .friends
+        locationPrivacy = PrivacyLevel(rawValue: user.locationVisibility?.rawValue ?? "friends") ?? .friends
+        musicPreferencePrivacy = PrivacyLevel(rawValue: user.musicPreferenceVisibility?.rawValue ?? "friends") ?? .friends
+    }
+    
+    private func savePrivacySettings() async {
+        isSaving = true
+        errorMessage = nil
+        
+        let privacySettings: [String: Any] = [
+            "displayNameVisibility": displayNamePrivacy.rawValue,
+            "bioVisibility": bioPrivacy.rawValue,
+            "birthDateVisibility": birthDatePrivacy.rawValue,
+            "locationVisibility": locationPrivacy.rawValue,
+            "musicPreferenceVisibility": musicPreferencePrivacy.rawValue
+        ]
+        
+        do {
+            let updatedUser = try await APIService.shared.updatePrivacySettings(privacySettings)
+            await MainActor.run {
+                authManager.currentUser = updatedUser
+                hasChanges = false
+                toastMessage = "Privacy settings updated successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+            }
+        }
+        
+        isSaving = false
+    }
+}
+
+/* Relicat avec NavigationLink vers autre page
 struct PrivacySettingsView: View {
     var body: some View {
         List {
@@ -931,7 +1209,43 @@ struct PrivacySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 }
+ */
 
+// MARK: - Toggle Privacy Setting Row
+enum PrivacyLevel: String, CaseIterable, Identifiable {
+    case `public` = "public"
+    case friends = "friends"
+    case `private` = "private"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .public: return "Public"
+        case .friends: return "Friends Only"
+        case .private: return "Private"
+        }
+    }
+}
+
+struct PrivacyToggleRow: View {
+    let title: String
+    @Binding var selection: PrivacyLevel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            Picker("", selection: $selection) {
+                ForEach(PrivacyLevel.allCases) { level in
+                    Text(level.displayName).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(.vertical, 4)
+    }
+}
 // MARK: - Toggle Setting Row
 struct ToggleSettingRow: View {
     let title: String
@@ -944,6 +1258,59 @@ struct ToggleSettingRow: View {
             Toggle("", isOn: $isOn)
                 .labelsHidden()
         }
+    }
+}
+
+// MARK: - Social Account Link Row
+struct SocialAccountLinkRow: View {
+    let provider: String
+    let icon: String
+    let isLinked: Bool
+    let isLinking: Bool
+    let onLink: () -> Void
+    let onUnlink: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundColor(isLinked ? .green : .gray)
+                .frame(width: 30)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(provider)
+                    .font(.headline)
+                    .foregroundColor(.textPrimary)
+                
+                Text(isLinked ? "Account linked" : "Not linked")
+                    .font(.caption)
+                    .foregroundColor(isLinked ? .green : .textSecondary)
+            }
+            
+            Spacer()
+            
+            if isLinking {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else {
+                Button(isLinked ? "Unlink" : "Link") {
+                    if isLinked {
+                        onUnlink()
+                    } else {
+                        onLink()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .foregroundColor(isLinked ? .red : .musicPrimary)
+            }
+        }
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 

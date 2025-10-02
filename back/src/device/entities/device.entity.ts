@@ -33,6 +33,9 @@ export class Device {
   @Column()
   name: string;
 
+  @Column({ nullable: true })
+  identifier: string;
+
   @Column({
     type: 'enum',
     enum: DeviceType,
@@ -43,7 +46,7 @@ export class Device {
   @Column({
     type: 'enum',
     enum: DeviceStatus,
-    default: DeviceStatus.OFFLINE,
+    default: DeviceStatus.ONLINE,
   })
   status: DeviceStatus;
 
@@ -64,9 +67,6 @@ export class Device {
   // Control delegation
   @Column({ name: 'can_be_controlled', default: false })
   canBeControlled: boolean;
-
-  @Column({ name: 'delegated_to_id', nullable: true })
-  delegatedToId: string | null;
 
   @Column({ name: 'delegation_expires_at', type: 'timestamp', nullable: true })
   delegationExpiresAt: Date | null;
@@ -96,5 +96,8 @@ export class Device {
 
   @ManyToOne(() => User, (user) => user.delegatedDevices, { nullable: true }) // ok
   @JoinColumn({ name: 'delegated_to_id' })
-  delegatedTo: User;
+  delegatedTo: User | null;
+
+  @Column({ name: 'delegated_to_id', nullable: true })
+  delegatedToId: string | null;
 }

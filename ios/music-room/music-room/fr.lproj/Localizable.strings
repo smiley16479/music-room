@@ -26,6 +26,7 @@
 
 // Home Screen
 "discover_events" = "Découvrir les événements";
+"discover_playlists" = "Découvrir les playlists";
 "your_playlists" = "Vos playlists";
 "recent_activity" = "Activité récente";
 "music_preferences" = "Préférences musicales";

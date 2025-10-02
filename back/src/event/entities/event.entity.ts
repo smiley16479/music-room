@@ -71,13 +71,19 @@ export class Event {
   status: EventStatus;
 
   // Location data for location-based voting
-  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true })
+  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true, transformer: {
+    to: (value: number) => value,
+    from: (value: string) => parseFloat(value),
+  }})
   latitude: number;
 
-  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true })
+  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true, transformer: {
+    to: (value: number) => value,
+    from: (value: string) => parseFloat(value),
+  }})
   longitude: number;
 
-  @Column({ name: 'location_radius', type: 'int', nullable: true, comment: 'Radius in meters' })
+  @Column({ name: 'location_radius', type: 'int', nullable: true, comment: 'Radius in meters', default: 1000 })
   locationRadius: number;
 
   @Column({ name: 'location_name', nullable: true })
@@ -95,13 +101,6 @@ export class Event {
 
   @Column({ name: 'event_end_date', type: 'timestamp', nullable: true })
   eventEndDate: Date;
-
-  // Current playing track
-  @Column({ name: 'current_track_id', nullable: true })
-  currentTrackId: string;
-
-  @Column({ name: 'current_track_started_at', type: 'timestamp', nullable: true })
-  currentTrackStartedAt: Date;
 
   // Playback state tracking for accurate synchronization
   @Column({ name: 'is_playing', type: 'boolean', default: false })
@@ -130,9 +129,16 @@ export class Event {
   @Column({ name: 'creator_id' })
   creatorId: string;
 
+  // Current playing track
   @ManyToOne(() => Track, { nullable: true })
   @JoinColumn({ name: 'current_track_id' })
   currentTrack: Track;
+
+  @Column({ name: 'current_track_id', nullable: true })
+  currentTrackId: string;
+
+  @Column({ name: 'current_track_started_at', type: 'timestamp', nullable: true })
+  currentTrackStartedAt: Date;
 
   @OneToMany(() => Vote, (vote) => vote.event)
   votes: Vote[];

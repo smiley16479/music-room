@@ -54,7 +54,52 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
+    // MARK: - Social Account Linking
+    func linkGoogleAccount(code: String, redirectUri: String) async throws -> User {
+        let endpoint = "/auth/google/mobile-token"
+        let body: [String: Any] = [
+            "code": code,
+            "redirectUri": redirectUri,
+            "platform": "ios",
+            "linkingMode": "link"
+        ]
+        
+        print("🔗 Linking Google account with body: \(body)")
+        
+        let response: User = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+        
+        print("🔗 Link response user googleId: \(response.googleId ?? "nil")")
+        
+        return response
+    }
+    
+    func linkFacebookAccount(token: String) async throws -> User {
+        let endpoint = "/auth/facebook/mobile-login"
+        let body: [String: Any] = [
+            "access_token": token,
+            "linkingMode": "link"
+        ]
+        let response: User = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+        
+        return response
+    }
+    
+    func unlinkGoogleAccount() async throws {
+        let endpoint = "/auth/unlink-google"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
+    func unlinkFacebookAccount() async throws {
+        let endpoint = "/auth/unlink-facebook"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
+    }
+    
     // MARK: - User Endpoints
+    func getUserProfile() async throws -> User {
+        let endpoint = "/users/me"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
     func updateProfile(_ updateData: [String: Any]) async throws -> User {
         let endpoint = "/users/me"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
@@ -63,6 +108,11 @@ class APIService {
     func updateMusicPreferences(_ updateData: [String: Any]) async throws -> User {
         let endpoint = "/users/me/preferences"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
+    }
+
+    func updatePrivacySettings(_ privacySettings: [String: Any]) async throws -> User {
+        let endpoint = "/users/me/privacy"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: privacySettings)
     }
 
     func searchUsers(query: String) async throws -> [User] {
@@ -140,6 +190,11 @@ class APIService {
         let endpoint = "/events/my-event"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
+    
+    func getEvent(eventId: String) async throws -> Event {
+        let endpoint = "/events/\(eventId)"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
 
     /// Promote a user to admin for an event
     func promoteUserToAdmin(eventId: String, userId: String) async throws {
@@ -167,9 +222,22 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: updateData)
     }
     
+    func inviteUserToEvent(eventId: String, userId: String, message: String? = nil) async throws {
+        let endpoint = "/invitations"
+        let body: [String: Any] = [
+            "inviteeId": userId,
+            "type": "event",
+            "eventId": eventId,
+            "message": message as Any
+        ]
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
+    }
+    
+    // Legacy method for backward compatibility
     func inviteUsersToEvent(eventId: String, _ usersEmails: [String]) async throws {
+        // This method is deprecated - use inviteUserToEvent with userId instead
         let endpoint = "/events/\(eventId)/invite"
-        let body = ["emails": usersEmails] // Encapsulation dans un dictionnaire JSON
+        let body = ["emails": usersEmails]
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: body)
     }
     
@@ -194,11 +262,22 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: playlistData)
     }
 
+    func updatePlaylist(_ playlistId: String, _ playlistData: [String: Any]) async throws -> Playlist {
+        let endpoint = "/playlists/\(playlistId)"
+        print("playlistData", playlistData)
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: playlistData)
+    }
+
     func addMusicToPlaylist(_ playlistId: String, _ playlistData: [String: Any]) async throws -> PlaylistTrack {
         let endpoint = "/playlists/\(playlistId)/tracks"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: playlistData)
     }
     
+    func deletePlaylist(_ playlistId: String) async throws {
+        let endpoint = "/playlists/\(playlistId)"
+        let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
+    }
+
     func removeMusicFromPlaylist(_ playlistId: String, trackId: String) async throws {
         let endpoint = "/playlists/\(playlistId)/tracks/\(trackId)"
         let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "DELETE")
@@ -255,12 +334,12 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
-    func updateNowPlaying(eventId: String, trackId: String?) async throws -> NowPlayingResponse {
-        let endpoint = "/events/\(eventId)/now-playing"
+    func updateNowPlaying(eventId: String, trackId: String) async throws {
+        let endpoint = "/events/\(eventId)/now-playing/\(trackId)"
         let body: [String: Any] = [
-            "trackId": trackId ?? NSNull()
+            "trackId": trackId
         ]
-        return try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
+        /* return */let _: EmptyResponse = try await performAuthenticatedRequest(endpoint: endpoint, method: "PATCH", body: body)
     }
     
     func skipTrack(eventId: String) async throws -> NowPlayingResponse {
@@ -319,9 +398,24 @@ class APIService {
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
     }
     
+    func getDelegatedDevices() async throws -> [Device] {
+        let endpoint = "/devices/delegated-to-me"
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "GET")
+    }
+    
     func createDevice(_ deviceData: [String: Any]) async throws -> Device {
         let endpoint = "/devices"
         return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: deviceData)
+    }
+
+    func delegateDevice(_ deviceId: String, _ deviceData: [String: Any]) async throws -> Device {
+        let endpoint = "/devices/\(deviceId)/delegate" // pas le bon endpoint
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST", body: deviceData)
+    }
+
+    func revokeDeviceDelegation(_ deviceId: String) async throws -> Device {
+        let endpoint = "/devices/\(deviceId)/revoke" // pas le bon endpoint
+        return try await performAuthenticatedRequest(endpoint: endpoint, method: "POST")
     }
     
     // MARK: - Private Helper Methods
@@ -395,6 +489,14 @@ class APIService {
                 case 400:
                     if let apiError = try? JSONDecoder().decode(APIResponse<T>.self, from: data) {
                         throw APIError.serverMessage(apiError.message ?? "")
+                    } else if
+                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                        let message = json["message"] {
+                        if let arr = message as? [String] {
+                            throw APIError.serverMessage(arr.joined(separator: "\n"))
+                        } else if let str = message as? String {
+                            throw APIError.serverMessage(str)
+                        }
                     }
                     throw APIError.unknownError(httpResponse.statusCode)
                 case 401:

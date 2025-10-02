@@ -58,7 +58,10 @@ export class Vote {
   @Column({ name: 'track_id' })
   trackId: string;
 
-  @ManyToOne(() => PlaylistTrack, playlistTrack => playlistTrack.votes, /* { onDelete: 'CASCADE', nullable: true } */)
+  @ManyToOne(() => PlaylistTrack, playlistTrack => playlistTrack.votes, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'playlist_track_id' })
   playlistTrack: PlaylistTrack;
+
+  @Column({ name: 'playlist_track_id' })
+  playlistTrackId: string;
 }

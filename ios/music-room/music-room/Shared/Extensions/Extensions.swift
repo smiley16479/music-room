@@ -41,10 +41,20 @@ extension Date {
         formatter.timeStyle = .none
         return formatter.string(from: self)
     }
+
+    func formatParisDate() -> String {
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateFormat = "dd/MM/yyyy HH:mm"
+        displayFormatter.timeZone = TimeZone(identifier: "Europe/Paris")
+        print("Formatted date: \(displayFormatter.string(from: self))")
+        return displayFormatter.string(from: self)
+    }
 }
 
 // MARK: - String Extensions
-extension String {
+extension String: Identifiable {
+    public var id: String { self }
+
     var isValidEmail: Bool {
         let emailRegEx = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
         let emailPred = NSPredicate(format:"SELF MATCHES %@", emailRegEx)
@@ -64,6 +74,35 @@ extension String {
     
     func capitalizingFirstLetter() -> String {
         return prefix(1).capitalized + dropFirst()
+    }
+
+    func formatParisDate() -> String {
+        // Essayer avec ISO8601DateFormatter (plus robuste)
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        
+        var date = iso8601Formatter.date(from: self)
+        
+        // Si ça échoue, essayer sans les millisecondes
+        if date == nil {
+            iso8601Formatter.formatOptions = [.withInternetDateTime]
+            date = iso8601Formatter.date(from: self)
+        }
+        
+        guard let parsedDate = date else {
+            print("❌ Failed to parse date: \(self)")
+            return self
+        }
+        
+        // Formatage pour l'affichage en heure de Paris
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateFormat = "dd/MM/yyyy HH:mm"
+        displayFormatter.timeZone = TimeZone(identifier: "Europe/Paris") // Forcer UTC pour ne pas reconvertir ou TimeZone(identifier: "UTC")
+         
+        
+        let result = displayFormatter.string(from: parsedDate)
+        print("✅ Converted: \(self) -> \(result)")
+        return result
     }
 }
 

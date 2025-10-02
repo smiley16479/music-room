@@ -5,10 +5,10 @@
 //  Created by adrien on 18/08/2025.
 //
 
-//PAS UTILISÉ POUR LE MOMENT: DESTINÉ À EVENT NEAR_BY
 import CoreLocation
 
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    static let shared = LocationManager()
     private let manager = CLLocationManager()
     @Published var userLocation: CLLocation?
 
@@ -28,21 +28,22 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         print("Location error: \(error)")
     }
     
-    func getLongLatFromAddressString(place: String) {
+    func getLongLatFromAddressString(place: String, completion: @escaping (CLLocationCoordinate2D?) -> Void) {
         let geocoder = CLGeocoder()
         geocoder.geocodeAddressString(place) { placemarks, error in
-            guard let location = placemarks?.first?.location else { return }
-            print("Latitude: \(location.coordinate.latitude), Longitude: \(location.coordinate.longitude)")
+            if let location = placemarks?.first?.location {
+                completion(location.coordinate)
+            } else {
+                completion(nil)
+            }
         }
     }
     
-    func distBetweenPoints() {
-        let userLocation = CLLocation(latitude: 48.8566, longitude: 2.3522) // Paris
-        let eventLocation = CLLocation(latitude: 48.8606, longitude: 2.3376) // Musée du Louvre
-
+    /// Retourne true si la distance entre deux points est inférieure ou égale au rayon donné (en mètres)
+    func isWithinRadius(userCoord: CLLocationCoordinate2D, eventCoord: CLLocationCoordinate2D, radius: Double) -> Bool {
+        let userLocation = CLLocation(latitude: userCoord.latitude, longitude: userCoord.longitude)
+        let eventLocation = CLLocation(latitude: eventCoord.latitude, longitude: eventCoord.longitude)
         let distanceMeters = userLocation.distance(from: eventLocation)
-        if distanceMeters <= 1000 {
-            print("L'utilisateur est dans le rayon 1km de l'événement")
-        }
+        return distanceMeters <= radius
     }
 }

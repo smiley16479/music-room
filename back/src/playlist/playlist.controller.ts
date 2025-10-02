@@ -189,6 +189,9 @@ export class PlaylistController {
   })
   async getPlaylistTracks(@Param('id') id: string, @CurrentUser() user?: User) {
     const tracks = await this.playlistService.getPlaylistTracks(id, user?.id);
+
+    console.log("tracks", tracks);
+
     return {
       success: true,
       data: tracks,
@@ -234,6 +237,9 @@ export class PlaylistController {
     @Body() updatePlaylistDto: UpdatePlaylistDto,
     @CurrentUser() user: User,
   ) {
+
+    console.log("updatePlaylistDto", updatePlaylistDto);
+
     const playlist = await this.playlistService.update(id, updatePlaylistDto, user.id);
     return {
       success: true,

@@ -1,11 +1,24 @@
+//
+//  HomeView 2.swift
+//  music-room
+//
+//  Created by adrien on 12/08/2025.
+//
+
+
 import SwiftUI
 
+// MARK: HomeView
 struct HomeView: View {
     @EnvironmentObject private var authManager: AuthenticationManager
     @EnvironmentObject private var tabManager: MainTabManager
     @State private var recentEvents: [Event] = []
     @State private var recentPlaylists: [Playlist] = []
     @State private var invitations: [Invitation] = []
+    @State private var allEvents: [Event] = []
+    // Changement important : stocker l'index au lieu de l'objet
+    @State private var selectedInvitationIndex: Int? = nil
+    
     @State private var isLoading = false
     @State private var showCreateEvent = false
     @State private var showCreatePlaylist = false
@@ -15,111 +28,117 @@ struct HomeView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Welcome Header
-                    WelcomeHeader()
+                    WelcomeHeader2()
                     
-                    // Notifications (Invitations)
                     if !invitations.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Notifications")
                                 .font(.headline)
                                 .foregroundColor(.musicPrimary)
                                 .padding(.horizontal, 20)
-                            ForEach(invitations.prefix(5)) { invitation in
-                                InvitationNotificationView(
-                                    invitation: invitation,
-                                    onRespond: { status in
-                                        Task {
-                                            await respondToInvitation(invitation: invitation, status: status)
-                                        }
-                                    }
-                                )
-                                .padding(.horizontal, 20)
+                            
+                            // Utiliser indices pour éviter les problèmes de référence
+                            ForEach(Array(invitations.prefix(5).enumerated()), id: \.element.id) { index, invitation in
+                                Button {
+                                    print("🔵 Tapped invitation at index \(index)")
+                                    selectedInvitationIndex = index
+                                } label: {
+                                    InvitationNotificationView2(invitation: invitation)
+                                        .padding(.horizontal, 20)
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                     }
-
-
-                    // Quick Actions
-                    QuickActionsView(
-                        onCreateEvent: { showCreateEvent = true; tabManager.selectedTab = 1 },
-                        onCreatePlaylist: { showCreatePlaylist = true; tabManager.selectedTab = 2 },
-                        onAddDevice: { showAddDevice = true; tabManager.selectedTab = 3 }
+                    
+                    QuickActionsView2(
+                        onCreateEvent: {
+                            showCreateEvent = true
+                            tabManager.selectedTab = 1
+                        },
+                        onCreatePlaylist: {
+                            showCreatePlaylist = true
+                            tabManager.selectedTab = 2
+                        },
+                        onAddDevice: {
+                            showAddDevice = true
+                            tabManager.selectedTab = 3
+                        }
                     )
                     
-                    // Recent Events
-                    if !recentEvents.isEmpty {
-                        SectionHeaderView(
-                            title: "recent_activity".localized,
-                            actionTitle: "See All",
-                            action: { /* Navigate to events */ }
-                        )
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(recentEvents) { event in
-                                    EventCardView(event: event)
-                                        .frame(width: 280)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                    
-                    // Your Playlists
-                    if !recentPlaylists.isEmpty {
-                        SectionHeaderView(
-                            title: "your_playlists".localized,
-                            actionTitle: "See All",
-                            action: { /* Navigate to playlists */ }
-                        )
-                        
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 16) {
-                                ForEach(recentPlaylists) { playlist in
-                                    PlaylistCardView(playlist: playlist)
-                                        .frame(width: 200)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-                    
-                    // Discover Section
-                    DiscoverSection()
-                    
+                    // Reste du contenu...
+                    DiscoverPlaylistsSection()
+                    DiscoverEventsSection(events: allEvents)
                     Spacer()
                 }
             }
             .navigationTitle("home".localized)
             .navigationBarTitleDisplayMode(.large)
             .refreshable {
-                await loadData()
+                await loadInvitations()
+            }
+        }
+        .onChange(of: authManager.isAuthenticated) { old, isAuth in
+            if isAuth {
+                Task { await loadInvitations() }
             }
         }
         .task {
-            await loadData()
+            do {
+                await loadInvitations()
+                allEvents = try await APIService.shared.getEvents()
+            } catch {
+                print("Erreur chargement events:", error)
+            }
+        }
+        // Sheet basée sur l'index
+        .sheet(isPresented: Binding(
+            get: { selectedInvitationIndex != nil },
+            set: { if !$0 { selectedInvitationIndex = nil } }
+        )) {
+            if let index = selectedInvitationIndex,
+               index < invitations.count {
+                let invitation = invitations[index]
+                
+                InvitationDetailView2(
+                    invitation: invitation,
+                    onRespond: { status in
+                        Task {
+                            await respondToInvitation(invitation: invitation, status: status)
+                            selectedInvitationIndex = nil
+                        }
+                    },
+                    onClose: {
+                        selectedInvitationIndex = nil
+                    }
+                )
+            } else {
+                Text("Erreur: Invitation non trouvée")
+                    .onAppear {
+                        print("❌ Index invalide ou invitations vides")
+                    }
+            }
         }
     }
     
-    private func loadData() async {
+    private func loadInvitations() async {
         isLoading = true
-        async let invitationsTask = await loadInvitations()
-        // Simulate loading data
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        _ = await invitationsTask
+        do {
+            print("🔄 Chargement des invitations...")
+            let result = try await APIService.shared.getInvitations()
+            
+            print("✅ \(result.count) invitation(s) chargée(s)")
+            
+            await MainActor.run {
+                self.invitations = result
+                print("📝 Invitations mises à jour dans l'UI")
+            }
+        } catch {
+            print("❌ Erreur: \(error)")
+        }
         isLoading = false
     }
-
-    private func loadInvitations() async {
-        do {
-            invitations = try await APIService.shared.getInvitations()
-        } catch {
-            print("Failed to load invitations: \(error)")
-        }
-    }
     
-    // Gérer la réponse à une invitation
     private func respondToInvitation(invitation: Invitation, status: InvitationStatus) async {
         do {
             if status == .accepted {
@@ -127,19 +146,16 @@ struct HomeView: View {
             } else if status == .declined {
                 _ = try await APIService.shared.declineInvitation(invitationId: invitation.id)
             }
-            // Mettre à jour la liste locale
             await loadInvitations()
         } catch {
-            print("Erreur lors de la réponse à l'invitation: \(error)")
+            print("❌ Erreur: \(error)")
         }
     }
+}
 
 // MARK: - Invitation Notification View
-struct InvitationNotificationView: View {
+struct InvitationNotificationView2: View {
     let invitation: Invitation
-    var onRespond: ((InvitationStatus) -> Void)? = nil
-    @State private var isProcessing = false
-
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: iconName(for: invitation.type))
@@ -158,43 +174,14 @@ struct InvitationNotificationView: View {
                 }
             }
             Spacer()
-            if invitation.status == .pending {
-                HStack(spacing: 8) {
-                    Button {
-                        isProcessing = true
-                        onRespond?(.accepted)
-                    } label: {
-                        Text("Accepter")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.green)
-                            .cornerRadius(8)
-                    }
-                    .disabled(isProcessing)
-                    .fixedSize()
-                    Button {
-                        isProcessing = true
-                        onRespond?(.declined)
-                    } label: {
-                        Text("Refuser")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.red)
-                            .cornerRadius(8)
-                    }
-                    .disabled(isProcessing)
-                    .fixedSize()
-                }
-            }
+            Image(systemName: "chevron.right")
+                .foregroundColor(.secondary)
         }
         .padding(10)
         .background(Color.cardBackground)
         .cornerRadius(10)
     }
+    
     private func iconName(for type: InvitationType) -> String {
         switch type {
         case .event: return "calendar.badge.plus"
@@ -203,10 +190,131 @@ struct InvitationNotificationView: View {
         }
     }
 }
+
+// MARK: - Invitation Detail View
+struct InvitationDetailView2: View {
+    let invitation: Invitation
+    var onRespond: ((InvitationStatus) -> Void)?
+    var onClose: (() -> Void)?
+    @State private var isProcessing = false
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Profil de l'inviteur
+                if let inviter = invitation.inviter {
+                    VStack(spacing: 8) {
+                        AsyncImage(url: URL(string: inviter.avatarUrl ?? "")) { image in
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            Image(systemName: "person.circle.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.musicSecondary)
+                        }
+                        .frame(width: 60, height: 60)
+                        .clipShape(Circle())
+                        Text(inviter.displayName)
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        if let email = inviter.email {
+                            Text(email)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                // Type et infos liées
+                VStack(spacing: 8) {
+                    HStack {
+                        Image(systemName: iconName(for: invitation.type))
+                            .foregroundColor(.musicPrimary)
+                        Text(invitation.type.localizedString)
+                            .font(.headline)
+                    }
+                    if let msg = invitation.message, !msg.isEmpty {
+                        Text(msg)
+                            .font(.body)
+                            .foregroundColor(.textSecondary)
+                    }
+                    if let event = invitation.event {
+                        Divider()
+                        Text("Événement: \(event.name)")
+                            .font(.subheadline)
+                        if let desc = event.description {
+                            Text(desc)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    if let playlist = invitation.playlist {
+                        Divider()
+                        Text("Playlist: \(playlist.name)")
+                            .font(.subheadline)
+                        if let desc = playlist.description {
+                            Text(desc)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if invitation.status == .pending {
+                    HStack(spacing: 16) {
+                        Button {
+                            isProcessing = true
+                            onRespond?(.accepted)
+                        } label: {
+                            Text("Accepter")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                                .background(Color.green)
+                                .cornerRadius(10)
+                        }
+                        .disabled(isProcessing)
+                        Button {
+                            isProcessing = true
+                            onRespond?(.declined)
+                        } label: {
+                            Text("Refuser")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 10)
+                                .background(Color.red)
+                                .cornerRadius(10)
+                        }
+                        .disabled(isProcessing)
+                    }
+                }
+            }
+            .padding()
+            .navigationTitle("Détail de la notification")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { onClose?() }
+                }
+            }
+        }
+    }
+
+    private func iconName(for type: InvitationType) -> String {
+        switch type {
+        case .event: return "calendar.badge.plus"
+        case .playlist: return "music.note.list"
+        case .friend: return "person.crop.circle.badge.plus"
+        }
+    }
 }
 
+
 // MARK: - Welcome Header
-struct WelcomeHeader: View {
+struct WelcomeHeader2: View {
     @EnvironmentObject private var authManager: AuthenticationManager
     
     var body: some View {
@@ -262,7 +370,7 @@ struct WelcomeHeader: View {
 }
 
 // MARK: - Quick Actions
-struct QuickActionsView: View {
+struct QuickActionsView2: View {
     var onCreateEvent: () -> Void
     var onCreatePlaylist: () -> Void
     var onAddDevice: () -> Void
@@ -274,19 +382,19 @@ struct QuickActionsView: View {
                 .padding(.horizontal, 20)
             
             HStack(spacing: 16) {
-                QuickActionButton(
+                QuickActionButton2(
                     title: "create_event".localized,
                     icon: "calendar.badge.plus",
                     color: .musicPrimary,
                     action: onCreateEvent
                 )
-                QuickActionButton(
+                QuickActionButton2(
                     title: "create_playlist".localized,
                     icon: "music.note.list",
                     color: .musicSecondary,
                     action: onCreatePlaylist
                 )
-                QuickActionButton(
+                QuickActionButton2(
                     title: "add_device".localized,
                     icon: "speaker.wave.3",
                     color: .musicBackground,
@@ -298,7 +406,7 @@ struct QuickActionsView: View {
     }
 }
 
-struct QuickActionButton: View {
+struct QuickActionButton2: View {
     let title: String
     let icon: String
     let color: Color
@@ -318,7 +426,7 @@ struct QuickActionButton: View {
                     .font(.caption)
                     .foregroundColor(.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity)
@@ -326,7 +434,7 @@ struct QuickActionButton: View {
 }
 
 // MARK: - Section Header
-struct SectionHeaderView: View {
+struct SectionHeaderView2: View {
     let title: String
     let actionTitle: String
     let action: () -> Void
@@ -350,7 +458,7 @@ struct SectionHeaderView: View {
 }
 
 // MARK: - Event Card View
-struct EventCardView: View {
+struct EventCardView2: View {
     let event: Event
     
     var body: some View {
@@ -404,9 +512,9 @@ struct EventCardView: View {
 }
 
 // MARK: - Playlist Card View
-struct PlaylistCardView: View {
+struct PlaylistCardView2: View {
     let playlist: Playlist
-    
+
     var body: some View {
         CardView {
             VStack(alignment: .leading, spacing: 8) {
@@ -442,11 +550,13 @@ struct PlaylistCardView: View {
     }
 }
 
-// MARK: - Discover Section
-struct DiscoverSection: View {
+// MARK: - Discover Playlists Section
+struct DiscoverPlaylistsSection: View {
+  @EnvironmentObject private var tabManager: MainTabManager
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("discover_events".localized)
+            Text("discover_playlists".localized)
                 .font(.headline)
                 .foregroundColor(.textPrimary)
                 .padding(.horizontal, 20)
@@ -457,12 +567,12 @@ struct DiscoverSection: View {
                     CardView {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Discover Music Events")
+                                Text("Discover Playlists")
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                     .foregroundColor(.textPrimary)
                                 
-                                Text("Find events near you")
+                                Text("Find playlists for you")
                                     .font(.caption)
                                     .foregroundColor(.textSecondary)
                             }
@@ -474,6 +584,34 @@ struct DiscoverSection: View {
                         }
                     }
                     .padding(.horizontal, 20)
+                    .onTapGesture {
+                        tabManager.selectedTab = 2
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Discover Events Section
+struct DiscoverEventsSection: View {
+    @EnvironmentObject private var tabManager: MainTabManager
+    let events: [Event]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("discover_events".localized)
+                .font(.headline)
+                .foregroundColor(.textPrimary)
+                .padding(.horizontal, 20)
+            
+            LazyVStack(spacing: 12) {
+                ForEach(events) { event in
+                    EventCardView2(event: event)
+                        .padding(.horizontal, 20)
+                        .onTapGesture {
+                            tabManager.selectedTab = 1
+                        }
                 }
             }
         }

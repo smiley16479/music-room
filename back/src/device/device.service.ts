@@ -53,6 +53,7 @@ export interface DeviceConnection {
   socketId: string;
   connectedAt: Date;
   lastActivity: Date;
+  deviceIdentifier?: string;
   userAgent?: string;
 }
 
@@ -141,6 +142,28 @@ export class DeviceService {
   async findById(id: string, userId?: string): Promise<DeviceWithStats> {
     const device = await this.deviceRepository.findOne({
       where: { id },
+      relations: ['owner', 'delegatedTo'],
+    });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
+
+    // Check if user has access to this device
+    const hasAccess = device.ownerId === userId || 
+                     device.delegatedToId === userId ||
+                     !userId; // Public access for some endpoints
+
+    if (userId && !hasAccess) {
+      throw new ForbiddenException('You do not have access to this device');
+    }
+
+    return this.addDeviceStats(device);
+  }
+
+    async findByDeviceIdentifier(identifier: string, userId?: string): Promise<DeviceWithStats> {
+    const device = await this.deviceRepository.findOne({
+      where: { identifier },
       relations: ['owner', 'delegatedTo'],
     });
 
@@ -258,43 +281,56 @@ export class DeviceService {
 
   // Device Connection Management
   async registerConnection(
-    deviceId: string, 
     userId: string, 
     socketId: string, 
+    deviceId?: string,
+    deviceIdentifier?: string,
     userAgent?: string
   ): Promise<void> {
-    const device = await this.findById(deviceId);
+    let device: DeviceWithStats | undefined;
 
-    // Check if user can connect to this device
-    const canConnect = device.ownerId === userId || device.delegatedToId === userId;
-    if (!canConnect) {
-      throw new ForbiddenException('You cannot connect to this device');
+    if (deviceId) {
+      device = await this.findById(deviceId);
+    } else if (deviceIdentifier) {
+      device = await this.findByDeviceIdentifier(deviceIdentifier);
+    } else {
+      throw new BadRequestException('deviceId or deviceIdentifier is required');
     }
 
+    // Check if user can connect to this device
+    // const canConnect = device.ownerId === userId || device.delegatedToId === userId;
+    // if (!canConnect) {
+    //   throw new ForbiddenException('You cannot connect to this device');
+    // }
+
     // Update device status
-    await this.updateDeviceStatus(deviceId, DeviceStatus.ONLINE);
+    await this.updateDeviceStatus(device.id, DeviceStatus.ONLINE);
 
     // Register connection
     const connection: DeviceConnection = {
-      deviceId,
+      deviceId: device.id,
       userId,
       socketId,
       connectedAt: new Date(),
       lastActivity: new Date(),
+      deviceIdentifier,
       userAgent,
     };
 
-    if (!this.activeConnections.has(deviceId)) {
-      this.activeConnections.set(deviceId, []);
+    if (!this.activeConnections.has(device.id)) {
+      this.activeConnections.set(device.id, []);
     }
 
-    this.activeConnections.get(deviceId)!.push(connection);
+    this.activeConnections.get(device.id)!.push(connection);
 
     // Notify about device connection
-    this.deviceGateway.notifyDeviceConnected(deviceId, userId);
+    this.deviceGateway.notifyDeviceConnected(device.id, userId);
   }
 
   async unregisterConnection(socketId: string): Promise<void> {
+
+    this.logActiveConnections();
+
     for (const [deviceId, connections] of this.activeConnections.entries()) {
       const connectionIndex = connections.findIndex(conn => conn.socketId === socketId);
       
@@ -313,6 +349,17 @@ export class DeviceService {
         break;
       }
     }
+  }
+
+  logActiveConnections() {
+    console.log('--- Active Device Connections ---');
+    for (const [deviceId, connections] of this.activeConnections.entries()) {
+      console.log(`Device: ${deviceId}`);
+      connections.forEach((conn, idx) => {
+        console.log(`  [${idx}] userId: ${conn.userId}, socketId: ${conn.socketId}, connectedAt: ${conn.connectedAt.toISOString()}, lastActivity: ${conn.lastActivity.toISOString()}, deviceIdentifier: ${conn.deviceIdentifier}, userAgent: ${conn.userAgent}`);
+      });
+    }
+    console.log('--------------------------------');
   }
 
   async updateLastActivity(socketId: string): Promise<void> {
@@ -386,7 +433,17 @@ export class DeviceService {
 
   async revokeDelegation(deviceId: string, requesterId: string): Promise<DeviceWithStats> {
     const device = await this.findById(deviceId, requesterId);
+    /* const device = await this.deviceRepository.findOne({
+      where: { id: deviceId },
+      relations: ['owner', 'delegatedTo'],
+    });
 
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    } */
+
+    console.log('Revoking delegation for device:', device);
+    
     // Only owner or delegated user can revoke
     const canRevoke = device.ownerId === requesterId || device.delegatedToId === requesterId;
     if (!canRevoke) {
@@ -395,15 +452,18 @@ export class DeviceService {
 
     const previousDelegatedTo = device.delegatedTo;
 
+    // Notify about revocation
+    this.deviceGateway.notifyControlRevoked(device.identifier, previousDelegatedTo, requesterId);
+
     // Clear delegation
+    device.delegatedTo = null;
     device.delegatedToId = null;
     device.delegationExpiresAt = null;
     device.delegationPermissions = null;
 
     const updatedDevice = await this.deviceRepository.save(device);
 
-    // Notify about revocation
-    this.deviceGateway.notifyControlRevoked(deviceId, previousDelegatedTo, requesterId);
+    console.log('Revoking delegation for updatedDevice:', updatedDevice);
 
     return this.addDeviceStats(updatedDevice);
   }
@@ -583,7 +643,7 @@ export class DeviceService {
 
       // Notify about automatic revocation
       this.deviceGateway.notifyControlRevoked(
-        device.id, 
+        device.identifier, 
         previousDelegatedTo, 
         'system' // System-initiated revocation
       );

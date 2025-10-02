@@ -96,6 +96,14 @@ export class User {
   })
   locationVisibility: VisibilityLevel;
 
+  @Column({
+    name: 'music_preference_visibility',
+    type: 'enum',
+    enum: VisibilityLevel,
+    default: VisibilityLevel.FRIENDS,
+  })
+  musicPreferenceVisibility: VisibilityLevel;
+
   // Music Preferences (JSON)
   @Column({ name: 'music_preferences', type: 'json', nullable: true })
   musicPreferences: {
