@@ -4,10 +4,11 @@ import AVFoundation
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
     @StateObject private var deezerService = DeezerService()
-    @State var playlistViewModel: PlaylistViewModel
+    @Bindable var playlistViewModel: PlaylistViewModel
     @State private var searchText = ""
     @State private var showingProposalConfirmation = false
     @State private var selectedTrack: DeezerTrack?
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         NavigationView {
@@ -60,10 +61,14 @@ struct DeezerSearchView: View {
             .alert("Proposer ce morceau ?", isPresented: $showingProposalConfirmation, presenting: selectedTrack) { track in
                 Button("Proposer", role: .none) {
                     playlistViewModel.addProposedTrack(track.asTrack)
+                    dismiss()
                 }
                 Button("Ajouter directement", role: .none) {
-                    Task{
+                    Task {
                         await playlistViewModel.addTrackToPlaylist(track.asTrack)
+                        await MainActor.run {
+                            dismiss()
+                        }
                     }
                 }
                 Button("Annuler", role: .cancel) {}
@@ -166,6 +171,19 @@ struct PlaylistDetailsView: View {
         case carousel
     }
 
+    // Vérifie si l'utilisateur peut utiliser le player (admin d'event ou playlist non-event)
+    var canUsePlayer: Bool {
+        guard let currentUser = authManager.currentUser else { return false }
+        
+        // Si la playlist n'est pas rattachée à un événement, tout le monde peut utiliser le player
+        if playlist.eventId == nil {
+            return true
+        }
+        
+        // Si c'est une playlist d'événement, seuls les admins peuvent utiliser le player
+        return playlist.collaborators?.contains(where: { $0.id == currentUser.id }) == true || playlist.creatorId == currentUser.id
+    }
+    
     // Simule si l'utilisateur est admin sur l'event (à remplacer par ta logique réelle)
     var isAdmin: Bool {
         guard let currentUser = authManager.currentUser else { return false }
@@ -208,8 +226,8 @@ struct PlaylistDetailsView: View {
             }
             .padding()
 
-            // Audio player visible seulement pour les admins
-            if isAdmin {
+            // Audio player visible pour les admins d'événements et pour toutes les playlists non-événements
+            if canUsePlayer {
                AudioPlayerView(viewModel: viewModel)
             }
 
@@ -367,10 +385,7 @@ struct PlaylistDetailsView: View {
 // MARK: Audio Player View
 struct AudioPlayerView: View {
     @State var viewModel: PlaylistViewModel
-    // @State private var audioPlayer: AVPlayer? = nil
-    // @State private var isPlaying: Bool = false
-    // @State private var currentTrackIndex: Int = 0
-    // @State private var volume: Float = 0.5
+    @ObservedObject private var audioManager = AudioManager.shared
 
     var body: some View {
         VStack(spacing: 8) {
@@ -390,7 +405,8 @@ struct AudioPlayerView: View {
                     Button(action: {
                         viewModel.togglePlayPause(for: track)
                     }) {
-                        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        let isCurrentTrackPlaying = audioManager.currentTrack?.id == track.id && audioManager.isPlaying
+                        Image(systemName: isCurrentTrackPlaying ? "pause.circle.fill" : "play.circle.fill")
                             .font(.system(size: 44))
                             .foregroundColor(.blue)
                     }
@@ -418,7 +434,7 @@ struct AudioPlayerView: View {
         }
         .padding()
         .onAppear {
-            viewModel.audioPlayer?.volume = viewModel.volume
+            // viewModel.audioPlayer?.volume = viewModel.volume
             configureAudioSession()
         }
         .onChange(of: viewModel.currentTrackId) { old, newId in

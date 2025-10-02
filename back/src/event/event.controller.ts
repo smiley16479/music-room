@@ -10,12 +10,14 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 
 import { EventService } from './event.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { CreateVoteDto } from './dto/vote.dto';
+import { InviteUsersDto } from './dto/invite-users.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { LocationDto } from '../common/dto/location.dto';
 
@@ -31,6 +33,8 @@ import { log } from 'console';
 @Controller('events')
 @UseGuards(JwtAuthGuard)
 export class EventController {
+    private readonly logger = new Logger(EventController.name);
+  
   constructor(private readonly eventService: EventService) {}
 
   @Post()
@@ -611,29 +615,19 @@ export class EventController {
     description: 'The ID of the event',
     required: true
   })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        emails: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of email addresses to invite',
-          example: ['friend1@example.com', 'friend2@example.com']
-        }
-      },
-      required: ['emails']
-    }
-  })
+  @ApiBody({ type: InviteUsersDto })
   async inviteUsers(
     @Param('id') id: string,
-    @Body() { emails }: { emails: string[] },
+    @Body() inviteUsersDto: InviteUsersDto,
     @CurrentUser() user: User,
   ) {
-    await this.eventService.inviteUsers(id, user.id, emails);
+    const { userIds, message } = inviteUsersDto;
+    this.logger.debug(`Inviting users to event ${id}: ${userIds}`);
+    const result = await this.eventService.inviteUsers(id, user.id, userIds, message);
     return {
       success: true,
-      message: 'Invitations sent successfully',
+      message: 'Invitations processed successfully',
+      data: result,
       timestamp: new Date().toISOString(),
     };
   }

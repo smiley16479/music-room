@@ -234,7 +234,7 @@ struct SearchBar: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.textSecondary)
             
-            TextField("Search events...", text: $text)
+            TextField("Search...", text: $text)
                 .textFieldStyle(PlainTextFieldStyle())
             
             if !text.isEmpty {
@@ -343,7 +343,7 @@ struct CreateEventView: View {
     @State private var playlistName: String = ""
     @State private var selectedPlaylist: Playlist? = nil
     @State private var showPlaylistPicker = false
-    @State private var createNewPlaylist = false
+    // @State private var createNewPlaylist = false
 
     // Computed property pour valider les dates
     private var isDateValid: Bool {
@@ -371,8 +371,10 @@ struct CreateEventView: View {
                         Text("Public Event")
                     }
                 }
-                Section(header: Text("Event Playlist")) {
-                    Toggle("Créer une nouvelle playlist", isOn: $createNewPlaylist)
+                Section(header: Text("Create Event Playlist")) {
+                        TextField("Nom de la playlist", text: $playlistName)
+
+                    /* Toggle("Créer une nouvelle playlist", isOn: $createNewPlaylist)
                     if createNewPlaylist {
                         TextField("Nom de la playlist", text: $playlistName)
                         // ... autres champs playlist ...
@@ -380,7 +382,7 @@ struct CreateEventView: View {
                         Button(action: { showPlaylistPicker = true }) {
                             Text(selectedPlaylist?.name ?? "Sélectionner une playlist existante")
                         }
-                    }
+                    } */
                 }
                 if let error = errorMessage {
                     Section {
@@ -399,8 +401,8 @@ struct CreateEventView: View {
                         saveEvent()
                     }
                     .disabled(isSaving || name.isEmpty || !isDateValid
-                          || (createNewPlaylist && playlistName.isEmpty)
-                          || (!createNewPlaylist && selectedPlaylist == nil)
+                          || (/* createNewPlaylist &&  */playlistName.isEmpty)
+                          /* || (!createNewPlaylist && selectedPlaylist == nil)*/
                     )
                 }
             }
@@ -431,7 +433,7 @@ struct CreateEventView: View {
                 "eventEndDate": ISO8601DateFormatter().string(from: endDate),
                 "visibility": isPublic ? "public" : "private",
                 "selectedPlaylistId": selectedPlaylist?.id ?? "",
-                "playlistName": createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
+                "playlistName": playlistName //createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
             ]
             Task {
                 do {

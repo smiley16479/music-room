@@ -735,6 +735,13 @@ struct EditProfileView: View {
     // Social account linking states
     @State private var isLinkingGoogle = false
     @State private var isLinkingFacebook = false
+    
+    // Password change states
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var showingPasswordSection = false
+    @State private var isChangingPassword = false
 
     private func updateProfile() async {
         isSaving = true
@@ -825,6 +832,85 @@ struct EditProfileView: View {
                         }
                         .padding(.horizontal)
                     }
+                    
+                    // Password Change Section
+                    VStack(alignment: .leading, spacing: 16) {
+                        Button(action: {
+                            withAnimation {
+                                showingPasswordSection.toggle()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "lock")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.musicPrimary)
+                                    .frame(width: 24)
+                                
+                                Text("Change Password")
+                                    .font(.headline)
+                                    .foregroundColor(.textPrimary)
+                                
+                                Spacer()
+                                
+                                Image(systemName: showingPasswordSection ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            .padding()
+                            .background(Color.cardBackground)
+                            .cornerRadius(12)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if showingPasswordSection {
+                            VStack(spacing: 16) {
+                                SecureField("Current Password", text: $currentPassword)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                
+                                SecureField("New Password", text: $newPassword)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                
+                                SecureField("Confirm New Password", text: $confirmPassword)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                
+                                Button(action: {
+                                    Task { await changePassword() }
+                                }) {
+                                    HStack {
+                                        if isChangingPassword {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                        } else {
+                                            Text("Update Password")
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.musicPrimary)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
+                                }
+                                .disabled(
+                                    currentPassword.isEmpty || 
+                                    newPassword.isEmpty || 
+                                    confirmPassword.isEmpty || 
+                                    isChangingPassword ||
+                                    newPassword != confirmPassword
+                                )
+                                
+                                if newPassword != confirmPassword && !confirmPassword.isEmpty {
+                                    Text("Passwords do not match")
+                                        .font(.caption)
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding()
+                            .background(Color.secondaryBackground)
+                            .cornerRadius(12)
+                            .transition(.opacity.combined(with: .slide))
+                        }
+                    }
+                    .padding(.horizontal)
                     
                     if let error = errorMessage {
                         Text(error)
@@ -928,6 +1014,60 @@ struct EditProfileView: View {
                 errorMessage = "Failed to unlink Facebook account: \(error.localizedDescription)"
             }
         }
+    }
+    
+    private func changePassword() async {
+        // Validation
+        guard !currentPassword.isEmpty, !newPassword.isEmpty, !confirmPassword.isEmpty else {
+            await MainActor.run {
+                errorMessage = "All password fields are required"
+            }
+            return
+        }
+        
+        guard newPassword == confirmPassword else {
+            await MainActor.run {
+                errorMessage = "New passwords do not match"
+            }
+            return
+        }
+        
+        guard newPassword.count >= 6 else {
+            await MainActor.run {
+                errorMessage = "New password must be at least 6 characters"
+            }
+            return
+        }
+        
+        isChangingPassword = true
+        errorMessage = nil
+        
+        do {
+            // Créer le DTO pour le changement de mot de passe
+            let passwordData: [String: Any] = [
+                "currentPassword": currentPassword,
+                "newPassword": newPassword
+            ]
+            
+            let result = try await APIService.shared.updatePassword(passwordData)
+            
+            await MainActor.run {
+                // Réinitialiser les champs
+                currentPassword = ""
+                newPassword = ""
+                confirmPassword = ""
+                showingPasswordSection = false
+                
+                toastMessage = "Password updated successfully"
+                showToast = true
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to update password: \(error.localizedDescription)"
+            }
+        }
+        
+        isChangingPassword = false
     }
 }
 

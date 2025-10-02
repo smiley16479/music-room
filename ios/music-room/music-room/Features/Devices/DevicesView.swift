@@ -97,7 +97,7 @@ struct DevicesView: View {
             }
             .navigationTitle("devices".localized)
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
+            /* .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         showingAddDevice = true
@@ -106,7 +106,7 @@ struct DevicesView: View {
                             .foregroundColor(.musicPrimary)
                     }
                 }
-            }
+            } */
         }
         .onAppear {
             viewModel.devicesSocket.onDeviceControlRevoked { data, ack in

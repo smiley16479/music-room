@@ -653,16 +653,17 @@ export class PlaylistService {
   async inviteCollaborators(
     playlistId: string,
     inviterUserId: string,
-    inviteeEmails: string[]
-  ): Promise<void> {
+    inviteeIds: string[],
+    message?: string,
+  ): Promise<{ invitations: Invitation[]; skipped: { userId: string; reason: string }[] }> {
     const playlist = await this.findById(playlistId, inviterUserId);
 
-    // Only creator or invited users can invite others
     const isCreator = playlist.creatorId === inviterUserId;
-    let canInvite = isCreator;
+    const isCollaborator = playlist.collaborators?.some((collaborator) => collaborator.id === inviterUserId) || false;
 
-    if (!isCreator) {
-      // Check if inviter has been invited
+    let canInvite = isCreator || isCollaborator;
+
+    if (!canInvite) {
       const inviterInvitation = await this.invitationRepository.findOne({
         where: {
           playlistId,
@@ -680,33 +681,81 @@ export class PlaylistService {
 
     const inviter = await this.userRepository.findOne({ where: { id: inviterUserId } });
 
-    for (const email of inviteeEmails) {
-      // Check if user exists
-      const invitee = await this.userRepository.findOne({ where: { email } });
+    const createdInvitations: Invitation[] = [];
+    const skipped: { userId: string; reason: string }[] = [];
+    const uniqueInviteeIds = Array.from(new Set(inviteeIds));
 
-      if (invitee) {
-        // Create invitation record
+    for (const inviteeId of uniqueInviteeIds) {
+      if (inviteeId === inviterUserId) {
+        skipped.push({ userId: inviteeId, reason: 'cannot_invite_self' });
+        continue;
+      }
+
+      const invitee = await this.userRepository.findOne({ where: { id: inviteeId } });
+
+      if (!invitee) {
+        skipped.push({ userId: inviteeId, reason: 'user_not_found' });
+        continue;
+      }
+
+      if (playlist.creatorId === inviteeId || playlist.collaborators?.some((collaborator) => collaborator.id === inviteeId)) {
+        skipped.push({ userId: inviteeId, reason: 'already_collaborator' });
+        continue;
+      }
+
+      const existingInvitation = await this.invitationRepository.findOne({
+        where: {
+          playlistId,
+          inviteeId,
+          type: InvitationType.PLAYLIST,
+        },
+        order: { createdAt: 'DESC' },
+      });
+
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      if (existingInvitation && existingInvitation.status === InvitationStatus.PENDING) {
+        skipped.push({ userId: inviteeId, reason: 'already_invited' });
+        continue;
+      }
+
+      let savedInvitation: Invitation;
+
+      if (existingInvitation) {
+        existingInvitation.status = InvitationStatus.PENDING;
+        existingInvitation.message = message;
+        existingInvitation.inviterId = inviterUserId;
+        existingInvitation.expiresAt = expiresAt;
+        savedInvitation = await this.invitationRepository.save(existingInvitation);
+      } else {
         const invitation = this.invitationRepository.create({
           inviterId: inviterUserId,
-          inviteeId: invitee.id,
+          inviteeId,
           playlistId,
           type: InvitationType.PLAYLIST,
           status: InvitationStatus.PENDING,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          message,
+          expiresAt,
         });
 
-        await this.invitationRepository.save(invitation);
+        savedInvitation = await this.invitationRepository.save(invitation);
       }
 
-      // Send invitation email
-      const playlistUrl = `${process.env.FRONTEND_URL}/playlists/${playlistId}`;
-      await this.emailService.sendPlaylistInvitation(
-        email,
-        playlist.name,
-        inviter?.displayName || 'A friend',
-        playlistUrl,
-      );
+      createdInvitations.push(savedInvitation);
+
+      if (invitee.email) {
+        const baseUrl = process.env.FRONTEND_URL || 'https://music-room.com';
+        const playlistUrl = `${baseUrl}/playlists/${playlistId}`;
+        await this.emailService.sendPlaylistInvitation(
+          invitee.email,
+          playlist.name,
+          inviter?.displayName || 'A friend',
+          playlistUrl,
+        );
+      }
     }
+
+    return { invitations: createdInvitations, skipped };
   }
 
   // Export/Import

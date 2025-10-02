@@ -25,11 +25,13 @@ class PlaylistViewModel {
     let eventsSocket = EventsSocketService.shared
     let devicesSocket = DevicesSocketService.shared
 
-    // Player
-    var audioPlayer: AVPlayer? = nil
-    var isPlaying: Bool = false
+    // Player - utilise le singleton AudioManager
+    private let audioManager = AudioManager.shared
     var currentTrackIndex: Int = 0
-    var volume: Float = 0.5
+    
+    // Propriétés calculées pour accéder à l'état audio
+    var isPlaying: Bool { audioManager.isPlaying }
+    var volume: Float { audioManager.volume }
     
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -44,10 +46,11 @@ class PlaylistViewModel {
     }
     
     deinit {
-      guard let eventId = self.eventId else { return }
-      self.eventsSocket.leaveEvent(eventId: eventId)
-      // self.eventsSocket.removeAllListeners()
-      // self.eventsSocket.disconnect()
+        // Nettoyer les sockets seulement - l'audio est géré par AudioManager
+        guard let eventId = self.eventId else { return }
+        self.eventsSocket.leaveEvent(eventId: eventId)
+        // self.eventsSocket.removeAllListeners()
+        // self.eventsSocket.disconnect()
     }
 
     static var mockPlaylist: Playlist {
@@ -243,36 +246,47 @@ class PlaylistViewModel {
     }
     
     func addTrackToPlaylist(_ track: Track) async {
-      print("Adding track to playlist: \(track)")
-      // let newTrack = Track(from: track) else { return }
-        var newTrack = track
-        newTrack.likes = 0
-        newTrack.dislikes = 0
-        newTrack.hasPlayed = false
-        newTrack.isCurrentlyPlaying = false
-        // tracks.append(newTrack)
-        sortUpcomingTracks()
+        print("Adding track to playlist: \(track)")
+        
+        let payload: [String: Any] = [
+            "deezerId": track.deezerId ?? "",
+            "title": track.title,
+            "artist": track.artist,
+            "album": track.album ?? "",
+            "albumCoverUrl": track.albumCoverUrl ?? "",
+            "previewUrl": track.previewUrl ?? "",
+            "duration": track.duration,
+        ]
 
-      let payload: [String: Any] = [
-          "deezerId": track.deezerId ?? "",
-          "title": track.title,
-          "artist": track.artist,
-          "album": track.album ?? "",
-          "albumCoverUrl": track.albumCoverUrl ?? "",
-          "previewUrl": track.previewUrl ?? "",
-          "duration": track.duration,
-          // "position": ... // optionnel si tu veux gérer la position
-      ]
-
-      do {
-          let playListTrack = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
-      } catch {
-        print("Erreur lors de addTrackToPlaylist: \(error)")
-          // await MainActor.run {
-          //    errorMessage = error.localizedDescription
-          //    isSaving = false
-            // }
-      }
+        do {
+            let playListTrack = try await APIService.shared.addMusicToPlaylist(playlist.id, payload)
+            
+            // Pour les playlists non-événement, ajouter la track localement 
+            // (pour les événements, le socket s'en charge)
+            if playlist.eventId == nil {
+                await MainActor.run {
+                    var newTrack = track
+                    newTrack.likes = 0
+                    newTrack.dislikes = 0
+                    newTrack.hasPlayed = false
+                    newTrack.isCurrentlyPlaying = false
+                    
+                    // Vérifier que la track n'existe pas déjà
+                    if !self.tracks.contains(where: { $0.id == newTrack.id }) {
+                        self.tracks.append(newTrack)
+                        self.sortUpcomingTracks()
+                        print("✅ Track ajoutée localement: \(newTrack.title)")
+                    }
+                }
+            } else {
+                print("🎭 Track ajoutée à un événement, attente du socket...")
+            }
+        } catch {
+            print("❌ Erreur lors de addTrackToPlaylist: \(error)")
+            await MainActor.run {
+                self.errorMessage = "Erreur lors de l'ajout de la track: \(error.localizedDescription)"
+            }
+        }
     }
     
     func addProposedTrack(_ track: Track) {
@@ -316,74 +330,25 @@ class PlaylistViewModel {
 
 // MARK: - AUDIO CONTROL
     func togglePlayPause(for track: Track) {
-        guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
-        // Synchronize track state
-        syncCurrentTrack(track: track)
-
-        // Vérifie si le player joue déjà ce morceau
-        // let urlTest = "https://audiocdn.epidemicsound.com/lqmp3/01K1WWG258YTCAZJMGZH0KXSYY.mp3"
-
-        // Met à jour l'index courant (dans syncCurrentTrack maintenant)
-        /* if let idx = viewModel.tracks.firstIndex(where: { $0.id == track.id }) {
-            currentTrackIndex = idx
-        }
-
-        let tracks = viewModel.tracks
-        if (!tracks.isEmpty && currentTrackIndex == 0) {
-            for i in tracks.indices {
-                viewModel.tracks[i].hasPlayed = false
-                viewModel.tracks[i].isCurrentlyPlaying = false
-            }
-            viewModel.tracks[0].hasPlayed = false
-            viewModel.tracks[0].isCurrentlyPlaying = true
-        } */
-
-        if let currentAsset = audioPlayer?.currentItem?.asset as? AVURLAsset,
-          currentAsset.url == url {
-            // Même morceau : toggle play/pause
-            if isPlaying {
-                audioPlayer?.pause()
-                isPlaying = false
-            } else {
-                audioPlayer?.play()
-                isPlaying = true
-            }
+        // Vérifier si c'est la même track qui joue actuellement
+        if let currentTrack = audioManager.currentTrack, currentTrack.id == track.id {
+            // Même track : toggle play/pause
+            audioManager.togglePlayPause()
         } else {
-            // Un autre morceau : pause l'ancien player
-            audioPlayer?.pause()
-            isPlaying = false
-            // Nouveau morceau : crée un nouveau player et joue
-            audioPlayer = AVPlayer(url: url)
-            audioPlayer?.play()
-            isPlaying = true
+            // Nouvelle track : démarrer la lecture
+            playTrack(track)
         }
     }
 
     func playTrack(_ track: Track) {
-        guard let previewUrl = track.previewUrl ?? track.preview, let url = URL(string: previewUrl) else { return }
-        audioPlayer?.pause()
-        audioPlayer = AVPlayer(url: url)
-        audioPlayer?.play()
-        isPlaying = true
-
+        // Utiliser le AudioManager pour jouer la track
+        audioManager.playTrack(track)
+        
+        // Synchroniser l'état local
         syncCurrentTrack(track: track)
-
-        // Retire l'ancien observer si besoin
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: audioPlayer?.currentItem)
-        // Ajoute un nouvel observer
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(trackDidFinishPlaying),
-            name: .AVPlayerItemDidPlayToEndTime,
-            object: audioPlayer?.currentItem
-        )
     }
 
-    @objc private func trackDidFinishPlaying(_ notification: Notification) {
-        DispatchQueue.main.async {
-            self.nextTrack()
-        }
-    }
+    // Cette méthode n'est plus nécessaire car gérée par AudioManager
 
    func nextTrack() {
        guard !tracks.isEmpty else { return }
@@ -490,8 +455,14 @@ class PlaylistViewModel {
                   let newTrack = Track(from: track) else { return }
 
             DispatchQueue.main.async {
-                  self.tracks.append(newTrack)
-                  self.sortUpcomingTracks()
+                // Vérifier que la track n'existe pas déjà pour éviter les doublons
+                if !self.tracks.contains(where: { $0.id == newTrack.id }) {
+                    self.tracks.append(newTrack)
+                    self.sortUpcomingTracks()
+                    print("✅ Track ajoutée via socket: \(newTrack.title)")
+                } else {
+                    print("⚠️ Track déjà présente, ignorée: \(newTrack.title)")
+                }
             }
         }
 
@@ -586,11 +557,9 @@ class PlaylistViewModel {
 
             switch command {
                 case "play":
-                    audioPlayer?.play()
-                    isPlaying = true
+                    audioManager.togglePlayPause() // Si en pause, reprend la lecture
                 case "pause":
-                    audioPlayer?.pause()
-                    isPlaying = false
+                    audioManager.togglePlayPause() // Si en lecture, met en pause
                 case "next":
                     nextTrack()
                     

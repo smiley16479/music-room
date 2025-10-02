@@ -18,6 +18,7 @@ import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { UpdatePlaylistDto } from './dto/update-playlist.dto';
 import { AddTrackToPlaylistDto } from './dto/add-track.dto';
 import { ReorderTracksDto } from './dto/reorder-tracks.dto';
+import { InviteCollaboratorsDto } from './dto/invite-collaborators.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -487,29 +488,21 @@ export class PlaylistController {
     description: 'The ID of the playlist',
     required: true
   })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        emails: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of email addresses to invite',
-          example: ['friend1@example.com', 'friend2@example.com']
-        }
-      },
-      required: ['emails']
-    }
-  })
+  @ApiBody({ type: InviteCollaboratorsDto })
   async inviteCollaborators(
     @Param('id') id: string,
-    @Body() { emails }: { emails: string[] },
+    @Body() inviteCollaboratorsDto: InviteCollaboratorsDto,
     @CurrentUser() user: User,
   ) {
-    await this.playlistService.inviteCollaborators(id, user.id, emails);
+    const { userIds, userId, message } = inviteCollaboratorsDto;
+    const inviteeIds = userIds ?? (userId ? [userId] : []);
+
+    this.logger.debug(`Inviting collaborators to playlist ${id}: ${inviteeIds.join(', ')}`);
+    const result = await this.playlistService.inviteCollaborators(id, user.id, inviteeIds, message);
     return {
       success: true,
-      message: 'Invitations sent successfully',
+      message: 'Invitations processed successfully',
+      data: result,
       timestamp: new Date().toISOString(),
     };
   }
