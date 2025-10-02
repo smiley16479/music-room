@@ -272,6 +272,9 @@ export class EventService {
       throw new ForbiddenException('Only the creator can update this event');
     }
 
+    // Store original license type for comparison
+    const originalLicenseType = event.licenseType;
+
     // Handle city-based geocoding for location-based events
     if (updateEventDto.licenseType === EventLicenseType.LOCATION_BASED || event.licenseType === EventLicenseType.LOCATION_BASED) {
       if (updateEventDto.cityName) {
@@ -289,6 +292,19 @@ export class EventService {
 
     Object.assign(event, updateEventDto);
     const updatedEvent = await this.eventRepository.save(event);
+
+    // Update associated playlist license type if it exists and license type changed
+    if (updatedEvent.playlist && updateEventDto.licenseType && updateEventDto.licenseType !== originalLicenseType) {
+      try {
+        await this.eventRepository.manager.query(
+          'UPDATE playlists SET license_type = $1 WHERE id = $2',
+          [updateEventDto.licenseType, updatedEvent.playlist.id]
+        );
+        console.log(`📝 Updated playlist ${updatedEvent.playlist.id} license type from ${originalLicenseType} to ${updateEventDto.licenseType}`);
+      } catch (error) {
+        console.error(`❌ Failed to update playlist license type:`, error);
+      }
+    }
 
     // Notify participants of changes
     this.eventGateway.notifyEventUpdated(id, updatedEvent);

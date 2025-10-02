@@ -287,6 +287,23 @@ struct Event: Codable, Identifiable {
     let admins: [User]?
     let playlist: Playlist?
     
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, visibility, status, latitude, longitude, creator, participants, admins, playlist
+        case licenseType = "licenseType"
+        case locationRadius = "locationRadius"
+        case locationName = "locationName"
+        case votingStartTime = "votingStartTime"
+        case votingEndTime = "votingEndTime" 
+        case eventDate = "eventDate"
+        case eventEndDate = "eventEndDate"
+        case currentTrackId = "currentTrackId"
+        case currentTrackStartedAt = "currentTrackStartedAt"
+        case maxVotesPerUser = "maxVotesPerUser"
+        case createdAt = "createdAt"
+        case updatedAt = "updatedAt"
+        case creatorId = "creatorId"
+    }
+    
     // MARK: - Mock Event Data:
       static let mockEvent: [Event] = [
           Event(id: "UUID", name: "No Events",

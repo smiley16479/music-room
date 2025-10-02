@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import CoreLocation
 
 // MARK: - Deezer Search View
 struct DeezerSearchView: View {
@@ -147,9 +148,18 @@ struct PlaylistDetailsView: View {
     let playlist: Playlist
     @State var viewModel: PlaylistViewModel
     @EnvironmentObject var authManager: AuthenticationManager
+    @ObservedObject private var locationManager = LocationManager.shared
     @State private var displayMode: DisplayMode = .list
     @State private var showingDeezerSearch = false
     @State private var showingProposedTracks = false
+    @State private var associatedEvent: Event? = nil {
+        didSet {
+            // Force une re-évaluation de canVote quand l'événement est chargé
+            print("🔄 Associated event updated, will trigger UI refresh")
+        }
+    }
+    @State private var currentTime = Date()
+    @State private var votingTimer: Timer?
     
     init(playlist: Playlist) {
         self.playlist = playlist
@@ -188,6 +198,168 @@ struct PlaylistDetailsView: View {
     var isAdmin: Bool {
         guard let currentUser = authManager.currentUser else { return false }
         return playlist.collaborators?.contains(where: { $0.id == currentUser.id }) == true || playlist.creatorId == currentUser.id
+    }
+    
+    // Vérifie si l'utilisateur peut voter selon les restrictions de géolocalisation
+    private func canVoteWithLocationRestrictions() -> Bool {
+        print("🔍 === STARTING LOCATION VOTE CHECK ===")
+        print("🔍 Playlist: \(playlist.name)")
+        print("🔍 Playlist licenseType: \(playlist.licenseType)")
+        print("🔍 Playlist eventId: \(playlist.eventId ?? "nil")")
+        
+        // Vérifier le licenseType de l'événement associé si disponible, sinon utiliser celui de la playlist
+        let effectiveLicenseType: LicenseType
+        if let event = associatedEvent {
+            effectiveLicenseType = event.licenseType
+            print("🔄 Using event license type: \(effectiveLicenseType)")
+        } else {
+            effectiveLicenseType = playlist.licenseType
+            print("🔄 Using playlist license type: \(effectiveLicenseType)")
+        }
+        
+        // Si ce n'est pas un événement avec restriction de géolocalisation, autoriser le vote
+        guard effectiveLicenseType == .locationBased else { 
+            print("✅ No location restrictions - vote allowed (effective license: \(effectiveLicenseType))")
+            return true 
+        }
+        
+        print("⚠️ Location-based playlist detected - checking restrictions")
+        
+        // Pour une playlist avec restriction de géolocalisation, vérifier la position de l'utilisateur
+        guard let userLocation = locationManager.userLocation?.coordinate else {
+            print("❌ Location-based voting: User location not available")
+            return false
+        }
+        
+        print("📍 User location: \(userLocation.latitude), \(userLocation.longitude)")
+        
+        // Vérifier si on a les informations de l'événement associé
+        guard let event = associatedEvent else {
+            print("❌ Location-based voting: Associated event not loaded yet")
+            return false
+        }
+        
+        guard let eventLat = event.latitude,
+              let eventLon = event.longitude,
+              let radius = event.locationRadius else {
+            print("❌ Location-based voting: Event location data incomplete - lat: \(event.latitude?.description ?? "nil"), lon: \(event.longitude?.description ?? "nil"), radius: \(event.locationRadius?.description ?? "nil")")
+            return false
+        }
+        
+        print("🎯 Event location: \(eventLat), \(eventLon), radius: \(radius)m")
+        
+        // Vérifier les contraintes de temps pour les votes
+        if let votingStartTime = event.votingStartTime, let votingEndTime = event.votingEndTime {
+            let calendar = Calendar.current
+            let now = currentTime
+            
+            // Parser les heures de vote et les convertir en Date d'aujourd'hui
+            let startComponents = votingStartTime.split(separator: ":")
+            let endComponents = votingEndTime.split(separator: ":")
+            
+            guard startComponents.count >= 2, endComponents.count >= 2,
+                  let startHour = Int(startComponents[0]), let startMinute = Int(startComponents[1]),
+                  let endHour = Int(endComponents[0]), let endMinute = Int(endComponents[1]) else {
+                print("❌ Invalid voting time format - Vote DENIED")
+                return false
+            }
+            
+            // Créer les dates de début et fin de vote pour aujourd'hui
+            guard let todayVotingStart = calendar.date(bySettingHour: startHour, minute: startMinute, second: 0, of: now),
+                  let todayVotingEnd = calendar.date(bySettingHour: endHour, minute: endMinute, second: 0, of: now) else {
+                print("❌ Failed to create voting time bounds - Vote DENIED")
+                return false
+            }
+            
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm"
+            print("🕐 Voting hours: \(votingStartTime) - \(votingEndTime)")
+            print("🕐 Current time: \(timeFormatter.string(from: now))")
+            print("🕐 Voting period: \(timeFormatter.string(from: todayVotingStart)) - \(timeFormatter.string(from: todayVotingEnd))")
+            
+            // Vérifier si on est dans la période de vote
+            if now < todayVotingStart {
+                print("❌ Location-based voting: Too early - voting starts at \(votingStartTime) - Vote DENIED")
+                return false
+            } else if now > todayVotingEnd {
+                print("❌ Location-based voting: Too late - voting ended at \(votingEndTime) - Vote DENIED") 
+                return false
+            }
+            
+            print("✅ Time restriction passed - within voting hours")
+        }
+        
+        // Calculer la distance entre l'utilisateur et l'événement
+        let eventLocation = CLLocation(latitude: eventLat, longitude: eventLon)
+        let userLocationObj = CLLocation(latitude: userLocation.latitude, longitude: userLocation.longitude)
+        let distance = userLocationObj.distance(from: eventLocation)
+        
+        let isWithinRange = distance <= Double(radius)
+        
+        if isWithinRange {
+            print("✅ Location-based voting: User within range (\(Int(distance))m / \(radius)m)")
+        } else {
+            print("❌ Location-based voting: User outside range (\(Int(distance))m / \(radius)m) - Vote DENIED")
+        }
+        
+        return isWithinRange
+    }
+    
+    // Charge l'événement associé à la playlist s'il existe
+    private func loadAssociatedEvent() async {
+        guard let eventId = playlist.eventId else { 
+            print("ℹ️ No associated event for this playlist")
+            return 
+        }
+        
+        print("🔄 Loading associated event with ID: \(eventId)")
+        
+        do {
+            // Récupérer l'événement depuis l'API
+            let event = try await APIService.shared.getEvent(eventId: eventId)
+            await MainActor.run {
+                self.associatedEvent = event
+                print("✅ Loaded associated event: \(event.name)")
+                print("   - Event License Type: \(event.licenseType)")
+                print("   - Event Location: \(event.locationName ?? "Unknown")")
+                print("   - Event Coordinates: \(event.latitude?.description ?? "nil"), \(event.longitude?.description ?? "nil")")
+                print("   - Event Radius: \(event.locationRadius?.description ?? "nil")m")
+                print("   - Voting Hours RAW: '\(event.votingStartTime ?? "nil")' - '\(event.votingEndTime ?? "nil")'")
+                print("   - Voting Hours LENGTH: \(event.votingStartTime?.count ?? 0) - \(event.votingEndTime?.count ?? 0)")
+                print("   - Event Status: \(event.status)")
+                print("🔄 Playlist license type: \(playlist.licenseType) vs Event license type: \(event.licenseType)")
+                
+                // Debug the JSON response structure
+                if let data = try? JSONEncoder().encode(event),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    print("📝 Event JSON keys: \(json.keys.sorted())")
+                    if let votingStart = json["votingStartTime"] {
+                        print("📝 votingStartTime in JSON: '\(votingStart)' (type: \(type(of: votingStart)))")
+                    }
+                    if let votingEnd = json["votingEndTime"] {
+                        print("📝 votingEndTime in JSON: '\(votingEnd)' (type: \(type(of: votingEnd)))")
+                    }
+                }
+            }
+        } catch {
+            print("❌ Failed to load associated event: \(error)")
+        }
+    }
+    
+    // MARK: - Timer Methods
+    private func startVotingTimer() {
+        stopVotingTimer() // Arrêter le timer existant si présent
+        
+        // Démarrer un timer qui se déclenche toutes les 10 secondes
+        votingTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
+            currentTime = Date()
+        }
+        currentTime = Date() // Initialiser immédiatement
+    }
+    
+    private func stopVotingTimer() {
+        votingTimer?.invalidate()
+        votingTimer = nil
     }
 
     var body: some View {
@@ -254,6 +426,11 @@ struct PlaylistDetailsView: View {
         }
         .task {
             await viewModel.loadPlaylistDetails()
+            await loadAssociatedEvent()
+        }
+        .refreshable {
+            await viewModel.loadPlaylistDetails()
+            await loadAssociatedEvent()
         }
         .onAppear {
             // Debug: Afficher les tracks et leur statut
@@ -274,6 +451,12 @@ struct PlaylistDetailsView: View {
             } else {
                 print("🎵 No current track ID in viewModel")
             }
+            
+            // Démarrer le timer pour les événements location-based
+            startVotingTimer()
+        }
+        .onDisappear {
+            stopVotingTimer()
         }
     }
     // MARK: List View
@@ -300,7 +483,8 @@ struct PlaylistDetailsView: View {
                     canVote: !(track.hasPlayed ?? false)
                           && !((track.isCurrentlyPlaying ?? false) || (viewModel.currentTrackId == track.id))
                           && !(index < calculatedCurrentIndex)  // Pas de vote pour les tracks avant la courante
-                          && (playlist.name.hasPrefix("[Event]")),
+                          && (playlist.name.hasPrefix("[Event]"))
+                          && canVoteWithLocationRestrictions(),  // Vérification géolocalisation
                     currentTrackId: viewModel.currentTrackId,
                     trackIndex: index,
                     currentTrackIndex: calculatedCurrentIndex
@@ -350,7 +534,8 @@ struct PlaylistDetailsView: View {
                         canVote: !(track.hasPlayed ?? false)
                               && !((track.isCurrentlyPlaying ?? false) || (viewModel.currentTrackId == track.id))
                               && !(index < calculatedCurrentIndex)  // Pas de vote pour les tracks avant la courante
-                              && (playlist.name.hasPrefix("[Event]")),
+                              && (playlist.name.hasPrefix("[Event]"))
+                              && canVoteWithLocationRestrictions(),  // Vérification géolocalisation
                         currentTrackId: viewModel.currentTrackId,
                         trackIndex: index,
                         currentTrackIndex: calculatedCurrentIndex

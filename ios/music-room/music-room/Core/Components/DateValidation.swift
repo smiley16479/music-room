@@ -38,6 +38,9 @@ struct EventDateSection: View {
     @Binding var endDate: Date
     @Binding var location: String
     @Binding var radius: Double
+    @Binding var requireLocationForVoting: Bool
+    @Binding var votingStartTime: Date
+    @Binding var votingEndTime: Date
 
     private var startDateRange: PartialRangeFrom<Date> {
         showPastDateValidation ? Date()... : Date.distantPast...
@@ -51,6 +54,9 @@ struct EventDateSection: View {
         endDate: Binding<Date>,
         location: Binding<String>,
         radius: Binding<Double>,
+        requireLocationForVoting: Binding<Bool>,
+        votingStartTime: Binding<Date>,
+        votingEndTime: Binding<Date>,
         showPastDateValidation: Bool = true,
         minimumDurationHours: Int = 1
     ) {
@@ -59,6 +65,9 @@ struct EventDateSection: View {
         self._endDate = endDate
         self._location = location
         self._radius = radius
+        self._requireLocationForVoting = requireLocationForVoting
+        self._votingStartTime = votingStartTime
+        self._votingEndTime = votingEndTime
         self.showPastDateValidation = showPastDateValidation
         self.minimumDurationHours = minimumDurationHours
     }
@@ -83,10 +92,36 @@ struct EventDateSection: View {
     var body: some View {
         Section(header: Text("Location & Date")) {
             TextField("Location", text: $location)
-            Stepper(value: $radius, in: 100...10000, step: 50) {
-                Text("Rayon : \(Int(radius)) m")
+            
+            if !location.isEmpty {
+                Stepper(value: $radius, in: 100...10000, step: 50) {
+                    Text("Rayon : \(Int(radius)) m")
+                }
+                Slider(value: $radius, in: 100...10000, step: 50).accentColor(.musicPrimary)
+                
+                Toggle(isOn: $requireLocationForVoting) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Votes géolocalisés")
+                            .font(.subheadline)
+                        Text("Les participants doivent être à proximité pour participer")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                if requireLocationForVoting {
+                    DatePicker(
+                        "Début des votes",
+                        selection: $votingStartTime,
+                        displayedComponents: [.hourAndMinute]
+                    )
+                    DatePicker(
+                        "Fin des votes",
+                        selection: $votingEndTime,
+                        displayedComponents: [.hourAndMinute]
+                    )
+                }
             }
-            Slider(value: $radius, in: 100...10000, step: 50).accentColor(.musicPrimary)
             DatePicker(
                 "Date de début",
                 selection: $startDate,

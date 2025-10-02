@@ -338,6 +338,15 @@ struct CreateEventView: View {
     @State private var date: Date = Date()
     @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
+    @State private var requireLocationForVoting: Bool = false
+    @State private var votingStartTime: Date = {
+        let calendar = Calendar.current
+        return calendar.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
+    }()
+    @State private var votingEndTime: Date = {
+        let calendar = Calendar.current
+        return calendar.date(bySettingHour: 22, minute: 0, second: 0, of: Date()) ?? Date()
+    }()
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var playlistName: String = ""
@@ -363,6 +372,9 @@ struct CreateEventView: View {
                     endDate: $endDate,
                     location: $location,
                     radius: $radius,
+                    requireLocationForVoting: $requireLocationForVoting,
+                    votingStartTime: $votingStartTime,
+                    votingEndTime: $votingEndTime,
                     showPastDateValidation: true,
                     minimumDurationHours: 1
                 )
@@ -422,7 +434,7 @@ struct CreateEventView: View {
         LocationManager.shared.getLongLatFromAddressString(place: location) { coordinate in
             isSaving = true
             errorMessage = nil
-            let eventData: [String: Any] = [
+            var eventData: [String: Any] = [
                 "name": name,
                 "description": description,
                 "locationName": location,
@@ -432,9 +444,18 @@ struct CreateEventView: View {
                 "eventDate": ISO8601DateFormatter().string(from: date),
                 "eventEndDate": ISO8601DateFormatter().string(from: endDate),
                 "visibility": isPublic ? "public" : "private",
+                "licenseType": requireLocationForVoting ? "location_based" : "open",
                 "selectedPlaylistId": selectedPlaylist?.id ?? "",
                 "playlistName": playlistName //createNewPlaylist ? playlistName : selectedPlaylist?.name ?? ""
             ]
+            
+            // Ajouter les heures de vote pour les événements géolocalisés
+            if requireLocationForVoting {
+                let timeFormatter = DateFormatter()
+                timeFormatter.dateFormat = "HH:mm"
+                eventData["votingStartTime"] = timeFormatter.string(from: votingStartTime)
+                eventData["votingEndTime"] = timeFormatter.string(from: votingEndTime)
+            }
             Task {
                 do {
                     print("🆕 Creating event with data: \(eventData)")
@@ -549,6 +570,9 @@ struct EventEditView: View {
     @State private var date: Date = Date()
     @State private var endDate: Date = Date()
     @State private var isPublic: Bool = true
+    @State private var requireLocationForVoting: Bool = false
+    @State private var votingStartTime: Date = Date()
+    @State private var votingEndTime: Date = Date()
     @State private var isSaving = false
     @State private var isDeleting = false
     @State private var errorMessage: String?
@@ -598,6 +622,9 @@ struct EventEditView: View {
                     endDate: $endDate,
                     location: $location,
                     radius: $radius,
+                    requireLocationForVoting: $requireLocationForVoting,
+                    votingStartTime: $votingStartTime,
+                    votingEndTime: $votingEndTime,
                     showPastDateValidation: false,
                     minimumDurationHours: 1
                 )
@@ -771,6 +798,45 @@ struct EventEditView: View {
             endDate = formatter.date(from: event.eventEndDate ?? "") ?? Date()
         }
         isPublic = event.visibility == .public
+        requireLocationForVoting = event.licenseType == .locationBased
+        
+        // Initialiser les heures de vote depuis l'événement
+        if let votingStart = event.votingStartTime {
+            print("🕐 Loading voting start time from event: '\(votingStart)'")
+            let components = votingStart.split(separator: ":")
+            if components.count >= 2, 
+               let hour = Int(components[0]), 
+               let minute = Int(components[1]) {
+                let calendar = Calendar.current
+                if let time = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) {
+                    votingStartTime = time
+                    print("✅ Set voting start time to: \(time)")
+                } else {
+                    print("❌ Failed to create voting start time")
+                }
+            } else {
+                print("❌ Invalid voting start time format: '\(votingStart)'")
+            }
+        }
+        
+        if let votingEnd = event.votingEndTime {
+            print("🕐 Loading voting end time from event: '\(votingEnd)'")
+            let components = votingEnd.split(separator: ":")
+            if components.count >= 2, 
+               let hour = Int(components[0]), 
+               let minute = Int(components[1]) {
+                let calendar = Calendar.current
+                if let time = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) {
+                    votingEndTime = time
+                    print("✅ Set voting end time to: \(time)")
+                } else {
+                    print("❌ Failed to create voting end time")
+                }
+            } else {
+                print("❌ Invalid voting end time format: '\(votingEnd)'")
+            }
+        }
+        
         invitedUsers = event.participants ?? []
         admins = event.admins ?? []
         loadAllUsers()
@@ -786,7 +852,7 @@ struct EventEditView: View {
         LocationManager.shared.getLongLatFromAddressString(place: location) { coordinate in
             isSaving = true
             errorMessage = nil
-            let eventData: [String: Any] = [
+            var eventData: [String: Any] = [
                 "name": name,
                 "description": description,
                 "locationName": location,
@@ -796,9 +862,18 @@ struct EventEditView: View {
                 "eventDate": ISO8601DateFormatter().string(from: date),
                 "eventEndDate": ISO8601DateFormatter().string(from: endDate),
                 "visibility": isPublic ? "public" : "private",
+                "licenseType": requireLocationForVoting ? "location_based" : "open",
                 "admins": admins.map { $0.id }, // il n'y a pas en db
                 "participants": invitedUsers.map { $0.id } // il n'y a pas en db
             ]
+            
+            // Ajouter les heures de vote pour les événements géolocalisés
+            if requireLocationForVoting {
+                let timeFormatter = DateFormatter()
+                timeFormatter.dateFormat = "HH:mm"
+                eventData["votingStartTime"] = timeFormatter.string(from: votingStartTime)
+                eventData["votingEndTime"] = timeFormatter.string(from: votingEndTime)
+            }
             Task {
                 do {
                     let updated = try await APIService.shared.updateEvent(eventId: event.id, eventData)
