@@ -9,7 +9,6 @@ services:
       - 1.1.1.1      # Cloudflare DNS (optionnel)
     depends_on:
       - db
-      - redis
     ports:
       - 3000:3000
     command: npm run start:dev

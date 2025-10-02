@@ -50,7 +50,6 @@
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
     "date-fns-tz": "^3.2.0",
-    "ioredis": "^5.7.0",
     "keyv": "^5.5.0",
     "multer": "^2.0.2",
     "mysql2": "^3.14.3",
