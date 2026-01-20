@@ -24,27 +24,27 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  front:
-    container_name: front
-    build:
-      context: ./front/
-    image: front
-    depends_on:
-      - back
-    ports:
-      - '5050:5050'
-    links:
-      - back
-    command: npm run dev
-    volumes:
-      - ./front/src:/app/src
-      - uploads:/app/static/uploads #ajout d'un volume partagé pour les avatars
-      - front_back_shared:/app/static/front_back_shared # À ne pas mettre nécessairement dans public/
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # front:
+  #   container_name: front
+  #   build:
+  #     context: ./front/
+  #   image: front
+  #   depends_on:
+  #     - back
+  #   ports:
+  #     - '5050:5050'
+  #   links:
+  #     - back
+  #   command: npm run dev
+  #   volumes:
+  #     - ./front/src:/app/src
+  #     - uploads:/app/static/uploads #ajout d'un volume partagé pour les avatars
+  #     - front_back_shared:/app/static/front_back_shared # À ne pas mettre nécessairement dans public/
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
 
   db:
     container_name: db

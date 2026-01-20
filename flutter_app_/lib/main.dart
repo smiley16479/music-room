@@ -1,36 +1,115 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:provider/provider.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'config/app_config.dart';
+import 'config/logger_config.dart';
+import 'core/providers/index.dart';
+import 'core/services/index.dart';
+import 'features/authentication/screens/login_screen.dart';
+import 'features/playlists/screens/home_screen.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize app config
+  AppConfig.printConfiguration();
+
+  // Initialize services
+  final secureStorage = const FlutterSecureStorage();
+  final localStorage = LocalStorageService();
+  await localStorage.init();
+
+  final apiService = ApiService(secureStorage: SecureStorageService(secureStorage));
+  final authService = AuthService(
+    apiService: apiService,
+    secureStorage: SecureStorageService(secureStorage),
+  );
+  final playlistService = PlaylistService(apiService: apiService);
+
+  runApp(
+    MultiProvider(
+      providers: [
+        Provider<ApiService>(create: (_) => apiService),
+        Provider<AuthService>(create: (_) => authService),
+        Provider<PlaylistService>(create: (_) => playlistService),
+        Provider<TrackService>(create: (_) => TrackService(apiService: apiService)),
+        Provider<InvitationService>(
+          create: (_) => InvitationService(apiService: apiService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider(authService: authService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => PlaylistProvider(playlistService: playlistService),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: AppConfig.appName,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),
+        useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.purple,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      home: const _InitialScreen(),
+    );
+  }
+}
+
+/// Initial screen that checks authentication state
+class _InitialScreen extends StatefulWidget {
+  const _InitialScreen();
+
+  @override
+  State<_InitialScreen> createState() => _InitialScreenState();
+}
+
+class _InitialScreenState extends State<_InitialScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _initializeAuth();
+  }
+
+  Future<void> _initializeAuth() async {
+    final authProvider = context.read<AuthProvider>();
+    await authProvider.init();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, _) {
+        if (authProvider.isLoading) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (authProvider.isAuthenticated) {
+          return const HomeScreen();
+        } else {
+          return const LoginScreen();
+        }
+      },
     );
   }
 }
