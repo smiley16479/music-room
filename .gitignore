@@ -16,3 +16,32 @@ prompt
 *.xcworkspace/xcuserdata
 *.xcodeproj/xcuserdata
 DerivedData/
+
+# Flutter build outputs
+./flutter*/build/
+./flutter*/.dart_tool/
+./flutter*/.flutter-plugins
+./flutter*/.flutter-plugins-dependencies
+./flutter*/.packages
+
+# iOS
+./flutter*/ios/Flutter/Flutter.framework
+./flutter*/ios/Flutter/Flutter.podspec
+./flutter*/ios/Pods/
+./flutter*/ios/.symlinks/
+./flutter*/ios/Flutter/Generated.xcconfig
+
+# Android
+./flutter*/android/.gradle/
+./flutter*/android/app/build/
+./flutter*/android/.idea/
+./flutter*/android/local.properties
+
+# IDE
+./flutter*/.idea/
+./flutter*/*.iml
+./flutter*/.vscode/
+
+# Logs & temp
+./flutter*/*.log
+./flutter*/.DS_Store
