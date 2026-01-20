@@ -17,6 +17,7 @@ prompt
 *.xcodeproj/xcuserdata
 DerivedData/
 
+## APP FLUTTER ##
 # Flutter build outputs
 ./flutter*/build/
 ./flutter*/.dart_tool/
@@ -45,3 +46,35 @@ DerivedData/
 # Logs & temp
 ./flutter*/*.log
 ./flutter*/.DS_Store
+
+## APP IOS NATIVE ##
+# Xcode
+*.xcworkspace
+*.xcuserdata
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/DerivedData/
+*.xcodeproj/xcshareddata/WorkspaceSettings.xcsettings
+
+# Build products
+build/
+DerivedData/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# Swift Package Manager
+/.build/
+Packages/
+.swiftpm/
+
+# Logs
+*.log
+*.xcuserstate
+
+# macOS
+.DS_Store
