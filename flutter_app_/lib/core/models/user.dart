@@ -8,23 +8,41 @@ part 'user.g.dart';
 class User extends Equatable {
   final String id;
   final String email;
-  final String? firstName;
-  final String? lastName;
-  final String? profilePictureUrl;
+  final String? displayName;
+  final String? avatarUrl;
+  final String? bio;
+  final String? location;
+  final DateTime? birthDate;
+  final String? googleId;
+  final String? facebookId;
+  final bool emailVerified;
+  final String? displayNameVisibility;
+  final String? bioVisibility;
+  final String? birthDateVisibility;
+  final String? locationVisibility;
+  final DateTime? lastSeen;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   const User({
     required this.id,
     required this.email,
-    this.firstName,
-    this.lastName,
-    this.profilePictureUrl,
+    this.displayName,
+    this.avatarUrl,
+    this.bio,
+    this.location,
+    this.birthDate,
+    this.googleId,
+    this.facebookId,
+    required this.emailVerified,
+    this.displayNameVisibility,
+    this.bioVisibility,
+    this.birthDateVisibility,
+    this.locationVisibility,
+    this.lastSeen,
     required this.createdAt,
     required this.updatedAt,
   });
-
-  String get fullName => [firstName, lastName].where((e) => e != null).join(' ');
 
   factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
   Map<String, dynamic> toJson() => _$UserToJson(this);
@@ -33,10 +51,19 @@ class User extends Equatable {
   List<Object?> get props => [
         id,
         email,
-        firstName,
-        lastName,
-        profilePictureUrl,
-        createdAt,
+        displayName,
+        avatarUrl,
+        bio,
+        location,
+        birthDate,
+        googleId,
+        facebookId,
+        emailVerified,
+        displayNameVisibility,
+        bioVisibility,
+        birthDateVisibility,
+        locationVisibility,
+        lastSeen,        createdAt,
         updatedAt,
       ];
 }

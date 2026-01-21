@@ -10,10 +10,15 @@ class Playlist extends Equatable {
   final String id;
   final String name;
   final String? description;
-  final String ownerId;
+  @JsonKey(name: 'creatorId')
+  final String? ownerId;
+  @JsonKey(name: 'creator')
   final User? owner;
-  final bool isPublic;
+  @JsonKey(name: 'visibility')
+  final String? visibility;
+  @JsonKey(fromJson: _trackCountFromJson)
   final int trackCount;
+  @JsonKey(fromJson: _collaboratorCountFromJson)
   final int collaboratorCount;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -22,9 +27,9 @@ class Playlist extends Equatable {
     required this.id,
     required this.name,
     this.description,
-    required this.ownerId,
+    this.ownerId,
     this.owner,
-    required this.isPublic,
+    this.visibility,
     required this.trackCount,
     required this.collaboratorCount,
     required this.createdAt,
@@ -41,10 +46,21 @@ class Playlist extends Equatable {
         description,
         ownerId,
         owner,
-        isPublic,
+        visibility,
         trackCount,
         collaboratorCount,
         createdAt,
         updatedAt,
       ];
+}
+
+// Helper functions to extract counts from either direct fields or stats object
+int _trackCountFromJson(dynamic value) {
+  if (value is int) return value;
+  return 0;
+}
+
+int _collaboratorCountFromJson(dynamic value) {
+  if (value is int) return value;
+  return 0;
 }

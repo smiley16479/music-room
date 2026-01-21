@@ -3,7 +3,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
 
 import 'config/app_config.dart';
-import 'config/logger_config.dart';
 import 'core/providers/index.dart';
 import 'core/services/index.dart';
 import 'features/authentication/screens/login_screen.dart';
@@ -26,6 +25,7 @@ void main() async {
     secureStorage: SecureStorageService(secureStorage),
   );
   final playlistService = PlaylistService(apiService: apiService);
+  final eventService = EventService(apiService: apiService);
 
   runApp(
     MultiProvider(
@@ -33,6 +33,7 @@ void main() async {
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
         Provider<PlaylistService>(create: (_) => playlistService),
+        Provider<EventService>(create: (_) => eventService),
         Provider<TrackService>(create: (_) => TrackService(apiService: apiService)),
         Provider<InvitationService>(
           create: (_) => InvitationService(apiService: apiService),
@@ -42,6 +43,9 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(playlistService: playlistService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => EventProvider(eventService: eventService),
         ),
       ],
       child: const MyApp(),

@@ -195,13 +195,25 @@ class PlaylistProvider extends ChangeNotifier {
 
   /// Add track to playlist
   Future<bool> addTrackToPlaylist(
-    String playlistId,
-    String trackId,
-  ) async {
+    String playlistId, {
+    required String deezerId,
+    required String title,
+    required String artist,
+    required String album,
+    String? albumCoverUrl,
+    String? previewUrl,
+    int? duration,
+  }) async {
     try {
       await playlistService.addTrackToPlaylist(
         playlistId,
-        trackId: trackId,
+        deezerId: deezerId,
+        title: title,
+        artist: artist,
+        album: album,
+        albumCoverUrl: albumCoverUrl,
+        previewUrl: previewUrl,
+        duration: duration,
       );
       await loadPlaylistDetails(playlistId);
       return true;

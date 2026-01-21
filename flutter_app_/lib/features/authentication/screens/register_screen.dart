@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
@@ -134,6 +136,139 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'Or register with',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    const Expanded(child: Divider()),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            final GoogleSignIn googleSignIn = GoogleSignIn(
+                              clientId:
+                                  '734605703797-v6de8ju06pj8nj53d932t2t3isdiotu3.apps.googleusercontent.com',
+                            );
+                            final GoogleSignInAccount? googleUser =
+                                await googleSignIn.signIn();
+
+                            if (googleUser != null) {
+                              final GoogleSignInAuthentication
+                                  googleAuth =
+                                  await googleUser.authentication;
+
+                              final authProvider =
+                                  context.read<AuthProvider>();
+                              final success =
+                                  await authProvider.googleSignIn(
+                                code: googleAuth.idToken ?? '',
+                                redirectUri:
+                                    'http://localhost:3000/api/auth/google/callback',
+                              );
+
+                              if (!mounted) return;
+
+                              if (success) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Registered with Google!'),
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Error: ${authProvider.error}'),
+                                  ),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.g_mobiledata),
+                        label: const Text('Google'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            final result =
+                                await FacebookAuth.instance.login();
+
+                            if (result.status ==
+                                LoginStatus.success) {
+                              final accessToken =
+                                  result.accessToken;
+                              final authProvider =
+                                  context.read<AuthProvider>();
+                              final success =
+                                  await authProvider.facebookSignIn(
+                                accessToken: accessToken?.tokenString ?? '',
+                              );
+
+                              if (!mounted) return;
+
+                              if (success) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                        'Registered with Facebook!'),
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                        'Error: ${authProvider.error}'),
+                                  ),
+                                );
+                              }
+                            } else if (result.status ==
+                                LoginStatus.cancelled) {
+                              ScaffoldMessenger.of(context)
+                                  .showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Facebook login cancelled'),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.facebook),
+                        label: const Text('Facebook'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

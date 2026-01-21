@@ -138,9 +138,11 @@ class ApiService {
   /// Handle HTTP response
   dynamic _handleResponse(http.Response response) {
     logger.d('Response status: ${response.statusCode}');
+    logger.d('Response body: ${response.body}');
 
     try {
       final body = jsonDecode(response.body);
+      logger.d('Decoded body type: ${body.runtimeType}');
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return body;
@@ -151,15 +153,32 @@ class ApiService {
       } else if (response.statusCode == 404) {
         throw NotFoundException('Not found');
       } else if (response.statusCode >= 500) {
-        throw ServerException(body['message'] ?? 'Server error');
+        String message = _extractErrorMessage(body);
+        throw ServerException(message);
       } else {
-        throw ApiException(body['message'] ?? 'Error');
+        String message = _extractErrorMessage(body);
+        throw ApiException(message);
       }
     } catch (e) {
-      if (e is ApiException) rethrow;
+      if (e is ApiException || e is ServerException || e is UnauthorizedException || e is ForbiddenException || e is NotFoundException) rethrow;
       logger.e('Response parsing error: $e');
       throw ApiException('Failed to parse response: $e');
     }
+  }
+
+  /// Extract error message from response body (handles different formats)
+  String _extractErrorMessage(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      final message = body['message'];
+      if (message is String) {
+        return message;
+      } else if (message is List) {
+        // Handle validation error array
+        return message.map((e) => e.toString()).join(', ');
+      }
+      return body['error'] ?? 'Unknown error';
+    }
+    return 'Unknown error';
   }
 
   /// Auth: Register

@@ -45,7 +45,7 @@ export class Event {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column()
+  @Column({ nullable: true })
   playlistName: string;
 
   @Column({

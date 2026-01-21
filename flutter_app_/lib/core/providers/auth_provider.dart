@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import '../models/index.dart';
 import '../services/index.dart';
@@ -17,6 +16,7 @@ class AuthProvider extends ChangeNotifier {
 
   // Getters
   User? get currentUser => _currentUser;
+  User? get user => _currentUser; // Alias for easier access
   bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -97,6 +97,34 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Update profile
+  Future<bool> updateProfile({
+    String? displayName,
+    String? bio,
+    String? location,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final updatedUser = await authService.updateProfile(
+        displayName: displayName,
+        bio: bio,
+        location: location,
+      );
+      _currentUser = updatedUser;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Logout
   Future<void> logout() async {
     _isLoading = true;
@@ -113,6 +141,55 @@ class AuthProvider extends ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  /// Google Sign In
+  Future<bool> googleSignIn({
+    required String code,
+    required String redirectUri,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.googleSignIn(
+        code: code,
+        redirectUri: redirectUri,
+        platform: 'web',
+      );
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Facebook Sign In
+  Future<bool> facebookSignIn({
+    required String accessToken,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.facebookSignIn(
+        accessToken: accessToken,
+      );
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
   }
 
   /// Clear error

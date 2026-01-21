@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 import '../../config/app_config.dart';
 import '../models/index.dart';
 import 'api_service.dart';
@@ -93,7 +91,7 @@ class PlaylistService {
       body: {
         'name': name,
         if (description != null) 'description': description,
-        'isPublic': isPublic,
+        'visibility': isPublic ? 'public' : 'private',
       },
     );
 
@@ -113,7 +111,7 @@ class PlaylistService {
       body: {
         if (name != null) 'name': name,
         if (description != null) 'description': description,
-        if (isPublic != null) 'isPublic': isPublic,
+        if (isPublic != null) 'visibility': isPublic ? 'public' : 'private',
       },
     );
 
@@ -141,11 +139,25 @@ class PlaylistService {
   /// Add track to playlist
   Future<PlaylistTrack> addTrackToPlaylist(
     String playlistId, {
-    required String trackId,
+    required String deezerId,
+    required String title,
+    required String artist,
+    required String album,
+    String? albumCoverUrl,
+    String? previewUrl,
+    int? duration,
   }) async {
     final response = await apiService.post(
       '${AppConfig.playlistsEndpoint}/$playlistId/tracks',
-      body: {'trackId': trackId},
+      body: {
+        'deezerId': deezerId,
+        'title': title,
+        'artist': artist,
+        'album': album,
+        if (albumCoverUrl != null) 'albumCoverUrl': albumCoverUrl,
+        if (previewUrl != null) 'previewUrl': previewUrl,
+        if (duration != null) 'duration': duration,
+      },
     );
 
     final data = response['data'] as Map<String, dynamic>;

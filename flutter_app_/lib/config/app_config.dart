@@ -1,8 +1,11 @@
 /// Application configuration constants
 class AppConfig {
   // API Configuration
-  static const String baseUrl = 'http://localhost:3000/api';
-  static const String wsUrl = 'http://localhost:3000';
+  // For development on physical devices: Use your machine's IP (e.g., 192.168.x.x)
+  // For iOS Simulator: Try localhost:3000 first, or use your machine IP
+  // To find your IP: run `ifconfig` on Mac/Linux or `ipconfig` on Windows
+  static const String baseUrl = 'http://10.16.13.4:3000/api';
+  static const String wsUrl = 'http://10.16.13.4:3000';
   
   // API Endpoints
   static const String authEndpoint = '/auth';
