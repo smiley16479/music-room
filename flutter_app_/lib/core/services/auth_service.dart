@@ -18,19 +18,24 @@ class AuthService {
   Future<User> register({
     required String email,
     required String password,
-    String? firstName,
-    String? lastName,
+    required String displayName,
   }) async {
     final response = await apiService.register(
       email: email,
       password: password,
-      firstName: firstName,
-      lastName: lastName,
+      displayName: displayName,
     );
-
-    final userData = response['data'] as Map<String, dynamic>;
-    return User.fromJson(userData);
+  
+    final data = response['data'] as Map<String, dynamic>;
+    final userJson = data['user'] as Map<String, dynamic>;
+  
+    // Optional: store tokens here
+    final accessToken = data['accessToken'];
+    final refreshToken = data['refreshToken'];
+  
+    return User.fromJson(userJson);
   }
+
 
   /// Login user
   Future<User> login({
@@ -82,6 +87,7 @@ class AuthService {
     String? displayName,
     String? bio,
     String? location,
+    String? birthDate,
   }) async {
     final response = await apiService.patch(
       '/users/me',
@@ -89,6 +95,7 @@ class AuthService {
         if (displayName != null) 'displayName': displayName,
         if (bio != null) 'bio': bio,
         if (location != null) 'location': location,
+        if (birthDate != null) 'birthDate': birthDate,
       },
     );
 

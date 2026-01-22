@@ -45,8 +45,7 @@ class AuthProvider extends ChangeNotifier {
   Future<bool> register({
     required String email,
     required String password,
-    String? firstName,
-    String? lastName,
+    required String displayName,
   }) async {
     _isLoading = true;
     _error = null;
@@ -56,8 +55,7 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.register(
         email: email,
         password: password,
-        firstName: firstName,
-        lastName: lastName,
+        displayName: displayName,
       );
       _isAuthenticated = true;
       _isLoading = false;
@@ -102,6 +100,7 @@ class AuthProvider extends ChangeNotifier {
     String? displayName,
     String? bio,
     String? location,
+    String? birthDate,
   }) async {
     _isLoading = true;
     _error = null;
@@ -112,6 +111,7 @@ class AuthProvider extends ChangeNotifier {
         displayName: displayName,
         bio: bio,
         location: location,
+        birthDate: birthDate,
       );
       _currentUser = updatedUser;
       _isLoading = false;

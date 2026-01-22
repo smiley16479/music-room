@@ -16,16 +16,14 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _firstNameController = TextEditingController();
-  final _lastNameController = TextEditingController();
+  final _displayNameController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _firstNameController.dispose();
-    _lastNameController.dispose();
+    _displayNameController.dispose();
     super.dispose();
   }
 
@@ -36,8 +34,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final success = await authProvider.register(
       email: _emailController.text.trim(),
       password: _passwordController.text,
-      firstName: _firstNameController.text.trim(),
-      lastName: _lastNameController.text.trim(),
+      displayName: _displayNameController.text.trim(),
     );
 
     if (!mounted) return;
@@ -63,18 +60,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: ListView(
               children: [
                 TextFormField(
-                  controller: _firstNameController,
+                  controller: _displayNameController,
                   decoration: const InputDecoration(
-                    labelText: 'First Name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _lastNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Last Name',
+                    labelText: 'Display Name',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.person),
                   ),

@@ -185,16 +185,14 @@ class ApiService {
   Future<Map<String, dynamic>> register({
     required String email,
     required String password,
-    String? firstName,
-    String? lastName,
+    required String displayName,
   }) async {
     return await post(
       '${AppConfig.authEndpoint}/register',
       body: {
         'email': email,
         'password': password,
-        if (firstName != null) 'firstName': firstName,
-        if (lastName != null) 'lastName': lastName,
+        'displayName': displayName,
       },
     );
   }

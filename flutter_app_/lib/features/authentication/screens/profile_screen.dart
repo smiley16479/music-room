@@ -278,80 +278,147 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bioController = TextEditingController(text: user.bio);
     final locationController = TextEditingController(text: user.location);
 
+    final now = DateTime.now();
+    final firstDate = DateTime(now.year - 100, now.month, now.day);
+    final lastDate = DateTime(now.year - 18, now.month, now.day);
+
+    // Use user's existing DOB if available
+    DateTime selectedDate = user.birthDate ?? lastDate;
+
+    // Clamp to valid range
+    if (selectedDate.isBefore(firstDate)) selectedDate = firstDate;
+    if (selectedDate.isAfter(lastDate)) selectedDate = lastDate;
+
+    final birthDateController = TextEditingController(
+      text: selectedDate.toIso8601String().split('T').first,
+    );
+
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit Profile'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: displayNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Display Name',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bioController,
-                  decoration: const InputDecoration(
-                    labelText: 'Bio',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: locationController,
-                  decoration: const InputDecoration(
-                    labelText: 'Location',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final authProvider = context.read<AuthProvider>();
-                final success = await authProvider.updateProfile(
-                  displayName: displayNameController.text.isNotEmpty
-                      ? displayNameController.text
-                      : null,
-                  bio: bioController.text.isNotEmpty ? bioController.text : null,
-                  location: locationController.text.isNotEmpty
-                      ? locationController.text
-                      : null,
-                );
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Edit Profile'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Display Name
+                    TextField(
+                      controller: displayNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Display Name',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Bio
+                    TextField(
+                      controller: bioController,
+                      decoration: const InputDecoration(
+                        labelText: 'Bio',
+                        border: OutlineInputBorder(),
+                      ),
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 12),
+                    // Location
+                    TextField(
+                      controller: locationController,
+                      decoration: const InputDecoration(
+                        labelText: 'Location',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Birth Date
+                    GestureDetector(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate,
+                          firstDate: firstDate,
+                          lastDate: lastDate,
+                        );
 
-                if (mounted) {
-                  if (success) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Profile updated successfully!'),
+                        if (picked != null) {
+                          setDialogState(() {
+                            selectedDate = picked;
+                            birthDateController.text =
+                                picked.toIso8601String().split('T').first;
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              birthDateController.text.isEmpty
+                                  ? 'Select birth date'
+                                  : birthDateController.text,
+                            ),
+                            const Icon(Icons.calendar_today),
+                          ],
+                        ),
                       ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error: ${authProvider.error}'),
-                      ),
-                    );
-                  }
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (displayNameController.text.isNotEmpty) {
+                      final authProvider = context.read<AuthProvider>();
+  
+                      final success = await authProvider.updateProfile(
+                        displayName: displayNameController.text.trim().isNotEmpty
+                            ? displayNameController.text.trim()
+                            : null,
+                        bio: bioController.text.trim().isNotEmpty
+                            ? bioController.text.trim()
+                            : null,
+                        location: locationController.text.trim().isNotEmpty
+                            ? locationController.text.trim()
+                            : null,
+                        birthDate: birthDateController.text.trim().isNotEmpty
+                            ? birthDateController.text.trim()
+                            : null,
+                      );
+                      if (mounted) {
+                        Navigator.pop(context);
+                        if (success) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Profile updated successfully!'),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Error: ${authProvider.error}'),
+                            ),
+                          );
+                        }
+                      }
+                    }
+                  },
+                  child: const Text('Save'),
+                )
+              ],
+            );
+          },
         );
       },
     );
