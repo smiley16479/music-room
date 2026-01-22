@@ -145,8 +145,8 @@ class AuthProvider extends ChangeNotifier {
 
   /// Google Sign In
   Future<bool> googleSignIn({
-    required String code,
-    required String redirectUri,
+    required String idToken,
+    String platform = 'web',
   }) async {
     _isLoading = true;
     _error = null;
@@ -154,9 +154,34 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       _currentUser = await authService.googleSignIn(
-        code: code,
-        redirectUri: redirectUri,
-        platform: 'web',
+        idToken: idToken,
+        platform: platform,
+      );
+      _isAuthenticated = true;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Link Google Account
+  Future<bool> linkGoogleAccount({
+    required String idToken,
+    String platform = 'web',
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.linkGoogleAccount(
+        idToken: idToken,
+        platform: platform,
       );
       _isLoading = false;
       notifyListeners();
@@ -179,6 +204,30 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       _currentUser = await authService.facebookSignIn(
+        accessToken: accessToken,
+      );
+      _isAuthenticated = true;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Link Facebook Account
+  Future<bool> linkFacebookAccount({
+    required String accessToken,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.linkFacebookAccount(
         accessToken: accessToken,
       );
       _isLoading = false;

@@ -77,6 +77,10 @@ class AuthService {
       final userData = response['data'] as Map<String, dynamic>;
       return User.fromJson(userData);
     } catch (e) {
+      // If 401 or any auth error, clear tokens and return null
+      if (e.toString().contains('Unauthorized') || e.toString().contains('401')) {
+        await secureStorage.deleteTokens();
+      }
       return null;
     }
   }
@@ -122,23 +126,21 @@ class AuthService {
 
   /// Google Sign In
   Future<User> googleSignIn({
-    required String code,
-    required String redirectUri,
+    required String idToken,
     String platform = 'web',
   }) async {
     final response = await apiService.post(
       '/auth/google/mobile-token',
       body: {
-        'code': code,
-        'redirectUri': redirectUri,
+        'code': idToken, // The backend expects 'code' but we send the ID token
+        'redirectUri': 'http://localhost:3000/api/auth/google/callback',
         'platform': platform,
       },
     );
 
-    final data = response['data'] as Map<String, dynamic>;
-    final token = data['accessToken'] as String;
-    final refreshToken = data['refreshToken'] as String?;
-    final userData = data['user'] as Map<String, dynamic>;
+    final token = response['accessToken'] as String;
+    final refreshToken = response['refreshToken'] as String?;
+    final userData = response['user'] as Map<String, dynamic>;
 
     // Save tokens
     await secureStorage.saveToken(token);
@@ -149,21 +151,39 @@ class AuthService {
     return User.fromJson(userData);
   }
 
+  /// Link Google Account
+  Future<User> linkGoogleAccount({
+    required String idToken,
+    String platform = 'web',
+  }) async {
+    final response = await apiService.post(
+      '/auth/google/mobile-token',
+      body: {
+        'code': idToken,
+        'redirectUri': 'http://localhost:3000/api/auth/google/callback',
+        'platform': platform,
+        'linkingMode': 'link',
+      },
+    );
+
+    final data = response['data'] as Map<String, dynamic>;
+    return User.fromJson(data);
+  }
+
   /// Facebook Sign In
   Future<User> facebookSignIn({
     required String accessToken,
   }) async {
     final response = await apiService.post(
-      '/auth/facebook/mobile-token',
+      '/auth/facebook/mobile-login',
       body: {
-        'accessToken': accessToken,
+        'access_token': accessToken,
       },
     );
 
-    final data = response['data'] as Map<String, dynamic>;
-    final token = data['accessToken'] as String;
-    final refreshToken = data['refreshToken'] as String?;
-    final userData = data['user'] as Map<String, dynamic>;
+    final token = response['accessToken'] as String;
+    final refreshToken = response['refreshToken'] as String?;
+    final userData = response['user'] as Map<String, dynamic>;
 
     // Save tokens
     await secureStorage.saveToken(token);
@@ -172,5 +192,21 @@ class AuthService {
     }
 
     return User.fromJson(userData);
+  }
+
+  /// Link Facebook Account
+  Future<User> linkFacebookAccount({
+    required String accessToken,
+  }) async {
+    final response = await apiService.post(
+      '/auth/facebook/mobile-login',
+      body: {
+        'access_token': accessToken,
+        'linkingMode': 'link',
+      },
+    );
+
+    final data = response['data'] as Map<String, dynamic>;
+    return User.fromJson(data);
   }
 }

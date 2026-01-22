@@ -1,9 +1,12 @@
+import 'dart:io' show Platform;import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../config/app_config.dart';
 import 'register_screen.dart';
 
 /// Login screen
@@ -40,6 +43,38 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(authProvider.error ?? 'Login failed')),
+      );
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    try {
+      // Use backend OAuth for all platforms
+      // For mobile: use deep link scheme, for web: pass current origin as redirect
+      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
+      final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google')
+          .replace(queryParameters: {'redirect_uri': redirectUri});
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not launch Google Sign In: $e')),
+      );
+    }
+  }
+
+  Future<void> _handleFacebookSignIn() async {
+    try {
+      // Use backend OAuth for all platforms
+      // For mobile: use deep link scheme, for web: pass current origin as redirect
+      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
+      final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook')
+          .replace(queryParameters: {'redirect_uri': redirectUri});
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not launch Facebook Sign In: $e')),
       );
     }
   }
@@ -137,54 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () async {
-                          try {
-                            final googleSignIn = GoogleSignIn(
-                              clientId:
-                                  '734605703797-v6de8ju06pj8nj53d932t2t3isdiotu3.apps.googleusercontent.com',
-                              scopes: [
-                                'email',
-                                'profile',
-                              ],
-                            );
-
-                            final googleUser = await googleSignIn.signIn();
-                            if (googleUser == null) return;
-
-                            final googleAuth =
-                                await googleUser.authentication;
-                            final authProvider =
-                                context.read<AuthProvider>();
-
-                            final success =
-                                await authProvider.googleSignIn(
-                              code: googleAuth.idToken ?? '',
-                              redirectUri:
-                                  'http://localhost:3000/api/auth/google/callback',
-                            );
-
-                            if (!mounted) return;
-
-                            if (success) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Logged in with Google!'),
-                                ),
-                              );
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                      'Error: ${authProvider.error}'),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        },
+                        onPressed: _handleGoogleSignIn,
                         icon: const Icon(Icons.g_mobiledata),
                         label: const Text('Google'),
                       ),
@@ -192,57 +180,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () async {
-                          try {
-                            final result =
-                                await FacebookAuth.instance.login();
-
-                            if (result.status ==
-                                LoginStatus.success) {
-                              final accessToken =
-                                  result.accessToken;
-                              final authProvider =
-                                  context.read<AuthProvider>();
-                              final success =
-                                  await authProvider.facebookSignIn(
-                                accessToken: accessToken?.tokenString ?? '',
-                              );
-
-                              if (!mounted) return;
-
-                              if (success) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                        'Logged in with Facebook!'),
-                                  ),
-                                );
-                              } else {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                        'Error: ${authProvider.error}'),
-                                  ),
-                                );
-                              }
-                            } else if (result.status ==
-                                LoginStatus.cancelled) {
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(
-                                const SnackBar(
-                                  content:
-                                      Text('Facebook login cancelled'),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e')),
-                            );
-                          }
-                        },
+                        onPressed: _handleFacebookSignIn,
                         icon: const Icon(Icons.facebook),
                         label: const Text('Facebook'),
                       ),

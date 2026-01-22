@@ -61,7 +61,8 @@ class ApiService {
       final headers = await _getHeaders();
 
       logger.d('GET $url');
-      final response = await httpClient.get(url, headers: headers);
+      final response = await httpClient.get(url, headers: headers)
+          .timeout(const Duration(seconds: 10));
 
       return _handleResponse(response);
     } catch (e) {
@@ -85,7 +86,7 @@ class ApiService {
         url,
         headers: headers,
         body: jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 10));
 
       return _handleResponse(response);
     } catch (e) {
@@ -109,7 +110,7 @@ class ApiService {
         url,
         headers: headers,
         body: jsonEncode(body),
-      );
+      ).timeout(const Duration(seconds: 10));
 
       return _handleResponse(response);
     } catch (e) {
@@ -126,7 +127,8 @@ class ApiService {
       final headers = await _getHeaders();
 
       logger.d('DELETE $url');
-      final response = await httpClient.delete(url, headers: headers);
+      final response = await httpClient.delete(url, headers: headers)
+          .timeout(const Duration(seconds: 10));
 
       return _handleResponse(response);
     } catch (e) {

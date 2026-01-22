@@ -15,7 +15,8 @@ import {
   Inject,
   HttpException,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+// Use `any` for Express request/response in this file until proper @types are installed
+// (avoids conflicts with DOM types in editor). Replace `any` with proper types after running `npm install`.
 import { AuthService } from './auth.service';
 import { UserService } from '../user/user.service';
 import { JwtService } from '@nestjs/jwt';
@@ -48,8 +49,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    private readonly jwtService: any,
+    private readonly configService: any,
   ) {}
 
   @Public()
@@ -110,7 +111,7 @@ export class AuthController {
       },
     },
   })
-  async login(@Req() req: Request & { user: User }, @Body() loginDto: LoginDto) {
+  async login(@Req() req: any, @Body() loginDto: LoginDto) {
     const result = await this.authService.login(loginDto);
     return {
       success: true,
@@ -290,7 +291,7 @@ export class AuthController {
       platform: 'ios' | 'android';
       linkingMode?: 'link'
     },
-    @Req() request: Request
+    @Req() request: any
   ) {
     this.logger.log(`google/mobile-token exchange for ${body.platform}, linkingMode: ${body.linkingMode}`);
     
@@ -369,7 +370,7 @@ export class AuthController {
     summary: 'Google OAuth callback',
     description: 'Handles the Google OAuth callback and redirects to the frontend with authentication tokens',
   })
-  async googleAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+  async googleAuthCallback(@Req() req: any, @Res() res: any) {
     this.logger.log(`googleAuthCallback`);
     try {
       const user = req.user;
@@ -379,9 +380,9 @@ export class AuthController {
         // This is a linking flow
         try {
           // Verify the user token
-          const payload = this.jwtService.verify(user.linkingToken, { 
-            secret: this.configService.get<string>('JWT_SECRET') 
-          });
+            const payload = this.jwtService.verify(user.linkingToken, { 
+              secret: this.configService.get('JWT_SECRET') 
+            });
           const currentUser = await this.userService.findByEmail(payload.email);
           
           if (!currentUser) {
@@ -421,7 +422,20 @@ export class AuthController {
       const result = await this.authService.googleLogin(req.user);
       console.log('Google login successful:', result);
 
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
+      // Check for mobile redirect from state or query parameter
+      let redirectUri = req.query.redirect_uri as string;
+      
+      // Try to extract from state parameter if not in query
+      if (!redirectUri && req.query.state) {
+        try {
+          const state = JSON.parse(req.query.state as string);
+          redirectUri = state.redirect_uri;
+        } catch (e) {
+          // State is not JSON, ignore
+        }
+      }
+      
+      const frontendUrl = redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
       const userData = encodeURIComponent(JSON.stringify({
         id: result.user.id,
         email: result.user.email,
@@ -429,7 +443,11 @@ export class AuthController {
         avatarUrl: result.user.avatarUrl
       }));
       
-      const redirectUrl = `${frontendUrl}/auth/callback?` +
+      const redirectUrl = `${frontendUrl}${
+        frontendUrl.includes('://') && !frontendUrl.includes('http') 
+          ? '?' // Deep link, use ?
+          : '/auth/callback?' // Web URL, use /auth/callback?
+      }` +
         `token=${result.accessToken}&` +
         `refresh=${result.refreshToken}&` +
         `user=${userData}&` +
@@ -437,8 +455,23 @@ export class AuthController {
       
       res.redirect(redirectUrl);
     } catch (error) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
-      const redirectUrl = `${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`;
+      let redirectUri = req.query.redirect_uri as string;
+      
+      if (!redirectUri && req.query.state) {
+        try {
+          const state = JSON.parse(req.query.state as string);
+          redirectUri = state.redirect_uri;
+        } catch (e) {
+          // State is not JSON, ignore
+        }
+      }
+      
+      const frontendUrl = redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
+      const redirectUrl = `${frontendUrl}${
+        frontendUrl.includes('://') && !frontendUrl.includes('http')
+          ? '?'
+          : '/auth/callback?'
+      }error=${encodeURIComponent(error.message)}`;
       res.redirect(redirectUrl);
     }
   }
@@ -462,7 +495,7 @@ export class AuthController {
     summary: 'Facebook OAuth callback',
     description: 'Handles the Facebook OAuth callback and redirects to the frontend with authentication tokens',
   })
-  async facebookAuthCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+  async facebookAuthCallback(@Req() req: any, @Res() res: any) {
     try {
       const user = req.user;
       
@@ -472,7 +505,7 @@ export class AuthController {
         try {
           // Verify the user token
           const payload = this.jwtService.verify(user.linkingToken, { 
-            secret: this.configService.get<string>('JWT_SECRET') 
+            secret: this.configService.get('JWT_SECRET') 
           });
           const currentUser = await this.userService.findByEmail(payload.email);
           
@@ -513,24 +546,55 @@ export class AuthController {
       const result = await this.authService.facebookLogin(req.user);
       
       // Redirect to frontend with tokens and minimal user data
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
+      let redirectUri = req.query.redirect_uri as string;
+      
+      // Try to extract from state parameter if not in query
+      if (!redirectUri && req.query.state) {
+        try {
+          const state = JSON.parse(req.query.state as string);
+          redirectUri = state.redirect_uri;
+        } catch (e) {
+          // State is not JSON, ignore
+        }
+      }
+      
+      const frontendUrl = redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
       const userData = encodeURIComponent(JSON.stringify({
         id: result.user.id,
         email: result.user.email,
         displayName: result.user.displayName,
         avatarUrl: result.user.avatarUrl
       }));
-      
-      const redirectUrl = `${frontendUrl}/auth/callback?` +
+
+      const redirectUrl = `${frontendUrl}${
+        frontendUrl.includes('://') && !frontendUrl.includes('http')
+          ? '?'
+          : '/auth/callback?'
+      }` +
         `token=${result.accessToken}&` +
         `refresh=${result.refreshToken}&` +
         `user=${userData}&` +
         `success=true`;
-      
+
       res.redirect(redirectUrl);
     } catch (error) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5050';
-      const redirectUrl = `${frontendUrl}/auth/callback?error=${encodeURIComponent(error.message)}`;
+      let redirectUri = req.query.redirect_uri as string;
+      
+      if (!redirectUri && req.query.state) {
+        try {
+          const state = JSON.parse(req.query.state as string);
+          redirectUri = state.redirect_uri;
+        } catch (e) {
+          // State is not JSON, ignore
+        }
+      }
+      
+      const frontendUrl = redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
+      const redirectUrl = `${frontendUrl}${
+        frontendUrl.includes('://') && !frontendUrl.includes('http')
+          ? '?'
+          : '/auth/callback?'
+      }error=${encodeURIComponent(error.message)}`;
       res.redirect(redirectUrl);
     }
   }
@@ -543,7 +607,7 @@ export class AuthController {
   })
   async facebookMobileLogin(
     @Body() body: { access_token: string; linkingMode?: 'link' },
-    @Req() request: Request
+    @Req() request: any
   ) {
     try {
       this.logger.log(`facebookMobileLogin access_token ${body.access_token}, linkingMode: ${body.linkingMode}`);
@@ -738,58 +802,38 @@ export class AuthController {
     summary: 'Google OAuth linking callback',
     description: 'Handles the Google OAuth callback for account linking',
   })
-  async googleLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+  async googleLinkCallback(@Req() req: any, @Res() res: any) {
+    const user = req.user;
+    const redirectUri = user.redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
     
     try {
-      const user = req.user;
-      
-      
       if (!user.linkingToken) {
-        
         throw new UnauthorizedException('Missing authentication token for linking');
       }
       
       // Verify the user token
-      
-      const payload = this.jwtService.verify(user.linkingToken, { 
-        secret: this.configService.get<string>('JWT_SECRET') 
+          const payload = this.jwtService.verify(user.linkingToken, { 
+        secret: this.configService.get('JWT_SECRET') 
       });
       
       const currentUser = await this.userService.findByEmail(payload.email);
       
       if (!currentUser) {
-        
         throw new UnauthorizedException('User not found');
       }
       
       // Link the Google account
-      
       await this.authService.linkGoogleProfile(currentUser, user);
       
-      
-      
-      // Send success message to parent window (popup)
-      res.send(`
-        <script>
-          window.opener.postMessage({
-            type: 'OAUTH_SUCCESS',
-            provider: 'google'
-          }, '*');
-          setTimeout(() => window.close(), 500);
-        </script>
-      `);
+      // Redirect to the app with success
+      const isDeepLink = redirectUri.includes('://') && !redirectUri.startsWith('http');
+      const redirectUrl = `${redirectUri}${isDeepLink ? '?' : '/auth/callback?'}success=true&provider=google`;
+      res.redirect(redirectUrl);
     } catch (error) {
-      
-      // Send error message to parent window (popup)
-      res.send(`
-        <script>
-          window.opener.postMessage({
-            type: 'OAUTH_ERROR',
-            error: '${error.message || 'Failed to link Google account'}'
-          }, '*');
-          setTimeout(() => window.close(), 500);
-        </script>
-      `);
+      // Redirect to the app with error
+      const isDeepLink = redirectUri.includes('://') && !redirectUri.startsWith('http');
+      const redirectUrl = `${redirectUri}${isDeepLink ? '?' : '/auth/callback?'}error=${encodeURIComponent(error.message || 'Failed to link Google account')}`;
+      res.redirect(redirectUrl);
     }
   }
 
@@ -813,58 +857,38 @@ export class AuthController {
     summary: 'Facebook OAuth linking callback',
     description: 'Handles the Facebook OAuth callback for account linking',
   })
-  async facebookLinkCallback(@Req() req: Request & { user: any }, @Res() res: Response) {
+  async facebookLinkCallback(@Req() req: any, @Res() res: any) {
+    const user = req.user;
+    const redirectUri = user.redirectUri || process.env.FRONTEND_URL || 'http://localhost:5050';
     
     try {
-      const user = req.user;
-      
-      
       if (!user.linkingToken) {
-        
         throw new UnauthorizedException('Missing authentication token for linking');
       }
       
       // Verify the user token
-      
       const payload = this.jwtService.verify(user.linkingToken, { 
-        secret: this.configService.get<string>('JWT_SECRET') 
+        secret: this.configService.get('JWT_SECRET') 
       });
       
       const currentUser = await this.userService.findByEmail(payload.email);
       
       if (!currentUser) {
-        
         throw new UnauthorizedException('User not found');
       }
       
       // Link the Facebook account
-      
       await this.authService.linkFacebookProfile(currentUser, user);
       
-      
-      
-      // Send success message to parent window (popup)
-      res.send(`
-        <script>
-          window.opener.postMessage({
-            type: 'OAUTH_SUCCESS',
-            provider: 'facebook'
-          }, '*');
-          setTimeout(() => window.close(), 500);
-        </script>
-      `);
+      // Redirect to the app with success
+      const isDeepLink = redirectUri.includes('://') && !redirectUri.startsWith('http');
+      const redirectUrl = `${redirectUri}${isDeepLink ? '?' : '/auth/callback?'}success=true&provider=facebook`;
+      res.redirect(redirectUrl);
     } catch (error) {
-      
-      // Send error message to parent window (popup)
-      res.send(`
-        <script>
-          window.opener.postMessage({
-            type: 'OAUTH_ERROR',
-            error: '${error.message || 'Failed to link Facebook account'}'
-          }, '*');
-          setTimeout(() => window.close(), 500);
-        </script>
-      `);
+      // Redirect to the app with error
+      const isDeepLink = redirectUri.includes('://') && !redirectUri.startsWith('http');
+      const redirectUrl = `${redirectUri}${isDeepLink ? '?' : '/auth/callback?'}error=${encodeURIComponent(error.message || 'Failed to link Facebook account')}`;
+      res.redirect(redirectUrl);
     }
   }
 }

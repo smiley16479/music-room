@@ -163,9 +163,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   context.read<AuthProvider>();
                               final success =
                                   await authProvider.googleSignIn(
-                                code: googleAuth.idToken ?? '',
-                                redirectUri:
-                                    'http://localhost:3000/api/auth/google/callback',
+                                idToken: googleAuth.idToken ?? '',
                               );
 
                               if (!mounted) return;

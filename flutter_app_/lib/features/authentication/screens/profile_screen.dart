@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import 'account_linking_screen.dart';
 
 /// Profile screen - user profile and settings
 class ProfileScreen extends StatefulWidget {
@@ -144,9 +145,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Connected Accounts',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Connected Accounts',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const AccountLinkingScreen(),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.link),
+                          label: const Text('Manage'),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 16),
                     _buildAccountTile(
