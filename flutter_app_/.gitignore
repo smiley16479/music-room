@@ -43,3 +43,23 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Flutter
+.dart_tool/
+.build/
+.packages
+.pub-cache/
+.idea/
+.vscode/
+build/
+
+# Android
+android/.gradle/
+android/app/build/
+android/local.properties  # contient chemin SDK local
+android/*.iml
+
+# iOS
+ios/Flutter/Flutter.framework
+ios/Pods/
+ios/Runner.xcworkspace/

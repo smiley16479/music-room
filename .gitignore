@@ -78,3 +78,5 @@ Packages/
 
 # macOS
 .DS_Store
+
+/personnalDir
