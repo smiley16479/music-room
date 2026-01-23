@@ -4,8 +4,8 @@ class AppConfig {
   // For development on physical devices: Use your machine's IP (e.g., 192.168.x.x)
   // For iOS Simulator: Try localhost:3000 first, or use your machine IP
   // To find your IP: run `ifconfig` on Mac/Linux or `ipconfig` on Windows
-  static const String baseUrl = 'http://localhost:3000/api';
-  static const String wsUrl = 'http://localhost:3000';
+  static const String baseUrl = 'http://10.16.13.1:3000/api';
+  static const String wsUrl = 'http://10.16.13.1:3000';
   
   // API Endpoints
   static const String authEndpoint = '/auth';
@@ -28,6 +28,11 @@ class AppConfig {
   static const String appName = 'Music Room';
   static const String appVersion = '1.0.0';
   
+  // Debug Settings
+  /// Set to true to skip authentication and go directly to HomeScreen
+  /// ⚠️ WARNING: Set to false in production!
+  static const bool debugSkipAuth = false;
+  
   // Network timeouts (in seconds)
   static const int connectTimeout = 30;
   static const int receiveTimeout = 30;
@@ -43,6 +48,7 @@ class AppConfig {
     Version: $appVersion
     Base URL: $baseUrl
     WS URL: $wsUrl
+    Debug Skip Auth: $debugSkipAuth
     =============================
     ''');
   }

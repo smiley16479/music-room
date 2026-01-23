@@ -9,11 +9,11 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
-import { Event } from 'src/event/entities/event.entity';
+import { Event, EventVisibility } from 'src/event/entities/event.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User, VisibilityLevel } from 'src/user/entities/user.entity';
@@ -26,6 +26,7 @@ import { IsLatitude } from 'class-validator';
 import { getAvatarUrl } from 'src/common/utils/avatar.utils';
 import { create } from 'domain';
 import { UserService } from 'src/user/user.service';
+import { ParticipantRole } from './entities/event-participant.entity';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -436,8 +437,8 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         status: event.status,
         locationName: event.locationName,
         eventDate: event.eventDate,
-        eventEndDate: event.eventEndDate,
-        participants: event.participants ? event.participants.map(p => ({ id: p.id, displayName: p.displayName, avatarUrl: p.avatarUrl })) : [],
+        endDate: event.endDate,
+        participants: event.participants ? event.participants.map(p => ({ id: p.userId, displayName: p.user.displayName, avatarUrl: p.user.avatarUrl })) : [],
         participantsCount: event.participants ? event.participants.length : 0,
         creator: creator ? { id: creator.id, displayName: creator.displayName, avatarUrl: creator.avatarUrl } : null,
       },
@@ -561,28 +562,50 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   // Track Management (for events that use playlists)
-  notifyTrackAdded(eventId: string, track: Track, addedBy: string) {
+  notifyTrackAdded(eventId: string, track: any, addedBy: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    
+    // Handle both Track and PlaylistTrackWithDetails
+    const trackData = track.track ? {
+      id: track.track.id,
+      title: track.track.title,
+      artist: track.track.artist,
+      album: track.track.album,
+      duration: track.track.duration,
+      thumbnailUrl: track.track.albumCoverUrl,
+      previewUrl: track.track.previewUrl,
+      addedBy: track.addedBy ? {
+        id: track.addedBy.id,
+        displayName: track.addedBy.displayName,
+        avatarUrl: track.addedBy.avatarUrl,
+      } : undefined,
+      position: track.position,
+      addedAt: track.addedAt,
+    } : {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration: track.duration,
+      thumbnailUrl: track.albumCoverUrl,
+      previewUrl: track.previewUrl,
+      addedBy,
+    };
+
     this.server.to(room).emit('track-added', {
       eventId,
-      track: {
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        album: track.album,
-        duration: track.duration,
-        thumbnailUrl: track.albumCoverUrl,
-        previewUrl: track.previewUrl,
-        addedBy,
-      },
+      playlistId: eventId, // Support both
+      track: trackData,
+      addedBy,
       timestamp: new Date().toISOString(),
     });
   }
 
-  notifyTrackRemoved(eventId: string, trackId: string, removedBy: string) {
+  notifyTrackRemoved(eventId: string, trackId: string, removedBy: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('track-removed', {
       eventId,
+      playlistId: eventId, // Support both
       trackId,
       removedBy,
       timestamp: new Date().toISOString(),
@@ -593,8 +616,16 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('tracks-reordered', {
       eventId,
+      playlistId: eventId, // Support both eventId and playlistId
       trackOrder,
+      trackIds: trackOrder, // Support both trackOrder and trackIds
       reorderedBy,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Also notify global events room
+    this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-tracks-reordered', {
+      playlistId: eventId,
       timestamp: new Date().toISOString(),
     });
   }
@@ -944,62 +975,62 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   // Track accessibility tracking
   private trackAccessibilityReports = new Map<string, Map<string, { canPlay: boolean; timestamp: Date }>>();
 
-  @SubscribeMessage('track-accessibility-report')
-  async handleTrackAccessibilityReport(
-    @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId, trackId, canPlay, reason }: { 
-      eventId: string; 
-      trackId: string; 
-      canPlay: boolean; 
-      reason?: string;
-    }
-  ) {
-    try {
-      if (!client.userId) {
-        client.emit('error', { message: 'Authentication required' });
-        return;
-      }
+  // @SubscribeMessage('track-accessibility-report')
+  // async handleTrackAccessibilityReport(
+  //   @ConnectedSocket() client: AuthenticatedSocket,
+  //   @MessageBody() { eventId, trackId, canPlay, reason }: { 
+  //     eventId: string; 
+  //     trackId: string; 
+  //     canPlay: boolean; 
+  //     reason?: string;
+  //   }
+  // ) {
+  //   try {
+  //     if (!client.userId) {
+  //       client.emit('error', { message: 'Authentication required' });
+  //       return;
+  //     }
 
-      const reportKey = `${eventId}:${trackId}`;
+  //     const reportKey = `${eventId}:${trackId}`;
       
-      if (!this.trackAccessibilityReports.has(reportKey)) {
-        this.trackAccessibilityReports.set(reportKey, new Map());
-      }
+  //     if (!this.trackAccessibilityReports.has(reportKey)) {
+  //       this.trackAccessibilityReports.set(reportKey, new Map());
+  //     }
       
-      const trackReports = this.trackAccessibilityReports.get(reportKey)!;
-      trackReports.set(client.userId, {
-        canPlay,
-        timestamp: new Date()
-      });
+  //     const trackReports = this.trackAccessibilityReports.get(reportKey)!;
+  //     trackReports.set(client.userId, {
+  //       canPlay,
+  //       timestamp: new Date()
+  //     });
 
-      this.logger.log(`User ${client.userId} reported track ${trackId} accessibility: ${canPlay ? 'playable' : 'unplayable'} ${reason ? `(${reason})` : ''}`);
+  //     this.logger.log(`User ${client.userId} reported track ${trackId} accessibility: ${canPlay ? 'playable' : 'unplayable'} ${reason ? `(${reason})` : ''}`);
 
-      const participants = await this.getEventParticipants(eventId);
-      const participantCount = participants.length;
+  //     const participants = await this.getEventParticipants(eventId);
+  //     const participantCount = participants.length;
       
-      if (trackReports.size >= Math.min(3, Math.ceil(participantCount * 0.6))) {
-        const canPlayCount = Array.from(trackReports.values()).filter(report => report.canPlay).length;
-        const cannotPlayCount = trackReports.size - canPlayCount;
+  //     if (trackReports.size >= Math.min(3, Math.ceil(participantCount * 0.6))) {
+  //       const canPlayCount = Array.from(trackReports.values()).filter(report => report.canPlay).length;
+  //       const cannotPlayCount = trackReports.size - canPlayCount;
         
-        if (cannotPlayCount > canPlayCount && cannotPlayCount >= 2) {
-          const event = await this.eventService.findById(eventId, client.userId);
+  //       if (cannotPlayCount > canPlayCount && cannotPlayCount >= 2) {
+  //         const event = await this.eventService.findById(eventId, client.userId);
           
-          let adminUserId = event.creatorId;
-          if (!adminUserId && event.admins && event.admins.length > 0) {
-            adminUserId = event.admins[0].id;
-          }
+  //         let adminUserId = event.creatorId;
+  //         if (!adminUserId && event.admins && event.admins.length > 0) {
+  //           adminUserId = event.admins[0].id;
+  //         }
           
-          if (adminUserId) {
-            await this.handleTrackSkipDueToAccessibility(eventId, trackId, adminUserId, 'majority_cannot_play');
-          }
-        }
-      }
+  //         if (adminUserId) {
+  //           await this.handleTrackSkipDueToAccessibility(eventId, trackId, adminUserId, 'majority_cannot_play');
+  //         }
+  //       }
+  //     }
 
-    } catch (error) {
-      this.logger.error(`Track accessibility report error: ${error.message}`);
-      client.emit('error', { message: 'Failed to report track accessibility', details: error.message });
-    }
-  }
+  //   } catch (error) {
+  //     this.logger.error(`Track accessibility report error: ${error.message}`);
+  //     client.emit('error', { message: 'Failed to report track accessibility', details: error.message });
+  //   }
+  // }
 
   private async handleTrackSkipDueToAccessibility(eventId: string, trackId: string, adminUserId: string, reason: string) {
     try {
@@ -1067,9 +1098,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       const event = await this.eventService.findById(eventId, client.userId);
       const isCreator = event.creatorId === client.userId;
-      const isAdmin = event.admins?.some(admin => admin.id === client.userId) || false;
+      // const isAdmin = event.admins?.some(admin => admin.id === client.userId) || false;
 
-      if (isCreator || isAdmin) {
+      if (isCreator /* || isAdmin */) {
         try {
           if (event.playlist && event.playlist.id) {
             await this.playlistService.removeTrack(event.playlist.id, trackId, client.userId);
@@ -1181,7 +1212,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       }
 
       // Check if user is admin
-      const isAdmin = event.admins?.some(admin => admin.id === userId);
+      const isAdmin = event.participants?.some(participant => participant.userId === userId && participant.role === ParticipantRole.ADMIN);
       return !!isAdmin;
     } catch (error) {
       this.logger.error(`Error checking playback control permissions: ${error.message}`);
@@ -1199,6 +1230,105 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('playback-state-updated', {
       eventId,
       state,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // ============================================
+  // PLAYLIST NOTIFICATIONS (centralized here)
+  // ============================================
+
+  notifyPlaylistCreated(playlist: any, creator: any) {
+    // Since all playlists are event-based, notify both rooms
+    if (playlist.event?.visibility === EventVisibility.PUBLIC) {
+      this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-created', {
+        playlist: {
+          id: playlist.id,
+          name: playlist.name,
+          description: playlist.description,
+          coverImageUrl: playlist.coverImageUrl,
+          createdAt: playlist.createdAt,
+          creator: creator ? {
+            id: creator.id,
+            displayName: creator.displayName,
+            avatarUrl: creator.avatarUrl,
+          } : null,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  notifyPlaylistUpdated(playlistId: string, playlist: any, userId: string) {
+    const room = SOCKET_ROOMS.EVENT(playlistId);
+    this.server.to(room).emit('playlist-updated', {
+      playlistId,
+      playlist: {
+        id: playlist.id,
+        name: playlist.name,
+        description: playlist.description,
+        coverImageUrl: playlist.coverImageUrl,
+        updatedAt: playlist.updatedAt,
+      },
+      updatedBy: userId,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (playlist.event?.visibility === EventVisibility.PUBLIC) {
+      this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-updated', {
+        playlistId,
+        playlist: {
+          id: playlist.id,
+          name: playlist.name,
+          description: playlist.description,
+          coverImageUrl: playlist.coverImageUrl,
+          updatedAt: playlist.updatedAt,
+        },
+        updatedBy: userId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  notifyPlaylistDeleted(playlistId: string, deletedBy: string) {
+    this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-deleted', {
+      playlistId,
+      deletedBy,
+      timestamp: new Date().toISOString(),
+    });
+
+    const room = SOCKET_ROOMS.EVENT(playlistId);
+    this.server.to(room).emit('playlist-deleted', {
+      playlistId,
+      deletedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyCollaboratorAdded(playlistId: string, collaborator: any, addedBy: string) {
+    const room = SOCKET_ROOMS.EVENT(playlistId);
+    this.server.to(room).emit('collaborator-added', {
+      playlistId,
+      collaborator: {
+        id: collaborator.id,
+        displayName: collaborator.displayName,
+        avatarUrl: collaborator.avatarUrl,
+      },
+      addedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyCollaboratorRemoved(playlistId: string, collaborator: any, removedBy: string) {
+    const room = SOCKET_ROOMS.EVENT(playlistId);
+    this.server.to(room).emit('collaborator-removed', {
+      playlistId,
+      collaborator: {
+        id: collaborator.id,
+        displayName: collaborator.displayName,
+        avatarUrl: collaborator.avatarUrl,
+      },
+      removedBy,
       timestamp: new Date().toISOString(),
     });
   }

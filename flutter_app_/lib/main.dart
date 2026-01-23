@@ -100,6 +100,11 @@ class _InitialScreenState extends State<_InitialScreen> {
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, _) {
+        // Debug mode: skip authentication
+        if (AppConfig.debugSkipAuth) {
+          return const HomeScreen();
+        }
+        
         if (authProvider.isLoading) {
           return const Scaffold(
             body: Center(

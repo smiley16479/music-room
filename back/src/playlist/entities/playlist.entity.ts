@@ -5,8 +5,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
-  ManyToMany,
-  JoinTable,
   JoinColumn,
   OneToMany,
   OneToOne,
@@ -14,17 +12,9 @@ import {
 import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
 import { PlaylistTrack } from './playlist-track.entity';
-import { Invitation } from 'src/invitation/entities/invitation.entity';
 
-export enum PlaylistVisibility {
-  PUBLIC = 'public',
-  PRIVATE = 'private',
-}
-
-export enum PlaylistLicenseType {
-  OPEN = 'open', // Everyone can edit
-  INVITED = 'invited', // Only invited users can edit
-}
+// Removed: PlaylistVisibility, PlaylistLicenseType
+// All permissions are now handled via Event entity
 
 @Entity('playlists')
 export class Playlist {
@@ -37,20 +27,8 @@ export class Playlist {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column({
-    type: 'enum',
-    enum: PlaylistVisibility,
-    default: PlaylistVisibility.PUBLIC,
-  })
-  visibility: PlaylistVisibility;
-
-  @Column({
-    name: 'license_type',
-    type: 'enum',
-    enum: PlaylistLicenseType,
-    default: PlaylistLicenseType.OPEN,
-  })
-  licenseType: PlaylistLicenseType;
+  @Column({ name: 'is_public', type: 'boolean', default: false })
+  isPublic: boolean; // Simple visibility flag (different from Event permissions)
 
   @Column({ name: 'cover_image_url', nullable: true })
   coverImageUrl: string;
@@ -67,32 +45,28 @@ export class Playlist {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // Relations
-  @ManyToOne(() => User, (user) => user.createdPlaylists, { onDelete: 'CASCADE' }) // ok
+  /* // Relations
+  @ManyToOne(() => User, (user) => user.createdPlaylists, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'creator_id' })
   creator: User;
 
   @Column({ name: 'creator_id' })
-  creatorId: string;
+  creatorId: string; */
 
-  @ManyToMany(() => User, (user) => user.collaboratedPlaylists) // ok
-  @JoinTable({
-    name: 'playlist_collaborators',
-    joinColumn: { name: 'playlist_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'user_id', referencedColumnName: 'id' },
-  })
-  collaborators: User[];
+  // Removed: collaborators - now managed via event_participants
+  // Removed: licenseType, visibility - now in Event entity
 
-  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.playlist) // ok
+  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.playlist, { cascade: true })
   playlistTracks: PlaylistTrack[];
 
-  @OneToOne(() => Event, (event)=> event.playlist, { nullable: true, onDelete: 'CASCADE' }) // ok
+  // MANDATORY 1:1 relation with Event
+  @OneToOne(() => Event, (event) => event.playlist, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'event_id' })
   event: Event;
 
-  @Column({ name: 'event_id', nullable: true })
+  @Column({ name: 'event_id', nullable: false })
   eventId: string;
 
-  @OneToMany(() => Invitation, (invitation) => invitation.playlist) // ok
-  invitations: Invitation[];
+  // Removed: invitations - now only on Event
 }
 

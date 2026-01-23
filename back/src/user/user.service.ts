@@ -142,7 +142,7 @@ export class UserService {
     const user = await this.findById(id);
 
     // Handle avatar URL logic
-    const updateData = { ...updateUserDto };
+    const updateData: UpdateUserDto = { ...updateUserDto };
     
     // If avatarUrl is provided and not empty, use it
     // If avatarUrl is empty or not provided, keep the existing avatar
@@ -410,36 +410,36 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async getUserStats(userId: string): Promise<{
-    friendsCount: number;
-    eventsCreated: number;
-    eventsParticipated: number;
-    playlistsCreated: number;
-    playlistsCollaborated: number;
-  }> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: [
-        'friends',
-        'createdEvents',
-        'participatedEvents',
-        'createdPlaylists',
-        'collaboratedPlaylists',
-      ],
-    });
+  // async getUserStats(userId: string): Promise<{
+  //   friendsCount: number;
+  //   eventsCreated: number;
+  //   eventsParticipated: number;
+  //   playlistsCreated: number;
+  //   playlistsCollaborated: number;
+  // }> {
+  //   const user = await this.userRepository.findOne({
+  //     where: { id: userId },
+  //     relations: [
+  //       'friends',
+  //       'createdEvents',
+  //       'participatedEvents',
+  //       'createdPlaylists',
+  //       'collaboratedPlaylists',
+  //     ],
+  //   });
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+  //   if (!user) {
+  //     throw new NotFoundException('User not found');
+  //   }
 
-    return {
-      friendsCount: user.friends?.length || 0,
-      eventsCreated: user.createdEvents?.length || 0,
-      eventsParticipated: user.participatedEvents?.length || 0,
-      playlistsCreated: user.createdPlaylists?.length || 0,
-      playlistsCollaborated: user.collaboratedPlaylists?.length || 0,
-    };
-  }
+  //   return {
+  //     friendsCount: user.friends?.length || 0,
+  //     eventsCreated: user.createdEvents?.length || 0,
+  //     eventsParticipated: user.participatedEvents?.length || 0,
+  //     playlistsCreated: user.createdPlaylists?.length || 0,
+  //     playlistsCollaborated: user.collaboratedPlaylists?.length || 0,
+  //   };
+  // }
 
   // Privacy methods
   async getVisibleUserData(userId: string, viewerId?: string): Promise<Partial<User>> {

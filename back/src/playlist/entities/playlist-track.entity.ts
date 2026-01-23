@@ -46,9 +46,9 @@ export class PlaylistTrack {
   @Column({ name: 'track_id', nullable: false })
   trackId: string;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' }) // ok
-  @JoinColumn({ name: 'added_by_id' })
-  addedBy: User;
+  // @ManyToOne(() => User, { onDelete: 'CASCADE' }) // ok
+  // @JoinColumn({ name: 'added_by_id' })
+  // addedBy: User;
 
   @Column({ name: 'added_by_id', nullable: false })
   addedById: string;

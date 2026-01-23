@@ -125,11 +125,11 @@ export class User {
   @OneToMany(() => Event, (event) => event.creator) // ok
   createdEvents: Event[];
 
-  @OneToMany(() => Playlist, (playlist) => playlist.creator) // ok
-  createdPlaylists: Playlist[];
+  // @OneToMany(() => Playlist, (playlist) => playlist.creator) // ok
+  // createdPlaylists: Playlist[];
 
-  @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.addedBy) // ok
-  playlistTrack: PlaylistTrack[];
+  // @OneToMany(() => PlaylistTrack, (playlistTrack) => playlistTrack.addedBy) // ok
+  // playlistTrack: PlaylistTrack[];
 
   @OneToMany(() => Device, (device) => device.owner)
   devices: Device[];
@@ -144,7 +144,7 @@ export class User {
   receivedInvitations: Invitation[];
 
   // Many-to-many for friends
-  @ManyToMany(() => User, (user) => user.friends) // ok
+  @ManyToMany(() => User, (user) => user.friends)
   @JoinTable({
     name: 'user_friends',
     joinColumn: { name: 'user_id', referencedColumnName: 'id' },
@@ -152,17 +152,9 @@ export class User {
   })
   friends: User[];
 
-  // Many-to-many for participated events
-  @ManyToMany(() => Event, (event) => event.participants) // ok
-  participatedEvents: Event[];
+  // Removed: participatedEvents, adminOfEvents, collaboratedPlaylists
+  // Now using EventParticipant entity with roles
 
-  @ManyToMany(() => Event, (event) => event.admins) // ok
-  adminOfEvents: Event[];
-
-  // Many-to-many for collaborated playlists
-  @ManyToMany(() => Playlist, (playlist) => playlist.collaborators) // ok
-  collaboratedPlaylists: Playlist[];
-
-  @OneToMany(() => Device, (device) => device.delegatedTo) // ok
+  @OneToMany(() => Device, (device) => device.delegatedTo)
   delegatedDevices: Device[];
 }

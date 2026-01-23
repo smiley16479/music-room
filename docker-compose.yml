@@ -53,11 +53,12 @@ services:
       MYSQL_USER: mysql_user
       MYSQL_PASSWORD: root
       MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: db
     ports:
       - '3306:3306'
     volumes:
       - db:/var/lib/mysql
-      - ./db/init:/docker-entrypoint-initdb.d
+      - db-init:/docker-entrypoint-initdb.d
       
   mailhog:
     container_name: mailhog
@@ -66,10 +67,7 @@ services:
       - "1025:1025" # SMTP port
       - "8025:8025" # Web UI port
     logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      driver: none
   phpMyAdmin:
     container_name: phpMyAdmin-mr
     image: phpmyadmin:latest
@@ -92,3 +90,4 @@ volumes:
     driver: local
   front_back_shared:
     driver: local
+  db-init:

@@ -10,8 +10,8 @@ import {
 } from 'typeorm';
 import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
 
+// Keep InvitationType for FRIEND invitations (non-event based)
 export enum InvitationType {
   EVENT = 'event',
   PLAYLIST = 'playlist',
@@ -71,6 +71,7 @@ export class Invitation {
   @Column({ name: 'invitee_id' })
   inviteeId: string;
 
+  // Event invitations (nullable for friend requests)
   @ManyToOne(() => Event, (event) => event.invitations, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'event_id' })
   event?: Event;
@@ -78,10 +79,5 @@ export class Invitation {
   @Column({ name: 'event_id', nullable: true })
   eventId?: string;
 
-  @ManyToOne(() => Playlist, { onDelete: 'CASCADE', nullable: true })
-  @JoinColumn({ name: 'playlist_id' })
-  playlist?: Playlist;
-
-  @Column({ name: 'playlist_id', nullable: true })
-  playlistId: string;
+  // Removed: playlist relation and playlistId
 }

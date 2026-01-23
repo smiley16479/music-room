@@ -1,0 +1,325 @@
+/**
+ * Exemples d'utilisation de la nouvelle architecture
+ * Event ↔ Playlist (1:1 obligatoire)
+ */
+
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Event } from './event/entities/event.entity';
+import { EventType } from './event/entities/event-type.enum';
+import { EventVisibility, EventLicenseType } from './event/entities/event.entity';
+import { Playlist } from './playlist/entities/playlist.entity';
+import { EventParticipant, ParticipantRole } from './event/entities/event-participant.entity';
+
+@Injectable()
+export class ExampleService {
+  constructor(
+    @InjectRepository(Event)
+    private eventRepository: Repository<Event>,
+    @InjectRepository(Playlist)
+    private playlistRepository: Repository<Playlist>,
+    @InjectRepository(EventParticipant)
+    private participantRepository: Repository<EventParticipant>,
+  ) {}
+
+  /**
+   * Exemple 1: Créer une playlist personnelle
+   * Un Event de type LISTENING_SESSION est créé automatiquement
+   */
+  async createPersonalPlaylist(userId: string, name: string) {
+    // 1. Créer l'Event
+    const event = this.eventRepository.create({
+      name: `Session - ${name}`,
+      type: EventType.LISTENING_SESSION,
+      visibility: EventVisibility.PRIVATE,
+      licenseType: EventLicenseType.OPEN,
+      votingEnabled: false, // Pas de vote pour playlist perso
+      creator: { id: userId },
+    });
+
+    // 2. Créer la Playlist liée
+    const playlist = this.playlistRepository.create({
+      name,
+      isPublic: false,
+      creator: { id: userId },
+      event, // Cascade save
+    });
+
+    await this.playlistRepository.save(playlist);
+
+    // 3. Ajouter le créateur comme participant
+    const participant = this.participantRepository.create({
+      eventId: event.id,
+      userId,
+      role: ParticipantRole.CREATOR,
+    });
+
+    await this.participantRepository.save(participant);
+
+    return playlist;
+  }
+
+  /**
+   * Exemple 2: Créer une playlist collaborative
+   */
+  async createCollaborativePlaylist(userId: string, name: string) {
+    const event = this.eventRepository.create({
+      name,
+      type: EventType.COLLABORATIVE,
+      visibility: EventVisibility.PRIVATE,
+      licenseType: EventLicenseType.INVITED, // Seulement invités peuvent éditer
+      votingEnabled: true,
+      maxVotesPerUser: 1,
+      creator: { id: userId },
+    });
+
+    const playlist = this.playlistRepository.create({
+      name,
+      isPublic: false,
+      creator: { id: userId },
+      event,
+    });
+
+    await this.playlistRepository.save(playlist);
+
+    // Créateur = collaborateur avec tous les droits
+    await this.participantRepository.save({
+      eventId: event.id,
+      userId,
+      role: ParticipantRole.CREATOR,
+    });
+
+    return playlist;
+  }
+
+  /**
+   * Exemple 3: Créer un événement de soirée
+   */
+  async createPartyEvent(userId: string, data: {
+    name: string;
+    description: string;
+    startDate: Date;
+    endDate: Date;
+  }) {
+    const event = this.eventRepository.create({
+      name: data.name,
+      description: data.description,
+      type: EventType.PARTY,
+      visibility: EventVisibility.PUBLIC,
+      licenseType: EventLicenseType.INVITED, // Seulement invités votent
+      votingEnabled: true,
+      maxVotesPerUser: 3, // 3 votes par personne
+      startDate: data.startDate,
+      endDate: data.endDate,
+      creator: { id: userId },
+    });
+
+    const playlist = this.playlistRepository.create({
+      name: `Playlist - ${data.name}`,
+      isPublic: true,
+      creator: { id: userId },
+      event,
+    });
+
+    await this.playlistRepository.save(playlist);
+
+    await this.participantRepository.save({
+      eventId: event.id,
+      userId,
+      role: ParticipantRole.CREATOR,
+    });
+
+    return { event, playlist };
+  }
+
+  /**
+   * Exemple 4: Inviter un collaborateur
+   * Plus besoin de distinguer Event vs Playlist - toujours via Event
+   */
+  async inviteCollaborator(playlistId: string, invitedUserId: string, inviterId: string) {
+    // 1. Récupérer la playlist et son event
+    const playlist = await this.playlistRepository.findOne({
+      where: { id: playlistId },
+      relations: ['event'],
+    });
+
+    // 2. Vérifier les permissions sur l'Event
+    await this.checkCanInvite(playlist.event, inviterId);
+
+    // 3. Ajouter comme participant avec role COLLABORATOR
+    const participant = this.participantRepository.create({
+      eventId: playlist.eventId,
+      userId: invitedUserId,
+      role: ParticipantRole.COLLABORATOR,
+    });
+
+    await this.participantRepository.save(participant);
+
+    return participant;
+  }
+
+  /**
+   * Exemple 5: Vérifier les permissions (unifié)
+   */
+  async checkCanEdit(playlistId: string, userId: string): Promise<boolean> {
+    const playlist = await this.playlistRepository.findOne({
+      where: { id: playlistId },
+      relations: ['event'],
+    });
+
+    const event = playlist.event;
+
+    // Vérification basée sur Event.licenseType
+    switch (event.licenseType) {
+      case EventLicenseType.OPEN:
+        return true; // Tout le monde peut éditer
+
+      case EventLicenseType.INVITED:
+        // Seulement les participants avec rôle CREATOR ou COLLABORATOR
+        const participant = await this.participantRepository.findOne({
+          where: { eventId: event.id, userId },
+        });
+        return participant && 
+               (participant.role === ParticipantRole.CREATOR || 
+                participant.role === ParticipantRole.COLLABORATOR);
+
+      case EventLicenseType.ADMIN:
+        // Seulement le créateur
+        return event.creatorId === userId;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Exemple 6: Récupérer tous les participants d'une playlist
+   */
+  async getPlaylistParticipants(playlistId: string) {
+    const playlist = await this.playlistRepository.findOne({
+      where: { id: playlistId },
+      relations: ['event'],
+    });
+
+    // Une seule source de vérité: event_participants
+    const participants = await this.participantRepository.find({
+      where: { eventId: playlist.eventId },
+      relations: ['user'],
+    });
+
+    return participants.map(p => ({
+      user: p.user,
+      role: p.role,
+      joinedAt: p.joinedAt,
+    }));
+  }
+
+  /**
+   * Exemple 7: Récupérer toutes les playlists collaboratives d'un user
+   */
+  async getUserCollaborativePlaylists(userId: string) {
+    // Récupérer tous les events où l'user est collaborateur
+    const participations = await this.participantRepository.find({
+      where: { 
+        userId,
+        role: ParticipantRole.COLLABORATOR,
+      },
+      relations: ['event', 'event.playlist'],
+    });
+
+    return participations
+      .filter(p => p.event.playlist) // S'assurer que l'event a une playlist
+      .map(p => ({
+        playlist: p.event.playlist,
+        event: p.event,
+        role: p.role,
+      }));
+  }
+
+  /**
+   * Exemple 8: Vérifier si un user peut voter
+   */
+  async canVote(playlistId: string, userId: string): Promise<boolean> {
+    const playlist = await this.playlistRepository.findOne({
+      where: { id: playlistId },
+      relations: ['event'],
+    });
+
+    const event = playlist.event;
+
+    // Le vote doit être activé
+    if (!event.votingEnabled) {
+      return false;
+    }
+
+    // Vérification selon licenseType
+    switch (event.licenseType) {
+      case EventLicenseType.OPEN:
+        return true; // Tout le monde peut voter
+
+      case EventLicenseType.INVITED:
+      case EventLicenseType.ADMIN:
+        // Seulement les participants
+        const participant = await this.participantRepository.findOne({
+          where: { eventId: event.id, userId },
+        });
+        return !!participant;
+
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Exemple 9: Promouvoir un participant en collaborateur
+   */
+  async promoteToCollaborator(playlistId: string, targetUserId: string, adminUserId: string) {
+    const playlist = await this.playlistRepository.findOne({
+      where: { id: playlistId },
+      relations: ['event'],
+    });
+
+    // Vérifier que l'admin est bien créateur
+    if (playlist.event.creatorId !== adminUserId) {
+      throw new Error('Only creator can promote participants');
+    }
+
+    // Mettre à jour le rôle
+    await this.participantRepository.update(
+      { eventId: playlist.eventId, userId: targetUserId },
+      { role: ParticipantRole.COLLABORATOR }
+    );
+  }
+
+  /**
+   * Exemple 10: Lister tous les événements publics avec leurs playlists
+   */
+  async getPublicEvents() {
+    const events = await this.eventRepository.find({
+      where: { visibility: EventVisibility.PUBLIC },
+      relations: ['playlist', 'creator'],
+    });
+
+    return events.map(event => ({
+      event,
+      playlist: event.playlist,
+      creator: event.creator,
+    }));
+  }
+
+  // Helper privé
+  private async checkCanInvite(event: Event, userId: string): Promise<void> {
+    const participant = await this.participantRepository.findOne({
+      where: { eventId: event.id, userId },
+    });
+
+    const canInvite = 
+      event.creatorId === userId || 
+      (participant && participant.role === ParticipantRole.COLLABORATOR);
+
+    if (!canInvite) {
+      throw new Error('Not authorized to invite');
+    }
+  }
+}

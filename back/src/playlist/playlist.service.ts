@@ -11,14 +11,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, FindOptionsWhere, In, IsNull } from 'typeorm';
 
 import {
-  Playlist,
-  PlaylistVisibility,
-  PlaylistLicenseType
+  Playlist
 } from 'src/playlist/entities/playlist.entity';
 import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
-import { Event } from 'src/event/entities/event.entity';
+import { Event, EventVisibility } from 'src/event/entities/event.entity';
 import {
   Invitation,
   InvitationType,
@@ -35,8 +33,10 @@ import { EventService } from '../event/event.service';
 import { MusicService } from '../music/music.service';
 import { DeezerTrack } from '../music/interfaces/deezer.interface';
 import { EmailService } from '../email/email.service';
-import { PlaylistGateway } from './playlist.gateway';
 import { EventGateway } from '../event/event.gateway';
+import { ParticipantRole, EventParticipant } from 'src/event/entities/event-participant.entity';
+import { EventParticipantService } from '../event/event-participant.service';
+import { EventType } from 'src/event/entities/event-type.enum';
 
 export interface PlaylistWithStats extends Playlist {
   stats: {
@@ -80,7 +80,8 @@ export class PlaylistService {
     private emailService: EmailService,
     @Inject(forwardRef(() => EventService))
     private eventService: EventService,
-    private playlistGateway: PlaylistGateway,
+    private eventParticipantService: EventParticipantService,
+    @Inject(forwardRef(() => EventGateway))
     private eventGateway: EventGateway,
   ) {}
 
@@ -91,60 +92,80 @@ export class PlaylistService {
       throw new NotFoundException('Creator not found');
     }
 
+    // Create an Event for the playlist first (LISTENING_SESSION by default)
+    const event = this.eventRepository.create({
+      name: createPlaylistDto.name,
+      description: createPlaylistDto.description || 'Playlist listening session',
+      creatorId,
+      type: EventType.LISTENING_SESSION,
+      visibility: EventVisibility.PRIVATE, // Default to private
+      votingEnabled: false,
+    });
+
+    const savedEvent = await this.eventRepository.save(event);
+
+    // Add creator as participant with CREATOR role
+    await this.eventParticipantService.addParticipant(savedEvent.id, creatorId, ParticipantRole.CREATOR);
+
+    // Create the playlist linked to the event
     const playlist = this.playlistRepository.create({
       ...createPlaylistDto,
-      creatorId,
+      eventId: savedEvent.id,
       trackCount: 0,
       totalDuration: 0,
     });
 
     const savedPlaylist = await this.playlistRepository.save(playlist);
 
+    // Update the event with the playlist relationship
+    savedEvent.playlist = savedPlaylist;
+    await this.eventRepository.save(savedEvent);
+
+    // Attach event to playlist for gateway notification
+    savedPlaylist.event = savedEvent;
+
     // Notify about playlist creation
-    this.playlistGateway.notifyPlaylistCreated(savedPlaylist, creator);
-    // Add creator as first collaborator
-    await this.addCollaborator(savedPlaylist.id, creatorId, creatorId);
+    this.eventGateway.notifyPlaylistCreated(savedPlaylist, creator);
 
     return this.findById(savedPlaylist.id, creatorId);
   }
 
-  async findAll(paginationDto: PaginationDto, userId?: string, isPublic?: boolean, ownerId?: string, includeEventPlaylists?: boolean) {
+  async findAll(paginationDto: PaginationDto, userId?: string, isPublic?: boolean, ownerId?: string) {
     const { page, limit, skip } = paginationDto;
 
     const queryBuilder = this.playlistRepository.createQueryBuilder('playlist')
       .leftJoinAndSelect('playlist.creator', 'creator')
-      .leftJoinAndSelect('playlist.collaborators', 'collaborators');
+      .leftJoin('playlist.event', 'event');
 
     // Apply filters based on parameters
     if (isPublic !== undefined) {
       // Filter by visibility (public/private)
-      const visibility = isPublic ? PlaylistVisibility.PUBLIC : PlaylistVisibility.PRIVATE;
+      const visibility = isPublic ? EventVisibility.PUBLIC : EventVisibility.PRIVATE;
       
-      if (isPublic) {
-        // Public playlists only
-        queryBuilder.where('playlist.visibility = :visibility', { visibility });
-      } else {
-        // Private playlists that the user has access to (creator or direct collaborator)
-        if (userId) {
-          queryBuilder
-            .where('playlist.visibility = :visibility', { visibility })
-            .andWhere(
-              '(playlist.creatorId = :userId OR collaborators.id = :userId)',
-              { userId }
-            );
-        } else {
-          // No user authenticated - no private playlists visible
-          queryBuilder.where('1 = 0'); // Return no results
-        }
+      queryBuilder.andWhere('event.visibility = :visibility', { visibility });
+      
+      if (!isPublic && userId) {
+        // For private playlists, check if user has access via event participants
+        queryBuilder
+          .leftJoin('event.participants', 'participant')
+          .andWhere(
+            '(playlist.creatorId = :userId OR participant.userId = :userId)',
+            { userId }
+          );
+      } else if (!isPublic) {
+        // No user authenticated - no private playlists visible
+        queryBuilder.where('1 = 0'); // Return no results
       }
     } else if (ownerId) {
-      // Filter by specific owner - include playlists owned OR where user is a direct collaborator
+      // Filter by specific owner
       if (ownerId === userId) {
-        // Get playlists the user owns or collaborates on directly
-        queryBuilder.where(
-          '(playlist.creatorId = :ownerId OR collaborators.id = :userId)',
-          { ownerId, userId }
-        );
+        // Get playlists the user owns or participates in
+        queryBuilder
+          .leftJoin('event.participants', 'participant')
+          .where(
+            '(playlist.creatorId = :ownerId OR participant.userId = :userId)',
+            { ownerId, userId }
+          );
       } else {
         // Filter by specific owner only
         queryBuilder.where('playlist.creatorId = :ownerId', { ownerId });
@@ -153,20 +174,15 @@ export class PlaylistService {
       // Default behavior: show public playlists + private playlists user has access to
       if (userId) {
         queryBuilder
-          .where('playlist.visibility = :publicVisibility', { publicVisibility: PlaylistVisibility.PUBLIC })
-          .orWhere(
-            '(playlist.visibility = :privateVisibility AND (playlist.creatorId = :userId OR collaborators.id = :userId))',
-            { privateVisibility: PlaylistVisibility.PRIVATE, userId }
+          .leftJoin('event.participants', 'participant')
+          .where(
+            '(event.visibility = :publicVisibility OR (event.visibility = :privateVisibility AND (playlist.creatorId = :userId OR participant.userId = :userId)))',
+            { publicVisibility: EventVisibility.PUBLIC, privateVisibility: EventVisibility.PRIVATE, userId }
           );
       } else {
         // No user authenticated - only show public playlists
-        queryBuilder.where('playlist.visibility = :visibility', { visibility: PlaylistVisibility.PUBLIC });
+        queryBuilder.where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC });
       }
-    }
-
-    // Exclude event playlists by default, unless specifically requested
-    if (!includeEventPlaylists) {
-      queryBuilder.andWhere('playlist.eventId IS NULL');
     }
 
     queryBuilder
@@ -200,7 +216,7 @@ export class PlaylistService {
   async findById(id: string, userId?: string): Promise<PlaylistWithStats> {
     const playlist = await this.playlistRepository.findOne({
       where: { id },
-      relations: ['creator', 'collaborators'],
+      relations: ['creator'],
     });
 
     if (!playlist) {
@@ -227,26 +243,45 @@ export class PlaylistService {
     await this.playlistRepository.save(playlist);
 
     // Reload the playlist with all relations to ensure we have fresh data
-    const updatedPlaylist = await this.findById(id, userId);
+    const updatedPlaylist = await this.playlistRepository.findOne({
+      where: { id },
+      relations: ['creator', 'event'],
+    });
+
+    if (!updatedPlaylist) {
+      throw new NotFoundException('Playlist not found after update');
+    }
 
     // Notify collaborators of changes
-    this.playlistGateway.notifyPlaylistUpdated(id, updatedPlaylist, userId);
+    this.eventGateway.notifyPlaylistUpdated(id, updatedPlaylist, userId);
 
-    return updatedPlaylist;
+    return this.addPlaylistStats(updatedPlaylist, userId);
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const playlist = await this.findById(id, userId);
+    const playlist = await this.playlistRepository.findOne({
+      where: { id },
+      relations: ['event'],
+    });
 
-    // Only creator can delete playlist
-    if (playlist.creatorId !== userId) {
+    if (!playlist) {
+      throw new NotFoundException('Playlist not found');
+    }
+
+    // Only creator can delete playlist (creator is managed via event)
+    const event = await this.eventRepository.findOne({ where: { id: playlist.eventId } });
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
+    }
+
+    if (event.creatorId !== userId) {
       throw new ForbiddenException('Only the creator can delete this playlist');
     }
 
     await this.playlistRepository.remove(playlist);
 
     // Notify collaborators
-    this.playlistGateway.notifyPlaylistDeleted(id, userId);
+    this.eventGateway.notifyPlaylistDeleted(id, userId);
   }
 
   // Track Management
@@ -384,7 +419,7 @@ export class PlaylistService {
     });
 
     // Notify collaborators
-    this.playlistGateway.notifyTrackAdded(playlistId, trackWithDetails, userId, updatedPlaylist?.trackCount || 0);
+    this.eventGateway.notifyTrackAdded(playlistId, trackWithDetails, userId, updatedPlaylist?.trackCount || 0);
 
     // If this playlist belongs to an event, also notify the event participants
     if (playlist.eventId) {
@@ -435,7 +470,7 @@ export class PlaylistService {
     });
 
     // Notify collaborators
-    this.playlistGateway.notifyTrackRemoved(playlistId, trackId, userId, updatedPlaylist?.trackCount || 0);
+    this.eventGateway.notifyTrackRemoved(playlistId, trackId, userId, updatedPlaylist?.trackCount || 0);
 
     // If this playlist belongs to an event, also notify the event participants
     if (playlist.eventId) {
@@ -476,7 +511,7 @@ export class PlaylistService {
     const updatedTracks = await this.getPlaylistTracks(playlistId);
 
     // Notify collaborators
-    this.playlistGateway.notifyTracksReordered(playlistId, trackIds, userId);
+    this.eventGateway.notifyTracksReordered(playlistId, trackIds, userId);
 
     return updatedTracks;
   }
@@ -514,39 +549,26 @@ export class PlaylistService {
     console.log(`Adding collaborator ${collaboratorId} to playlist ${playlistId} by ${requesterId}`);
     const playlist = await this.findById(playlistId, requesterId);
 
-    // Only creator or existing collaborators can add new collaborators
-    const isCreator = playlist.creatorId === requesterId;
-    let canAddCollaborator = isCreator;
-
-    if (!isCreator) {
-      // Check if requester is already a collaborator
-      const isRequesterCollaborator = playlist.collaborators?.some(c => c.id === requesterId);
-      canAddCollaborator = isRequesterCollaborator;
+    // Check if requester can add collaborators
+    const event = await this.eventRepository.findOne({ where: { id: playlist.eventId } });
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
     }
 
-    if (!canAddCollaborator) {
+    const canEdit = await this.eventParticipantService.canEdit(event, requesterId);
+    if (!canEdit) {
       throw new ForbiddenException('You cannot add collaborators to this playlist');
     }
 
-    // Check if user is already a collaborator
-    const isAlreadyCollaborator = playlist.collaborators?.some(c => c.id === collaboratorId);
-    if (isAlreadyCollaborator) {
-      throw new ConflictException('User is already a collaborator');
-    }
-
-    // Add collaborator
-    await this.playlistRepository
-      .createQueryBuilder()
-      .relation(Playlist, 'collaborators')
-      .of(playlistId)
-      .add(collaboratorId);
+    // Add collaborator via event participants
+    await this.eventParticipantService.addCollaborator(event.id, collaboratorId);
 
     const collaborator = await this.userRepository.findOne({
       where: { id: collaboratorId }
     });
 
     // Notify collaborators
-    this.playlistGateway.notifyCollaboratorAdded(playlistId, collaborator!, requesterId);
+    this.eventGateway.notifyCollaboratorAdded(playlistId, collaborator!, requesterId);
   }
 
   async removeCollaborator(
@@ -556,38 +578,37 @@ export class PlaylistService {
   ): Promise<void> {
     const playlist = await this.findById(playlistId, requesterId);
 
+    const event = await this.eventRepository.findOne({ where: { id: playlist.eventId } });
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
+    }
+
     // Creator can remove anyone, collaborators can only remove themselves
-    const canRemove = playlist.creatorId === requesterId ||
-      (collaboratorId === requesterId);
+    const canRemove = event.creatorId === requesterId || (collaboratorId === requesterId);
 
     if (!canRemove) {
       throw new ForbiddenException('You cannot remove this collaborator');
     }
 
-    // Cannot remove creator
-    if (collaboratorId === playlist.creatorId) {
+    // Cannot remove creator (creator is the event creator)
+    if (collaboratorId === event.creatorId) {
       throw new BadRequestException('Cannot remove playlist creator');
     }
 
-    // Remove collaborator
-    await this.playlistRepository
-      .createQueryBuilder()
-      .relation(Playlist, 'collaborators')
-      .of(playlistId)
-      .remove(collaboratorId);
+    // Remove collaborator via event participants
+    await this.eventParticipantService.removeCollaborator(event.id, collaboratorId);
 
     const collaborator = await this.userRepository.findOne({
       where: { id: collaboratorId }
     });
 
     // Notify collaborators
-    this.playlistGateway.notifyCollaboratorRemoved(playlistId, collaborator!, requesterId);
+    this.eventGateway.notifyCollaboratorRemoved(playlistId, collaborator!, requesterId);
   }
 
   async getCollaborators(playlistId: string, userId?: string): Promise<User[]> {
     const playlist = await this.playlistRepository.findOne({
       where: { id: playlistId },
-      relations: ['collaborators'],
     });
 
     if (!playlist) {
@@ -596,15 +617,17 @@ export class PlaylistService {
 
     await this.checkPlaylistAccess(playlist, userId);
 
-    return playlist.collaborators || [];
+    // Get collaborators from event participants
+    const participants = await this.eventParticipantService.getCollaboratorsWithRole(playlist.eventId);
+    return participants.map(p => p.user);
   }
 
   // Search and Discovery
   async searchPlaylists(query: string, userId?: string, limit = 20) {
     const queryBuilder = this.playlistRepository.createQueryBuilder('playlist')
       .leftJoinAndSelect('playlist.creator', 'creator')
-      .leftJoinAndSelect('playlist.collaborators', 'collaborators')
-      .where('playlist.visibility = :visibility', { visibility: PlaylistVisibility.PUBLIC })
+      .leftJoin('playlist.event', 'event')
+      .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
       .andWhere('playlist.eventId IS NULL') // Exclude event playlists
       .andWhere('(playlist.name LIKE :query OR playlist.description LIKE :query)')
       .setParameter('query', `%${query}%`)
@@ -625,8 +648,8 @@ export class PlaylistService {
   }
 
   async getMyPlaylists(userId: string, paginationDto: PaginationDto): Promise<any> {
-    // Get all playlists the user owns or has been invited to (including event playlists)
-    return this.findAll(paginationDto, userId, undefined, userId, true);
+    // Get all playlists the user owns or has been invited to (all playlists are event-based now)
+    return this.findAll(paginationDto, userId, undefined, userId);
   }
 
   async getRecommendedPlaylists(userId: string, limit = 20) {
@@ -638,15 +661,15 @@ export class PlaylistService {
 
     // Find playlists with tracks matching user's preferences
     // This is a simplified version - in production you'd want more sophisticated recommendation logic
-    const playlists = await this.playlistRepository.find({
-      where: { 
-        visibility: PlaylistVisibility.PUBLIC,
-        eventId: IsNull() // Exclude event playlists
-      },
-      relations: ['creator', 'collaborators'],
-      order: { updatedAt: 'DESC' },
-      take: limit,
-    });
+    const playlists = await this.playlistRepository
+      .createQueryBuilder('playlist')
+      .leftJoinAndSelect('playlist.creator', 'creator')
+      .leftJoin('playlist.event', 'event')
+      .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
+      .andWhere('playlist.eventId IS NULL') // Exclude event playlists
+      .orderBy('playlist.updatedAt', 'DESC')
+      .take(limit)
+      .getMany();
 
     const playlistsWithStats = await Promise.all(
       playlists.map(playlist => this.addPlaylistStats(playlist, userId)),
@@ -668,12 +691,10 @@ export class PlaylistService {
     const originalPlaylist = await this.findById(originalPlaylistId, userId);
     const originalTracks = await this.getPlaylistTracks(originalPlaylistId, userId);
 
-    // Create new playlist
+    // Create new playlist (without visibility/licenseType as they're managed by Event)
     const duplicatePlaylist = await this.create({
       name: newName || `Copy of ${originalPlaylist.name}`,
       description: originalPlaylist.description,
-      visibility: originalPlaylist.visibility,
-      licenseType: originalPlaylist.licenseType,
     }, userId);
 
     // Copy all tracks
@@ -696,24 +717,19 @@ export class PlaylistService {
     inviteeIds: string[],
     message?: string,
   ): Promise<{ invitations: Invitation[]; skipped: { userId: string; reason: string }[] }> {
-    const playlist = await this.findById(playlistId, inviterUserId);
-
-    const isCreator = playlist.creatorId === inviterUserId;
-    const isCollaborator = playlist.collaborators?.some((collaborator) => collaborator.id === inviterUserId) || false;
-
-    let canInvite = isCreator || isCollaborator;
-
-    if (!canInvite) {
-      const inviterInvitation = await this.invitationRepository.findOne({
-        where: {
-          playlistId,
-          inviteeId: inviterUserId,
-          type: InvitationType.PLAYLIST,
-          status: InvitationStatus.ACCEPTED,
-        },
-      });
-      canInvite = !!inviterInvitation;
+    const playlist = await this.playlistRepository.findOne({ where: { id: playlistId } });
+    
+    if (!playlist) {
+      throw new NotFoundException('Playlist not found');
     }
+
+    const event = await this.eventRepository.findOne({ where: { id: playlist.eventId } });
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
+    }
+
+    // Check if inviter can invite
+    const canInvite = await this.eventParticipantService.canEdit(event, inviterUserId);
 
     if (!canInvite) {
       throw new ForbiddenException('You cannot invite collaborators to this playlist');
@@ -738,16 +754,17 @@ export class PlaylistService {
         continue;
       }
 
-      if (playlist.creatorId === inviteeId || playlist.collaborators?.some((collaborator) => collaborator.id === inviteeId)) {
+      // Check if already collaborator via event participants
+      const isAlreadyCollaborator = await this.eventParticipantService.isUserCollaborator(event.id, inviteeId);
+      if (event.creatorId === inviteeId || isAlreadyCollaborator) {
         skipped.push({ userId: inviteeId, reason: 'already_collaborator' });
         continue;
       }
 
       const existingInvitation = await this.invitationRepository.findOne({
         where: {
-          playlistId,
+          eventId: event.id,
           inviteeId,
-          type: InvitationType.PLAYLIST,
         },
         order: { createdAt: 'DESC' },
       });
@@ -771,8 +788,7 @@ export class PlaylistService {
         const invitation = this.invitationRepository.create({
           inviterId: inviterUserId,
           inviteeId,
-          playlistId,
-          type: InvitationType.PLAYLIST,
+          eventId: event.id,
           status: InvitationStatus.PENDING,
           message,
           expiresAt,
@@ -829,14 +845,21 @@ export class PlaylistService {
     playlist: Playlist,
     userId?: string
   ): Promise<PlaylistWithStats> {
-    const collaboratorCount = playlist.collaborators?.length || 0;
+    // Get collaborator count from event participants
+    const collaboratorCount = await this.eventParticipantService.getCollaboratorCount(playlist.eventId);
+    
     const isUserCollaborator = userId ?
-      playlist.collaborators?.some(c => c.id === userId) || false : false;
-    const isUserOwner = userId ? playlist.creatorId === userId : false;
+      await this.eventParticipantService.isUserCollaborator(playlist.eventId, userId) : false;
+    
+    // Check if user is owner via event creator
+    let isUserOwner = false;
+    if (userId) {
+      const event = await this.eventRepository.findOne({ where: { id: playlist.eventId } });
+      isUserOwner = event ? event.creatorId === userId : false;
+    }
 
     return {
       ...playlist,
-      collaborators: playlist.collaborators || [], // Ensure collaborators is always an array
       stats: {
         trackCount: playlist.trackCount,
         totalDuration: playlist.totalDuration,
@@ -848,7 +871,16 @@ export class PlaylistService {
   }
 
   private async checkPlaylistAccess(playlist: Playlist, userId?: string): Promise<void> {
-    if (playlist.visibility === PlaylistVisibility.PUBLIC) {
+    // Load the event to check visibility
+    const event = await this.eventRepository.findOne({
+      where: { id: playlist.eventId },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
+    }
+
+    if (event.visibility === EventVisibility.PUBLIC) {
       return; // Public playlists are accessible to everyone
     }
 
@@ -856,79 +888,36 @@ export class PlaylistService {
       throw new ForbiddenException('Authentication required for private playlists');
     }
 
-    // For private playlists: check if user is creator or direct collaborator
-    const isCreator = playlist.creatorId === userId;
+    // For private playlists: check if user is creator or participant
+    const isCreator = event.creatorId === userId;
     
     if (isCreator) {
       return; // Creator has access
     }
 
-    // Check if user is a direct collaborator
-    const isCollaborator = playlist.collaborators?.some(collaborator => collaborator.id === userId);
+    // Check if user is a participant
+    const isParticipant = await this.eventParticipantService.isUserParticipant(event.id, userId);
 
-    if (!isCollaborator) {
+    if (!isParticipant) {
       throw new ForbiddenException('You do not have access to this private playlist');
     }
   }
 
   private async checkEditPermissions(playlist: Playlist, userId: string): Promise<void> {
-    switch (playlist.licenseType) {
-      case PlaylistLicenseType.OPEN:
-        return; // Everyone can edit public playlists
+    // Load the event to check permissions
+    const event = await this.eventRepository.findOne({
+      where: { id: playlist.eventId },
+    });
 
-      case PlaylistLicenseType.INVITED:
-        const isCreator = playlist.creatorId === userId;
-        
-        if (isCreator) {
-          return; // Creator can always edit
-        }
-
-        // Check if user is a direct collaborator
-        const isCollaborator = playlist.collaborators?.some(collaborator => collaborator.id === userId);
-
-        if (isCollaborator) {
-          return; // Collaborator can edit
-        }
-
-        // If playlist is associated with an event, check if user is an admin of that event
-        if (playlist.eventId) {
-          try {
-            const isEventAdmin = await this.isUserEventAdmin(playlist.eventId, userId);
-            if (isEventAdmin) {
-              return; // Event admin can edit
-            }
-          } catch (error) {
-            // If we can't check event admin status, continue with other checks
-          }
-        }
-        throw new ForbiddenException('Only invited users can edit this playlist');
-        break;
+    if (!event) {
+      throw new NotFoundException('Associated event not found');
     }
-  }
 
-  private async isUserEventAdmin(eventId: string, userId: string): Promise<boolean> {
-    try {
-      // Get the event with admins relation directly using EventRepository
-      const event = await this.eventRepository.findOne({
-        where: { id: eventId },
-        relations: ['admins']
-      });
+    // Check if user is creator or collaborator
+    const canEdit = await this.eventParticipantService.canEdit(event, userId);
 
-      if (!event) {
-        return false;
-      }
-      
-      // Check if user is creator (creators are admins by default)
-      if (event.creatorId === userId) {
-        return true;
-      }
-
-      // Check if user is in the admins list
-      const isAdmin = event.admins?.some(admin => admin.id === userId) || false;
-      
-      return isAdmin;
-    } catch (error) {
-      return false;
+    if (!canEdit) {
+      throw new ForbiddenException('You do not have permission to edit this playlist');
     }
   }
 
