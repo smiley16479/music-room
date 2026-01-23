@@ -97,6 +97,9 @@ class _InitialScreenState extends State<_InitialScreen> {
   bool _isOAuthCallback = false;
   StreamSubscription<Uri>? _deepLinkSubscription;
   late AppLinks _appLinks;
+  
+  // GlobalKey to preserve HomeScreen state across rebuilds
+  static final GlobalKey _homeScreenKey = GlobalKey();
 
   @override
   void initState() {
@@ -225,7 +228,7 @@ class _InitialScreenState extends State<_InitialScreen> {
         }
 
         if (authProvider.isAuthenticated) {
-          return const HomeScreen();
+          return HomeScreen(key: _homeScreenKey);
         } else {
           return const LoginScreen();
         }

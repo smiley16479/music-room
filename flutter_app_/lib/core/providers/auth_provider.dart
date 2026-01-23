@@ -8,6 +8,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService authService;
 
   User? _currentUser;
+  String? _token;
   bool _isAuthenticated = false;
   bool _isLoading = false;
   String? _error;
@@ -17,6 +18,7 @@ class AuthProvider extends ChangeNotifier {
   // Getters
   User? get currentUser => _currentUser;
   User? get user => _currentUser; // Alias for easier access
+  String? get token => _token;
   bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -31,6 +33,8 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = user;
       _isAuthenticated = user != null;
       _error = null;
+      // Cache token in memory for quick access
+      _token = await authService.secureStorage.getToken();
     } catch (e) {
       _currentUser = null;
       _isAuthenticated = false;
@@ -57,6 +61,7 @@ class AuthProvider extends ChangeNotifier {
         password: password,
         displayName: displayName,
       );
+        _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
@@ -83,6 +88,7 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         password: password,
       );
+        _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
@@ -101,10 +107,16 @@ class AuthProvider extends ChangeNotifier {
     String? bio,
     String? location,
     String? birthDate,
+    String? displayNameVisibility,
+    String? bioVisibility,
+    String? locationVisibility,
+    String? birthDateVisibility,
+    List<String>? musicPreferences,
+    String? musicPreferenceVisibility,
   }) async {
-    _isLoading = true;
     _error = null;
-    notifyListeners();
+    // Don't set _isLoading = true here to avoid triggering a full UI rebuild
+    // which would navigate away from the profile screen
 
     try {
       final updatedUser = await authService.updateProfile(
@@ -112,14 +124,18 @@ class AuthProvider extends ChangeNotifier {
         bio: bio,
         location: location,
         birthDate: birthDate,
+        displayNameVisibility: displayNameVisibility,
+        bioVisibility: bioVisibility,
+        locationVisibility: locationVisibility,
+        birthDateVisibility: birthDateVisibility,
+        musicPreferences: musicPreferences,
+        musicPreferenceVisibility: musicPreferenceVisibility,
       );
       _currentUser = updatedUser;
-      _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
       _error = e.toString();
-      _isLoading = false;
       notifyListeners();
       return false;
     }
@@ -127,18 +143,16 @@ class AuthProvider extends ChangeNotifier {
 
   /// Logout
   Future<void> logout() async {
-    _isLoading = true;
-    notifyListeners();
-
     try {
       await authService.logout();
-      _currentUser = null;
-      _isAuthenticated = false;
-      _error = null;
     } catch (e) {
-      _error = e.toString();
+      // Ignore logout errors, we're clearing state anyway
     }
-
+    
+    _currentUser = null;
+    _token = null;
+    _isAuthenticated = false;
+    _error = null;
     _isLoading = false;
     notifyListeners();
   }
@@ -157,6 +171,7 @@ class AuthProvider extends ChangeNotifier {
         idToken: idToken,
         platform: platform,
       );
+        _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
@@ -183,6 +198,7 @@ class AuthProvider extends ChangeNotifier {
         idToken: idToken,
         platform: platform,
       );
+        _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;
@@ -206,7 +222,8 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.facebookSignIn(
         accessToken: accessToken,
       );
-      _isAuthenticated = true;
+        _token = await authService.secureStorage.getToken();
+        _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
       return true;
@@ -230,6 +247,7 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.linkFacebookAccount(
         accessToken: accessToken,
       );
+        _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;

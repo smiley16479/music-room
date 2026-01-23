@@ -1,9 +1,2 @@
-// Temporary ambient module declarations to silence TS errors in the editor
-// These should be removed once dependencies are installed (run `npm install` in /back)
-
-declare module '@nestjs/common';
-declare module '@nestjs/jwt';
-declare module '@nestjs/config';
-declare module '@nestjs/swagger';
-declare module '@nestjs/passport';
-declare module 'express';
+// global.d.ts disabled: rely on actual package typings in node_modules
+// If you need to add temporary ambient declarations, add them selectively.

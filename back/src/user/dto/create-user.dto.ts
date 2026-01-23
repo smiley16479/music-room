@@ -90,4 +90,8 @@ export class CreateUserDto {
     favoriteArtists?: string[];
     dislikedGenres?: string[];
   };
+
+  @IsOptional()
+  @IsEnum(VisibilityLevel)
+  musicPreferenceVisibility?: VisibilityLevel;
 }

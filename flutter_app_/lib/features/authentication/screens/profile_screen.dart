@@ -12,6 +12,58 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
+enum Privacy { public, friends, private }
+
+class SingleChoice extends StatelessWidget {
+  final Privacy value;
+  final ValueChanged<Privacy> onChanged;
+
+  const SingleChoice({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: SegmentedButton<Privacy>(
+        style: ButtonStyle(
+          shape: WidgetStateProperty.all(
+            const RoundedRectangleBorder(
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(8),
+                bottomRight: Radius.circular(8),
+              ),
+            ),
+          ),
+        ),
+        segments: const <ButtonSegment<Privacy>>[
+          ButtonSegment<Privacy>(
+            value: Privacy.public,
+            label: Text('Public', style: const TextStyle(fontSize: 12)),
+          ),
+          ButtonSegment<Privacy>(
+            value: Privacy.friends,
+            label: Text('Friends', style: const TextStyle(fontSize: 12)),
+          ),
+          ButtonSegment<Privacy>(
+            value: Privacy.private,
+            label: Text('Private', style: const TextStyle(fontSize: 12)),
+          ),
+        ],
+        selected: <Privacy>{value},
+        onSelectionChanged: (Set<Privacy> newSelection) {
+          onChanged(newSelection.first);
+        },
+        showSelectedIcon: false,
+      ),
+    );
+  }
+}
+
 class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
@@ -100,6 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       context,
                       'Display Name',
                       user.displayName ?? 'Not set',
+                      user.displayNameVisibility ?? '',
                     ),
                     const Divider(),
 
@@ -108,6 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       context,
                       'Bio',
                       user.bio ?? 'Not set',
+                      user.bioVisibility ?? '',
                     ),
                     const Divider(),
 
@@ -116,6 +170,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       context,
                       'Location',
                       user.location ?? 'Not set',
+                      user.locationVisibility ?? '',
                     ),
                     const Divider(),
 
@@ -126,6 +181,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       user.birthDate != null
                           ? user.birthDate!.toIso8601String().split('T')[0]
                           : 'Not set',
+                      user.birthDateVisibility ?? '',
+                    ),
+                    const Divider(),
+
+                    // Music Preferences
+                    _buildMusicPreferencesRow(
+                      context,
+                      user.musicPreferences ?? [],
+                      user.musicPreferenceVisibility ?? '',
                     ),
                     const SizedBox(height: 24),
 
@@ -210,23 +274,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-
-              // Logout Button
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final authProvider = context.read<AuthProvider>();
-                    await authProvider.logout();
-                  },
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Logout'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
             ],
           ),
         );
@@ -245,23 +292,105 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, String label, String value) {
+  Widget _buildInfoRow(BuildContext context, String label, String value, String visibility) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.grey,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.grey,
+                        fontSize: 15,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                visibility,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.purple,
+                      fontSize: 12,
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
             value,
             style: Theme.of(context).textTheme.bodyMedium,
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMusicPreferencesRow(BuildContext context, List<String> preferences, String visibility) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  'Music Preferences',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.grey,
+                        fontSize: 15,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                visibility,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.purple,
+                      fontSize: 12,
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (preferences.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: preferences.map((genre) {
+                return Chip(
+                  label: Text(genre),
+                  backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                  labelStyle: TextStyle(
+                    color: Theme.of(context).primaryColor,
+                    fontSize: 12,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                );
+              }).toList(),
+            )
+          else
+            Text(
+              'Not set',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
         ],
       ),
     );
@@ -292,6 +421,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
 
+    // Save the parent context before showing dialog
+    final parentContext = context;
+
     final displayNameController = TextEditingController(text: user.displayName);
     final bioController = TextEditingController(text: user.bio);
     final locationController = TextEditingController(text: user.location);
@@ -311,6 +443,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
       text: selectedDate.toIso8601String().split('T').first,
     );
 
+    // Visibility states
+    Privacy displayNameVisibility = _parseVisibility(user.displayNameVisibility);
+    Privacy bioVisibility = _parseVisibility(user.bioVisibility);
+    Privacy locationVisibility = _parseVisibility(user.locationVisibility);
+    Privacy birthDateVisibility = _parseVisibility(user.birthDateVisibility);
+    Privacy musicPreferenceVisibility = _parseVisibility(user.musicPreferenceVisibility);
+
+    // Music preferences
+    final availableGenres = [
+      'Rock', 'Pop', 'Jazz', 'Classical', 'Hip Hop', 'Rap',
+      'Blues', 'Country', 'Electronic', 'Reggae', 'Metal',
+      'R&B', 'Soul', 'Indie', 'Folk', 'Punk'
+    ];
+    Set<String> selectedGenres = user.musicPreferences?.toSet() ?? {};
+
     showDialog(
       context: context,
       builder: (context) {
@@ -327,29 +474,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       controller: displayNameController,
                       decoration: const InputDecoration(
                         labelText: 'Display Name',
-                        border: OutlineInputBorder(),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(4),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    SingleChoice(
+                      value: displayNameVisibility,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          displayNameVisibility = value;
+                        });
+                      },
+                    ),
                     // Bio
                     TextField(
                       controller: bioController,
                       decoration: const InputDecoration(
                         labelText: 'Bio',
-                        border: OutlineInputBorder(),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(4),
+                          ),
+                        ),
                       ),
                       maxLines: 3,
                     ),
-                    const SizedBox(height: 12),
+                    SingleChoice(
+                      value: bioVisibility,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          bioVisibility = value;
+                        });
+                      },
+                    ),
                     // Location
                     TextField(
                       controller: locationController,
                       decoration: const InputDecoration(
                         labelText: 'Location',
-                        border: OutlineInputBorder(),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(4),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    SingleChoice(
+                      value: locationVisibility,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          locationVisibility = value;
+                        });
+                      },
+                    ),
                     // Birth Date
                     GestureDetector(
                       onTap: () async {
@@ -372,7 +555,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(4),
+                          ),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -387,6 +573,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                     ),
+                    SingleChoice(
+                      value: birthDateVisibility,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          birthDateVisibility = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    // Music Preferences
+                    const Text(
+                      'Music Preferences',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(4),
+                        ),
+                      ),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: availableGenres.map((genre) {
+                          final isSelected = selectedGenres.contains(genre);
+                          return FilterChip(
+                            label: Text(genre),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              setDialogState(() {
+                                if (selected) {
+                                  selectedGenres.add(genre);
+                                } else {
+                                  selectedGenres.remove(genre);
+                                }
+                              });
+                            },
+                            selectedColor: Theme.of(context).primaryColor.withOpacity(0.3),
+                            checkmarkColor: Theme.of(context).primaryColor,
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    SingleChoice(
+                      value: musicPreferenceVisibility,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          musicPreferenceVisibility = value;
+                        });
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -398,7 +643,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     if (displayNameController.text.isNotEmpty) {
-                      final authProvider = context.read<AuthProvider>();
+                      // Close dialog first to avoid navigation issues
+                      Navigator.of(context).pop();
+                      
+                      // Use parent context for the auth provider
+                      final authProvider = parentContext.read<AuthProvider>();
   
                       final success = await authProvider.updateProfile(
                         displayName: displayNameController.text.trim().isNotEmpty
@@ -413,17 +662,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         birthDate: birthDateController.text.trim().isNotEmpty
                             ? birthDateController.text.trim()
                             : null,
+                        displayNameVisibility: _visibilityToString(displayNameVisibility),
+                        bioVisibility: _visibilityToString(bioVisibility),
+                        locationVisibility: _visibilityToString(locationVisibility),
+                        birthDateVisibility: _visibilityToString(birthDateVisibility),
+                        musicPreferences: selectedGenres.toList(),
+                        musicPreferenceVisibility: _visibilityToString(musicPreferenceVisibility),
                       );
-                      if (mounted) {
-                        Navigator.pop(context);
+                      
+                      // Show the snackbar using the parent context
+                      if (parentContext.mounted) {
                         if (success) {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          ScaffoldMessenger.of(parentContext).showSnackBar(
                             const SnackBar(
                               content: Text('Profile updated successfully!'),
                             ),
                           );
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          ScaffoldMessenger.of(parentContext).showSnackBar(
                             SnackBar(
                               content: Text('Error: ${authProvider.error}'),
                             ),
@@ -440,5 +696,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
     );
+  }
+
+  Privacy _parseVisibility(String? visibility) {
+    switch (visibility?.toLowerCase()) {
+      case 'friends':
+        return Privacy.friends;
+      case 'private':
+        return Privacy.private;
+      default:
+        return Privacy.public;
+    }
+  }
+
+  String _visibilityToString(Privacy privacy) {
+    switch (privacy) {
+      case Privacy.public:
+        return 'public';
+      case Privacy.friends:
+        return 'friends';
+      case Privacy.private:
+        return 'private';
+    }
   }
 }

@@ -92,6 +92,12 @@ class AuthService {
     String? bio,
     String? location,
     String? birthDate,
+    String? displayNameVisibility,
+    String? bioVisibility,
+    String? locationVisibility,
+    String? birthDateVisibility,
+    List<String>? musicPreferences,
+    String? musicPreferenceVisibility,
   }) async {
     final response = await apiService.patch(
       '/users/me',
@@ -100,6 +106,12 @@ class AuthService {
         if (bio != null) 'bio': bio,
         if (location != null) 'location': location,
         if (birthDate != null) 'birthDate': birthDate,
+        if (displayNameVisibility != null) 'displayNameVisibility': displayNameVisibility,
+        if (bioVisibility != null) 'bioVisibility': bioVisibility,
+        if (locationVisibility != null) 'locationVisibility': locationVisibility,
+        if (birthDateVisibility != null) 'birthDateVisibility': birthDateVisibility,
+        if (musicPreferences != null) 'musicPreferences': {'favoriteGenres': musicPreferences},
+        if (musicPreferenceVisibility != null) 'musicPreferenceVisibility': musicPreferenceVisibility,
       },
     );
 
@@ -130,10 +142,9 @@ class AuthService {
     String platform = 'web',
   }) async {
     final response = await apiService.post(
-      '/auth/google/mobile-token',
+      '/auth/google/id-token',
       body: {
-        'code': idToken, // The backend expects 'code' but we send the ID token
-        'redirectUri': 'http://localhost:3000/api/auth/google/callback',
+        'idToken': idToken,
         'platform': platform,
       },
     );
@@ -157,10 +168,9 @@ class AuthService {
     String platform = 'web',
   }) async {
     final response = await apiService.post(
-      '/auth/google/mobile-token',
+      '/auth/google/id-token',
       body: {
-        'code': idToken,
-        'redirectUri': 'http://localhost:3000/api/auth/google/callback',
+        'idToken': idToken,
         'platform': platform,
         'linkingMode': 'link',
       },

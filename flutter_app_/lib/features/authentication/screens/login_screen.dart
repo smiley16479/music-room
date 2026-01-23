@@ -48,34 +48,111 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleGoogleSignIn() async {
-    try {
-      // Use backend OAuth for all platforms
-      // For mobile: use deep link scheme, for web: pass current origin as redirect
-      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
-      final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google')
-          .replace(queryParameters: {'redirect_uri': redirectUri});
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch Google Sign In: $e')),
-      );
+    if (kIsWeb) {
+      // Web: Use browser-based OAuth flow
+      try {
+        final redirectUri = AppConfig.frontendUrl;
+        final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google')
+            .replace(queryParameters: {'redirect_uri': redirectUri});
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch Google Sign In: $e')),
+        );
+      }
+    } else {
+      // Mobile: Use native Google Sign-In SDK
+      try {
+        // For Android: use Android client ID + server client ID for backend verification
+        // For iOS: pass the iOS client ID
+        final GoogleSignIn googleSignIn = Platform.isAndroid 
+          ? GoogleSignIn(
+              clientId: AppConfig.googleAndroidClientId, // Android client ID
+              serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
+              scopes: ['email', 'profile'],
+            )
+          : GoogleSignIn(
+              clientId: AppConfig.googleClientId,
+              scopes: ['email', 'profile'],
+            );
+        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+
+        if (googleUser != null) {
+          final GoogleSignInAuthentication googleAuth =
+              await googleUser.authentication;
+
+          final authProvider = context.read<AuthProvider>();
+          final platform = Platform.isAndroid ? 'android' : 'ios';
+          final success = await authProvider.googleSignIn(
+            idToken: googleAuth.idToken ?? '',
+            platform: platform,
+          );
+
+          if (!mounted) return;
+
+          if (!success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Login failed: ${authProvider.error}')),
+            );
+          }
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Google Sign In failed: $e')),
+        );
+      }
     }
   }
 
   Future<void> _handleFacebookSignIn() async {
-    try {
-      // Use backend OAuth for all platforms
-      // For mobile: use deep link scheme, for web: pass current origin as redirect
-      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
-      final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook')
-          .replace(queryParameters: {'redirect_uri': redirectUri});
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch Facebook Sign In: $e')),
-      );
+    if (kIsWeb) {
+      // Web: Use browser-based OAuth flow
+      try {
+        final redirectUri = AppConfig.frontendUrl;
+        final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook')
+            .replace(queryParameters: {'redirect_uri': redirectUri});
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not launch Facebook Sign In: $e')),
+        );
+      }
+    } else {
+      // Mobile: Use native Facebook Login SDK
+      try {
+        final result = await FacebookAuth.instance.login();
+
+        if (result.status == LoginStatus.success) {
+          final accessToken = result.accessToken;
+          final authProvider = context.read<AuthProvider>();
+          final success = await authProvider.facebookSignIn(
+            accessToken: accessToken?.tokenString ?? '',
+          );
+
+          if (!mounted) return;
+
+          if (!success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Login failed: ${authProvider.error}')),
+            );
+          }
+        } else if (result.status == LoginStatus.cancelled) {
+          // User cancelled, do nothing
+        } else {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Facebook login failed: ${result.message}')),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Facebook Sign In failed: $e')),
+        );
+      }
     }
   }
 

@@ -22,11 +22,9 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
   bool _isLinkingFacebook = false;
 
   Future<void> _linkGoogleAccount() async {
-    // Get authProvider and token before any async operations
     final authProvider = context.read<AuthProvider>();
-    final token = await authProvider.authService.secureStorage.getToken();
     
-    if (token == null) {
+    if (authProvider.token == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -40,18 +38,62 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
     setState(() => _isLinkingGoogle = true);
     
     try {
-      // Use backend OAuth for all platforms
-      // Pass token in state parameter for linking
-      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
-      final queryParams = {'state': token, 'redirect_uri': redirectUri};
-      
-      final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google/link')
-          .replace(queryParameters: queryParams);
-      
-      await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
-      
-      // Don't set loading to false - user will come back via callback
-      return;
+      if (kIsWeb) {
+        // Web: Use browser-based OAuth flow
+        final token = authProvider.token!;
+        final redirectUri = AppConfig.frontendUrl;
+        final queryParams = {'state': token, 'redirect_uri': redirectUri};
+        
+        final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google/link')
+            .replace(queryParameters: queryParams);
+        
+        await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
+      } else {
+        // Mobile: Use native Google Sign-In SDK
+        // For Android: don't pass clientId, use serverClientId for backend verification
+        // For iOS: pass the iOS client ID
+        final GoogleSignIn googleSignIn = Platform.isAndroid 
+          ? GoogleSignIn(
+              clientId: AppConfig.googleAndroidClientId, // Android client ID
+              serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
+              scopes: ['email', 'profile'],
+            )
+          : GoogleSignIn(
+              clientId: AppConfig.googleClientId,
+              scopes: ['email', 'profile'],
+            );
+        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+
+        if (googleUser != null) {
+          final GoogleSignInAuthentication googleAuth =
+              await googleUser.authentication;
+
+          final platform = Platform.isAndroid ? 'android' : 'ios';
+          final success = await authProvider.linkGoogleAccount(
+            idToken: googleAuth.idToken ?? '',
+            platform: platform,
+          );
+
+          if (!mounted) return;
+
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Google account linked successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to link Google: ${authProvider.error}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+        setState(() => _isLinkingGoogle = false);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -60,19 +102,14 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      if (mounted) {
-        setState(() => _isLinkingGoogle = false);
-      }
+      setState(() => _isLinkingGoogle = false);
     }
   }
 
   Future<void> _linkFacebookAccount() async {
-    // Get authProvider and token before any async operations
     final authProvider = context.read<AuthProvider>();
-    final token = await authProvider.authService.secureStorage.getToken();
     
-    if (token == null) {
+    if (authProvider.token == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -86,18 +123,54 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
     setState(() => _isLinkingFacebook = true);
     
     try {
-      // Use backend OAuth for all platforms
-      // Pass token in state parameter for linking
-      final redirectUri = kIsWeb ? AppConfig.frontendUrl : 'musicroom://oauth';
-      final queryParams = {'state': token, 'redirect_uri': redirectUri};
-      
-      final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook/link')
-          .replace(queryParameters: queryParams);
-      
-      await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
-      
-      // Don't set loading to false - user will come back via callback
-      return;
+      if (kIsWeb) {
+        // Web: Use browser-based OAuth flow
+        final token = authProvider.token!;
+        final redirectUri = AppConfig.frontendUrl;
+        final queryParams = {'state': token, 'redirect_uri': redirectUri};
+        
+        final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook/link')
+            .replace(queryParameters: queryParams);
+        
+        await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
+      } else {
+        // Mobile: Use native Facebook Login SDK
+        final result = await FacebookAuth.instance.login();
+
+        if (result.status == LoginStatus.success) {
+          final accessToken = result.accessToken;
+          final success = await authProvider.linkFacebookAccount(
+            accessToken: accessToken?.tokenString ?? '',
+          );
+
+          if (!mounted) return;
+
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Facebook account linked successfully!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to link Facebook: ${authProvider.error}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        } else if (result.status != LoginStatus.cancelled) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Facebook login failed: ${result.message}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _isLinkingFacebook = false);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -106,10 +179,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
           backgroundColor: Colors.red,
         ),
       );
-    } finally {
-      if (mounted) {
-        setState(() => _isLinkingFacebook = false);
-      }
+      setState(() => _isLinkingFacebook = false);
     }
   }
 

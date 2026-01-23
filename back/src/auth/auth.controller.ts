@@ -12,6 +12,7 @@ import {
   Logger,
   BadRequestException,
   UnauthorizedException,
+  ConflictException,
   Inject,
   HttpException,
 } from '@nestjs/common';
@@ -49,8 +50,8 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly userService: UserService,
-    private readonly jwtService: any,
-    private readonly configService: any,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Public()
@@ -351,6 +352,70 @@ export class AuthController {
     }
   }
 
+  @Post('google/id-token')
+  @Public()
+  @ApiOperation({
+    summary: 'Verify Google ID Token from native mobile SDK',
+    description: 'Authenticates user with Google ID token from native Android/iOS SDK',
+  })
+  async googleIdTokenAuth(
+    @Body() body: { 
+      idToken: string;
+      platform: 'ios' | 'android';
+      linkingMode?: 'link'
+    },
+    @Req() request: any
+  ) {
+    this.logger.log(`google/id-token auth for ${body.platform}, linkingMode: ${body.linkingMode}`);
+    
+    try {
+      // Verify the ID token
+      const googleUser = await this.authService.verifyGoogleIdToken(body.idToken);
+      
+      // Si c'est en mode linking, lier le compte Google à l'utilisateur existant
+      if (body.linkingMode === 'link') {
+        const authHeader = request.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          throw new UnauthorizedException('Authorization token required for linking');
+        }
+        
+        const token = authHeader.substring(7);
+        const currentUser = await this.authService.getUserFromToken(token);
+        
+        // Lier le compte Google
+        const updatedUser = await this.authService.linkGoogleAccount(currentUser.id, googleUser.id);
+        
+        return {
+          success: true,
+          message: 'Google account linked successfully',
+          data: updatedUser,
+          timestamp: new Date().toISOString(),
+        };
+      }
+      
+      // Normal login
+      const result = await this.authService.googleLogin(googleUser);
+      
+      return {
+        success: true,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        user: result.user
+      };
+      
+    } catch (error) {
+      this.logger.error(`Google ID token auth failed: ${error.message}`, error.stack);
+      
+      if (error instanceof UnauthorizedException || 
+          error instanceof BadRequestException ||
+          error instanceof ConflictException) {
+        throw error;
+      }
+      
+      throw new BadRequestException(error.message || 'Google authentication failed');
+    }
+  }
+
   // Google OAuth
   @Public()
   @Get('google')
@@ -383,7 +448,8 @@ export class AuthController {
             const payload = this.jwtService.verify(user.linkingToken, { 
               secret: this.configService.get('JWT_SECRET') 
             });
-          const currentUser = await this.userService.findByEmail(payload.email);
+          // Use user ID (sub) instead of email to find the current user
+          const currentUser = await this.userService.findById(payload.sub);
           
           if (!currentUser) {
             throw new UnauthorizedException('User not found');
@@ -507,7 +573,8 @@ export class AuthController {
           const payload = this.jwtService.verify(user.linkingToken, { 
             secret: this.configService.get('JWT_SECRET') 
           });
-          const currentUser = await this.userService.findByEmail(payload.email);
+          // Use user ID (sub) instead of email to find the current user
+          const currentUser = await this.userService.findById(payload.sub);
           
           if (!currentUser) {
             throw new UnauthorizedException('User not found');
@@ -653,7 +720,16 @@ export class AuthController {
       };
     } catch (error) {
         this.logger.error('Facebook mobile login failed:', error);
-        throw new BadRequestException('Facebook authentication failed');
+        
+        // Re-throw specific errors with their original messages
+        if (error instanceof UnauthorizedException || 
+            error instanceof BadRequestException ||
+            error instanceof ConflictException) {
+          throw error;
+        }
+        
+        // Generic error for unexpected issues
+        throw new BadRequestException(error.message || 'Facebook authentication failed');
     }
   }
 
@@ -816,7 +892,8 @@ export class AuthController {
         secret: this.configService.get('JWT_SECRET') 
       });
       
-      const currentUser = await this.userService.findByEmail(payload.email);
+      // Use user ID (sub) instead of email to find the current user
+      const currentUser = await this.userService.findById(payload.sub);
       
       if (!currentUser) {
         throw new UnauthorizedException('User not found');
@@ -871,7 +948,8 @@ export class AuthController {
         secret: this.configService.get('JWT_SECRET') 
       });
       
-      const currentUser = await this.userService.findByEmail(payload.email);
+      // Use user ID (sub) instead of email to find the current user
+      const currentUser = await this.userService.findById(payload.sub);
       
       if (!currentUser) {
         throw new UnauthorizedException('User not found');

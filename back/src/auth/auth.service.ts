@@ -244,6 +244,43 @@ private decodeJWT(token: string): any {
   }
 }
 
+  /** Verify Google ID Token from native mobile SDK */
+  async verifyGoogleIdToken(idToken: string) {
+    try {
+      // Verify the ID token with Google's tokeninfo endpoint
+      const response = await firstValueFrom(
+        this.httpService.get(
+          `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
+        )
+      );
+
+      const payload = response.data;
+      
+      // Verify the token is for our app
+      const validAudiences = [
+        this.configService.get('GOOGLE_CLIENT_ID'), // Web client
+        this.configService.get('GOOGLE_ANDROID_CLIENT_ID'), // Android client
+        this.configService.get('GOOGLE_IOS_CLIENT_ID'), // iOS client
+      ].filter(Boolean);
+
+      if (!validAudiences.includes(payload.aud)) {
+        throw new UnauthorizedException('Invalid token audience');
+      }
+
+      // Return user info
+      return {
+        id: payload.sub,
+        email: payload.email,
+        name: payload.name,
+        picture: payload.picture,
+        emailVerified: payload.email_verified,
+      };
+    } catch (error) {
+      this.logger.error('Failed to verify Google ID token:', error.message);
+      throw new UnauthorizedException('Invalid Google ID token');
+    }
+  }
+
   /** Récupère le user en fonction de son googleUser.id et renvoie les acces et refreshToken */
   async googleLogin(googleUser: any): Promise<AuthResult> {
 
@@ -289,13 +326,6 @@ private decodeJWT(token: string): any {
       refreshToken,
     };
   }
-
-async verifyGoogleIdToken(idToken: string) {
-    const response = await firstValueFrom(
-        this.httpService.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`)
-    );
-    return response.data; // Contient les infos user
-}
 
   async verifyFacebookToken(fbToken: string) {
     try {
@@ -618,9 +648,12 @@ async verifyGoogleIdToken(idToken: string) {
 
   async getUserFromToken(token: string): Promise<User> {
     try {
-      const decoded = this.jwtService.verify(token);
+      const decoded = this.jwtService.verify(token, {
+        secret: this.configService.get<string>('JWT_SECRET'),
+      });
       return await this.userService.findById(decoded.sub);
     } catch (error) {
+      this.logger.error(`getUserFromToken failed: ${error.message}`);
       throw new UnauthorizedException('Invalid token');
     }
   }

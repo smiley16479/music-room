@@ -34,6 +34,16 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Music Room'),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () async {
+              final authProvider = context.read<AuthProvider>();
+              await authProvider.logout();
+            },
+          ),
+        ],
       ),
       body: _buildContent(),
       bottomNavigationBar: BottomNavigationBar(

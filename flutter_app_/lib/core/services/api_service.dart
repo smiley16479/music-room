@@ -142,34 +142,48 @@ class ApiService {
     logger.d('Response status: ${response.statusCode}');
     logger.d('Response body: ${response.body}');
 
+    dynamic body;
     try {
-      final body = jsonDecode(response.body);
-      logger.d('Decoded body type: ${body.runtimeType}');
-
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        return body;
-      } else if (response.statusCode == 401) {
-        throw UnauthorizedException('Unauthorized');
-      } else if (response.statusCode == 403) {
-        throw ForbiddenException('Forbidden');
-      } else if (response.statusCode == 404) {
-        throw NotFoundException('Not found');
-      } else if (response.statusCode >= 500) {
-        String message = _extractErrorMessage(body);
-        throw ServerException(message);
+      if (response.body.isEmpty || response.body == 'null' || response.body.trim() == 'null') {
+        body = null;
       } else {
-        String message = _extractErrorMessage(body);
-        throw ApiException(message);
+        body = jsonDecode(response.body);
       }
+      logger.d('Decoded body type: ${body.runtimeType}');
     } catch (e) {
-      if (e is ApiException || e is ServerException || e is UnauthorizedException || e is ForbiddenException || e is NotFoundException) rethrow;
-      logger.e('Response parsing error: $e');
-      throw ApiException('Failed to parse response: $e');
+      logger.e('JSON decode error: $e');
+      // If decoding fails and it's a success status, return null (e.g., for logout)
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        logger.w('Successful response with invalid JSON, treating as null');
+        body = null;
+      } else {
+        // For error responses, treat the body as a plain error message
+        body = {'error': response.body, 'message': response.body};
+      }
+    }
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return body;
+    } else if (response.statusCode == 401) {
+      throw UnauthorizedException('Unauthorized');
+    } else if (response.statusCode == 403) {
+      throw ForbiddenException('Forbidden');
+    } else if (response.statusCode == 404) {
+      throw NotFoundException('Not found');
+    } else if (response.statusCode >= 500) {
+      String message = _extractErrorMessage(body);
+      throw ServerException(message);
+    } else {
+      String message = _extractErrorMessage(body);
+      throw ApiException(message);
     }
   }
 
   /// Extract error message from response body (handles different formats)
   String _extractErrorMessage(dynamic body) {
+    if (body == null) {
+      return 'Unknown error';
+    }
     if (body is Map<String, dynamic>) {
       final message = body['message'];
       if (message is String) {
@@ -179,6 +193,9 @@ class ApiService {
         return message.map((e) => e.toString()).join(', ');
       }
       return body['error'] ?? 'Unknown error';
+    }
+    if (body is String) {
+      return body;
     }
     return 'Unknown error';
   }

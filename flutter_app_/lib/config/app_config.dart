@@ -2,37 +2,41 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 /// Application configuration constants
+/// 
+/// MOBILE OAUTH: Uses native SDKs (Google Sign-In, Facebook Login)
+/// - No browser redirect needed for mobile
+/// - Native SDKs handle authentication directly in the app
+/// - Only web uses browser-based OAuth flow
+/// 
+/// NETWORK ACCESS:
+/// - For Android emulator: Use 10.0.2.2 to access host machine's localhost
+/// - For physical devices: Use your machine's actual IP address
+/// - For web: localhost works directly
 class AppConfig {
+  // Machine IP for physical device testing
+  // Run `ifconfig` (Mac/Linux) or `ipconfig` (Windows) to find your IP
+  static const String _machineIp = '10.16.13.5';
+  
   // API Configuration
-  // For development on physical devices: Use your machine's IP (e.g., 192.168.x.x)
-  // For iOS Simulator: Try localhost:3000 first, or use your machine IP
-  // To find your IP: run `ifconfig` on Mac/Linux or `ipconfig` on Windows
+  // For Android emulator: 10.0.2.2 maps to host's localhost
+  // For physical devices: use machine IP
+  // For web: localhost works directly
   static String get baseUrl {
     if (kIsWeb) {
       return 'http://localhost:3000/api';
     } else if (Platform.isAndroid) {
-      return 'http://10.0.2.2:3000/api'; // Android emulator host machine
+      // For emulator use 10.0.2.2, for physical device use _machineIp
+      return 'http://10.0.2.2:3000/api';
     } else {
-      return 'http://localhost:3000/api'; // iOS simulator, desktop
+      // iOS simulator can use localhost, physical device needs machine IP
+      return 'http://localhost:3000/api';
     }
   }
   
-  // OAuth URL for browser redirects (must be accessible from external browser)
-  // IMPORTANT: For Android/iOS, this must be your machine's actual IP address
-  // that is accessible from the device's browser, NOT 10.0.2.2 or localhost
-  // Run `ifconfig` (Mac/Linux) or `ipconfig` (Windows) to find your IP
-  static const String _machineIp = '10.14.6.13'; // TODO: Update with your machine's IP
-  
+  // OAuth URL - only used for web (mobile uses native SDKs)
   static String get oauthBaseUrl {
-    if (kIsWeb) {
-      return 'http://localhost:3000/api';
-    } else if (Platform.isAndroid) {
-      return 'http://$_machineIp:3000/api'; // Use actual machine IP for browser
-    } else if (Platform.isIOS) {
-      return 'http://$_machineIp:3000/api'; // Use actual machine IP for browser
-    } else {
-      return 'http://localhost:3000/api';
-    }
+    // Only web uses browser-based OAuth
+    return 'http://localhost:3000/api';
   }
   
   // Frontend URL for OAuth web callbacks (must match FRONTEND_URL in backend .env)
@@ -41,10 +45,12 @@ class AppConfig {
       // Get the current origin for web
       return Uri.base.origin;
     } else {
-      return 'http://$_machineIp:5050';
+      // Not used for mobile OAuth (native SDKs don't need this)
+      return 'http://localhost:5050';
     }
   }
   
+  // WebSocket URL for real-time features
   static String get wsUrl {
     if (kIsWeb) {
       return 'http://localhost:3000';
@@ -84,8 +90,30 @@ class AppConfig {
   static const int defaultPageSize = 20;
   
   // OAuth Configuration
-  // Google OAuth - Use the Web client ID for authorization code flow
-  static const String googleClientId = '734605703797-v6de8ju06pj8nj53d932t2t3isdiotu3.apps.googleusercontent.com';
+  // Google OAuth - Different client IDs for different platforms
+  // Web: Web client ID (for browser-based OAuth)
+  // Android: Android client ID (for native Google Sign-In SDK)  
+  // iOS: iOS client ID (for native Google Sign-In SDK)
+  static const String _googleWebClientId = '46787990233-v5nevke1f34dbjchgcc20sl8u7bvutaq.apps.googleusercontent.com';
+  static const String _googleAndroidClientId = '46787990233-c17r22jnabf1t2rgmev5grs056utdes0.apps.googleusercontent.com';
+  static const String _googleIosClientId = '46787990233-v0pg16vpkk8d82edjjea9ltmgq0lf9se.apps.googleusercontent.com';
+  
+  static String get googleClientId {
+    if (kIsWeb) {
+      return _googleWebClientId;
+    } else if (Platform.isAndroid) {
+      return _googleAndroidClientId;
+    } else if (Platform.isIOS) {
+      return _googleIosClientId;
+    }
+    return _googleWebClientId;
+  }
+  
+  // Explicit getters for each platform
+  static String get googleWebClientId => _googleWebClientId;
+  static String get googleAndroidClientId => _googleAndroidClientId;
+  static String get googleIosClientId => _googleIosClientId;
+  
   // For mobile, you may need platform-specific client IDs:
   // iOS: Configure in google-services.json
   // Android: Configure in google-services.json
