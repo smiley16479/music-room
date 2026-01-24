@@ -124,19 +124,19 @@ export class UserController {
     };
   }
 
-  @Get('me/stats')
-  @ApiOperation({
-    summary: 'Get current user stats',
-    description: 'Returns activity statistics for the current user',
-  })
-  async getMyStats(@CurrentUser() user: User) {
-    const stats = await this.userService.getUserStats(user.id);
-    return {
-      success: true,
-      data: stats,
-      timestamp: new Date().toISOString(),
-    };
-  }
+  // @Get('me/stats')
+  // @ApiOperation({
+  //   summary: 'Get current user stats',
+  //   description: 'Returns activity statistics for the current user',
+  // })
+  // async getMyStats(@CurrentUser() user: User) {
+  //   const stats = await this.userService.getUserStats(user.id);
+  //   return {
+  //     success: true,
+  //     data: stats,
+  //     timestamp: new Date().toISOString(),
+  //   };
+  // }
 
   @Get('me/friends')
   @ApiOperation({
@@ -344,27 +344,27 @@ export class UserController {
     };
   }
 
-  // Admin endpoints
-  @Get(':id/stats')
-  @RequirePermissions(PERMISSIONS.USERS.READ_ALL)
-  @ApiOperation({
-    summary: 'Get user stats (Admin)',
-    description: 'Returns detailed statistics for a specific user (admin only)',
-  })
-  @ApiParam({
-    name: 'id',
-    type: String,
-    description: 'The ID of the user to get stats for',
-    required: true
-  })
-  async getUserStats(@Param('id') id: string) {
-    const stats = await this.userService.getUserStats(id);
-    return {
-      success: true,
-      data: stats,
-      timestamp: new Date().toISOString(),
-    };
-  }
+  // // Admin endpoints
+  // @Get(':id/stats')
+  // @RequirePermissions(PERMISSIONS.USERS.READ_ALL)
+  // @ApiOperation({
+  //   summary: 'Get user stats (Admin)',
+  //   description: 'Returns detailed statistics for a specific user (admin only)',
+  // })
+  // @ApiParam({
+  //   name: 'id',
+  //   type: String,
+  //   description: 'The ID of the user to get stats for',
+  //   required: true
+  // })
+  // async getUserStats(@Param('id') id: string) {
+  //   const stats = await this.userService.getUserStats(id);
+  //   return {
+  //     success: true,
+  //     data: stats,
+  //     timestamp: new Date().toISOString(),
+  //   };
+  // }
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.USERS.UPDATE)

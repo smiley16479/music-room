@@ -7,7 +7,6 @@ import {
   Param,
   Delete,
   Query,
-  UseGuards,
   HttpCode,
   HttpStatus,
   Logger,
@@ -27,6 +26,7 @@ import { Public } from '../auth/decorators/public.decorator';
 
 import { User } from 'src/user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { UseGuards } from '@nestjs/common/decorators/core/use-guards.decorator';
 
 @ApiTags('Playlists')
 @Controller('playlists')
@@ -57,13 +57,13 @@ export class PlaylistController {
   @Public()
   @ApiOperation({
     summary: 'Get all playlists',
-    description: 'Returns a paginated list of playlists based on filters',
+    description: 'Returns a paginated list of playlists. All playlists are linked to events for unified management.',
   })
   @ApiQuery({ type: PaginationDto })
   @ApiQuery({ 
     name: 'isPublic', 
     type: Boolean, 
-    description: 'Filter by public/private playlists',
+    description: 'Filter by public/private playlists (based on event visibility)',
     required: false 
   })
   @ApiQuery({ 
@@ -72,22 +72,14 @@ export class PlaylistController {
     description: 'Filter by specific user ID (owner)',
     required: false 
   })
-  @ApiQuery({ 
-    name: 'includeEventPlaylists', 
-    type: Boolean, 
-    description: 'Include playlists that belong to events',
-    required: false 
-  })
   async findAll(
     @Query() paginationDto: PaginationDto, 
     @Query('isPublic') isPublic?: string,
     @Query('userId') ownerId?: string,
-    @Query('includeEventPlaylists') includeEventPlaylists?: string,
     @CurrentUser() user?: User
   ) {
     const isPublicBool = isPublic !== undefined ? isPublic === 'true' : undefined;
-    const includeEventPlaylistsBool = includeEventPlaylists === 'true';
-    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId, includeEventPlaylistsBool);
+    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId);
   }
 
   @Get('search')

@@ -16,6 +16,8 @@ import { Vote, VoteType } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation, InvitationType, InvitationStatus } from 'src/invitation/entities/invitation.entity';
+import { EventParticipantService } from './event-participant.service';
+import { EventParticipant, ParticipantRole } from 'src/event/entities/event-participant.entity';
 
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -59,6 +61,8 @@ export class EventService {
   constructor(
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
+    @InjectRepository(EventParticipant)
+    private readonly eventParticipantRepository: Repository<EventParticipant>,
     @InjectRepository(Playlist)
     private readonly playlistRepository: Repository<Playlist>,
     @InjectRepository(Vote)
@@ -69,6 +73,7 @@ export class EventService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    private readonly eventParticipantService: EventParticipantService,
     @Inject(forwardRef(() => PlaylistService))
     private readonly playlistService: PlaylistService,
     private readonly emailService: EmailService,
@@ -142,8 +147,8 @@ export class EventService {
         playlist.name = `[Event] ${createEventDto.playlistName.trim()}`
         playlist.eventId = savedEvent.id; // Set the eventId to link it to this event
         playlist.event = savedEvent;
-        playlist.creator = creator;
-        playlist.creatorId = creator.id;
+        // playlist.creator = creator;
+        // playlist.creatorId = creator.id;
         await this.playlistRepository.save(playlist);
         
         savedEvent.playlist = playlist;
@@ -336,7 +341,7 @@ export class EventService {
     }
 
     // Check if already participating
-    const isParticipating = event.participants?.some(p => p.id === userId);
+    const isParticipating = event.participants?.some(p => p.userId === userId);
     if (isParticipating) {
       throw new ConflictException('User is already participating in this event');
     }
@@ -414,7 +419,7 @@ export class EventService {
       throw new NotFoundException('Event not found');
     
     // Only creator or existing admin can promote
-    if (event.creatorId !== actorId && !(event.admins?.some(a => a.id === actorId))) {
+    if (event.creatorId !== actorId && !(event.participants?.some(a => a.userId === actorId))) {
       throw new ForbiddenException('Only creator or admin can promote another user');
     }
     
@@ -425,15 +430,14 @@ export class EventService {
 
     // Check if user has access to this event (creator, participant, or playlist collaborator)
     const hasAccess = event.creatorId === userId ||
-      event.participants?.some(p => p.id === userId) ||
-      (event.playlist?.collaborators?.some(c => c.id === userId));
+      event.participants?.some(p => p.userId === userId)
 
     if (!hasAccess) {
       throw new ForbiddenException('User must have access to the event to be promoted to admin');
     }
     
     // Add user as participant if not already participating
-    const isParticipant = event.participants?.some(p => p.id === userId);
+    const isParticipant = event.participants?.some(p => p.userId === userId);
     if (!isParticipant) {
       // Add directly without access check since we already verified access above
       const user = await this.userRepository.findOne({ where: { id: userId } });
@@ -452,7 +456,7 @@ export class EventService {
     }
 
     // Check if already admin
-    if (event.admins?.some(a => a.id === userId)) {
+    if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
       throw new ConflictException('User is already an admin');
     }
 
@@ -473,7 +477,7 @@ export class EventService {
       where: { id: eventId },
       relations: [
         'creator',
-        'admins',
+        'participants',
       ]
     });
 
@@ -481,7 +485,7 @@ export class EventService {
       throw new NotFoundException('Event not found');
     }
     // Only creator or existing admin can remove
-    if (event.creatorId !== actorId && !(event.admins?.some(a => a.id === actorId))) {
+    if (event.creatorId !== actorId && !(event.participants?.some(a => a.userId === actorId && a.role === ParticipantRole.ADMIN))) {
       throw new ForbiddenException('Only creator or admin can remove another admin');
     }
     // Can't remove creator from admins
@@ -489,7 +493,7 @@ export class EventService {
       throw new BadRequestException('Cannot remove creator from admins');
     }
     // Check if user is actually an admin
-    if (!event.admins?.some(a => a.id === userId)) {
+    if (!event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
       throw new NotFoundException('User is not an admin');
     }
     // Remove user from admins relation
@@ -780,7 +784,7 @@ export class EventService {
     }
 
     // Event creators and admins bypass location restrictions
-    if (userId && (event.creatorId === userId || event.admins?.some(admin => admin.id === userId))) {
+    if (userId && (event.creatorId === userId || event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN))) {
       return true;
     }
 
@@ -801,7 +805,7 @@ export class EventService {
 
   private async checkVotingTimePermission(event: Event, userId?: string): Promise<boolean> {
     // Event creators and admins bypass time restrictions
-    if (userId && (event.creatorId === userId || event.admins?.some(admin => admin.id === userId))) {
+    if (userId && (event.creatorId === userId || event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN))) {
       return true;
     }
 
@@ -822,7 +826,7 @@ export class EventService {
   async startEvent(eventId: string, userId: string): Promise<Event> {
     const event = await this.findById(eventId, userId);
 
-    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
+    if (event.creatorId !== userId && !event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
       throw new ForbiddenException('Only the creator or admin can start the event');
     }
 
@@ -842,7 +846,7 @@ export class EventService {
   async endEvent(eventId: string, userId: string): Promise<Event> {
     const event = await this.findById(eventId, userId);
 
-    if (event.creatorId !== userId && !event.admins?.some(admin => admin.id === userId)) {
+    if (event.creatorId !== userId && !event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
       throw new ForbiddenException('Only the creator or admin can end the event');
     }
 
@@ -863,7 +867,7 @@ export class EventService {
     const event = await this.findById(eventId, userId);
 
     const isCreator = event.creatorId === userId;
-    const isAdmin = event.admins?.some(admin => admin.id === userId) || false;
+    const isAdmin = event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN) || false;
 
     if (!isCreator && !isAdmin) {
       throw new ForbiddenException('Only the creator or admins can control playback');
@@ -920,7 +924,7 @@ export class EventService {
       console.log("🎵 Track found in DB:", track.title, "by", track.artist);
 
       // Only creator or existing admin can set current track
-      if (event.creatorId !== userId && !(event.admins?.some(a => a.id === userId))) {
+      if (event.creatorId !== userId && !(event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN))) {
         throw new ForbiddenException('Only creator and admins can set current track');
       }
 
@@ -1047,7 +1051,7 @@ export class EventService {
 
     // Only creator or participants can invite (depending on license)
     const canInvite = event.creatorId === inviterUserId ||
-      event.participants?.some(p => p.id === inviterUserId);
+      event.participants?.some(p => p.userId === inviterUserId);
 
     if (!canInvite) {
       throw new ForbiddenException('You cannot invite users to this event');
@@ -1072,12 +1076,12 @@ export class EventService {
         continue;
       }
 
-      if (event.participants?.some(p => p.id === inviteeId)) {
+      if (event.participants?.some(p => p.userId === inviteeId)) {
         skipped.push({ userId: inviteeId, reason: 'already_participant' });
         continue;
       }
 
-      if (event.admins?.some(a => a.id === inviteeId) || event.creatorId === inviteeId) {
+      if (event.participants?.some(a => a.role === ParticipantRole.ADMIN &&  a.userId === inviteeId) || event.creatorId === inviteeId) {
         skipped.push({ userId: inviteeId, reason: 'already_admin' });
         continue;
       }
@@ -1147,7 +1151,7 @@ export class EventService {
     const trackCount = uniqueTrackIds.size;
     const timeZone = 'Europe/Paris';
     const isUserParticipating = userId ? 
-      event.participants?.some(p => p.id === userId) || false : false;
+      event.participants?.some(p => p.userId === userId) || false : false;
 
     return {
       ...event,
@@ -1178,7 +1182,7 @@ export class EventService {
     }
 
     // Check if user is an admin
-    if (event.admins?.some(admin => admin.id === userId)) {
+    if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
       return; // User is an admin
     }
 
@@ -1202,9 +1206,9 @@ export class EventService {
         relations: ['collaborators'],
       });
 
-      if (playlistWithCollaborators && playlistWithCollaborators.collaborators) {
-        const isPlaylistCollaborator = playlistWithCollaborators.collaborators.some(
-          collaborator => collaborator.id === userId
+      if (playlistWithCollaborators && playlistWithCollaborators.event.participants) {
+        const isPlaylistCollaborator = playlistWithCollaborators.event.participants.some(
+          collaborator => collaborator.userId === userId
         );
         
         if (isPlaylistCollaborator) {
@@ -1221,15 +1225,15 @@ export class EventService {
     const now = new Date();
     let effectiveStatus = event.status;
     
-    if (event.eventDate && event.eventEndDate) {
-      if (now >= event.eventDate && now < event.eventEndDate) {
+    if (event.eventDate && event.endDate) {
+      if (now >= event.eventDate && now < event.endDate) {
         effectiveStatus = EventStatus.LIVE;
         
         // Update status in database if it's different
         if (event.status !== EventStatus.LIVE) {
           await this.eventRepository.update(event.id, { status: EventStatus.LIVE });
         }
-      } else if (now >= event.eventEndDate && event.status === EventStatus.LIVE) {
+      } else if (now >= event.endDate && event.status === EventStatus.LIVE) {
         effectiveStatus = EventStatus.ENDED;
         await this.eventRepository.update(event.id, { status: EventStatus.ENDED });
       }
@@ -1250,7 +1254,7 @@ export class EventService {
         }
 
         // Check if user is an admin
-        if (event.admins?.some(admin => admin.id === userId)) {
+        if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
           return;
         }
 
@@ -1274,9 +1278,9 @@ export class EventService {
             relations: ['collaborators'],
           });
 
-          if (playlistWithCollaborators && playlistWithCollaborators.collaborators) {
-            const isPlaylistCollaborator = playlistWithCollaborators.collaborators.some(
-              collaborator => collaborator.id === userId
+          if (playlistWithCollaborators && playlistWithCollaborators.event.participants) {
+            const isPlaylistCollaborator = playlistWithCollaborators.event.participants.some(
+              collaborator => collaborator.userId === userId
             );
             
             if (isPlaylistCollaborator) {
@@ -1295,7 +1299,7 @@ export class EventService {
         }
         
         // Event admins can always vote
-        if (event.admins?.some(admin => admin.id === userId)) {
+        if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
           return;
         }
         
@@ -1362,7 +1366,7 @@ export class EventService {
     const now = toZonedTime(new Date(), timeZone);
 
     const start = toZonedTime(new Date(event.eventDate), timeZone);
-    const end = toZonedTime(new Date(event.eventEndDate), timeZone);
+    const end = toZonedTime(new Date(event.endDate), timeZone);
 
     if (now < start) return EventStatus.UPCOMING;
     if (now >= start && now <= end) return EventStatus.LIVE;

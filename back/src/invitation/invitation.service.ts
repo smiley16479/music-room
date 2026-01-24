@@ -82,9 +82,21 @@ export class InvitationService {
     // Validate and check permissions based on type
     await this.validateInvitationPermissions(type, inviterId, eventId, playlistId);
 
+    // For playlist invitations, get the event ID from the playlist
+    let finalEventId = eventId;
+    if (type === InvitationType.PLAYLIST && playlistId) {
+      const playlist = await this.playlistRepository.findOne({
+        where: { id: playlistId },
+        relations: ['event']
+      });
+      if (playlist && playlist.event) {
+        finalEventId = playlist.event.id;
+      }
+    }
+
     // Check for existing invitation
     const existingInvitation = await this.findExistingInvitation(
-      inviterId, inviteeId, type, eventId, playlistId
+      inviterId, inviteeId, type, finalEventId, playlistId
     );
 
     if (existingInvitation) {
@@ -114,8 +126,7 @@ export class InvitationService {
       inviterId,
       inviteeId,
       type,
-      eventId,
-      playlistId,
+      eventId: finalEventId,
       message,
       status: InvitationStatus.PENDING,
       expiresAt: defaultExpiresAt,
@@ -135,8 +146,7 @@ export class InvitationService {
     let queryBuilder = this.invitationRepository.createQueryBuilder('invitation')
       .leftJoinAndSelect('invitation.inviter', 'inviter')
       .leftJoinAndSelect('invitation.invitee', 'invitee')
-      .leftJoinAndSelect('invitation.event', 'event')
-      .leftJoinAndSelect('invitation.playlist', 'playlist');
+      .leftJoinAndSelect('invitation.event', 'event');
 
     if (userId) {
       queryBuilder = queryBuilder.where(
@@ -171,7 +181,7 @@ export class InvitationService {
   async findByIdWithDetails(id: string): Promise<InvitationWithDetails> {
     const invitation = await this.invitationRepository.findOne({
       where: { id },
-      relations: ['inviter', 'invitee', 'event', 'playlist'],
+      relations: ['inviter', 'invitee', 'event'],
     });
 
     if (!invitation) {
@@ -204,7 +214,6 @@ export class InvitationService {
     let queryBuilder = this.invitationRepository.createQueryBuilder('invitation')
       .leftJoinAndSelect('invitation.inviter', 'inviter')
       .leftJoinAndSelect('invitation.event', 'event')
-      .leftJoinAndSelect('invitation.playlist', 'playlist')
       .where('invitation.inviteeId = :userId', { userId });
 
     if (status) {
@@ -249,7 +258,6 @@ export class InvitationService {
     let queryBuilder = this.invitationRepository.createQueryBuilder('invitation')
       .leftJoinAndSelect('invitation.invitee', 'invitee')
       .leftJoinAndSelect('invitation.event', 'event')
-      .leftJoinAndSelect('invitation.playlist', 'playlist')
       .where('invitation.inviterId = :userId', { userId });
 
     if (status) {
@@ -530,7 +538,7 @@ export class InvitationService {
         
         // Check if user can invite to this event
         const canInviteToEvent = event.creatorId === inviterId || 
-          event.participants?.some(p => p.id === inviterId);
+          event.participants?.some(p => p.userId === inviterId);
         
         if (!canInviteToEvent) {
           throw new ForbiddenException('You cannot invite users to this event');
@@ -544,16 +552,20 @@ export class InvitationService {
         
         const playlist = await this.playlistRepository.findOne({ 
           where: { id: playlistId },
-          relations: ['creator', 'collaborators']
+          relations: ['event', 'event.participants']
         });
         
         if (!playlist) {
           throw new NotFoundException('Playlist not found');
         }
         
-        // Check if user can invite to this playlist
-        const canInviteToPlaylist = playlist.creatorId === inviterId || 
-          playlist.collaborators?.some(c => c.id === inviterId);
+        if (!playlist.event) {
+          throw new BadRequestException('Playlist must be associated with an event');
+        }
+        
+        // Check if user can invite to this playlist via event permissions
+        const canInviteToPlaylist = playlist.event.creatorId === inviterId || 
+          playlist.event.participants?.some(p => p.userId === inviterId);
         
         if (!canInviteToPlaylist) {
           throw new ForbiddenException('You cannot invite users to this playlist');
@@ -584,7 +596,7 @@ export class InvitationService {
 
     return this.invitationRepository.findOne({ 
       where: whereCondition,
-      relations: ['inviter', 'invitee', 'event', 'playlist']
+      relations: ['inviter', 'invitee', 'event']
     });
   }
 
@@ -616,12 +628,12 @@ export class InvitationService {
         break;
 
       case InvitationType.PLAYLIST:
-        if (invitation.playlistId) {
-          // Add user as playlist collaborator
-          await this.playlistRepository
+        if (invitation.eventId) {
+          // Add user to event participants (playlists inherit permissions from events)
+          await this.eventRepository
             .createQueryBuilder()
-            .relation(Playlist, 'collaborators')
-            .of(invitation.playlistId)
+            .relation(Event, 'participants')
+            .of(invitation.eventId)
             .add(invitation.inviteeId);
         }
         break;
@@ -663,17 +675,17 @@ export class InvitationService {
         }
         break;
 
-      case InvitationType.PLAYLIST:
-        if (invitation.playlist) {
-          const playlistUrl = `${frontendUrl}/playlists/${invitation.playlistId}`;
-          await this.emailService.sendPlaylistInvitation(
-            invitee.email,
-            invitation.playlist.name,
-            inviter.displayName || inviter.email,
-            playlistUrl
-          );
-        }
-        break;
+      // case InvitationType.PLAYLIST:
+      //   if (invitation.playlist) {
+      //     const playlistUrl = `${frontendUrl}/playlists/${invitation.playlistId}`;
+      //     await this.emailService.sendPlaylistInvitation(
+      //       invitee.email,
+      //       invitation.playlist.name,
+      //       inviter.displayName || inviter.email,
+      //       playlistUrl
+      //     );
+      //   }
+      //   break;
 
       case InvitationType.FRIEND:
         const profileUrl = `${frontendUrl}/users/${invitation.inviterId}`;

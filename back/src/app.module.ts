@@ -5,7 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
-import { DatabaseModule } from './database/database.module';
+// import { DatabaseModule } from './database/database.module';
 import { MusicModule } from './music/music.module';
 import { DeviceModule } from './device/device.module';
 import { EmailModule } from './email/email.module';
@@ -13,10 +13,11 @@ import { EventModule } from './event/event.module';
 import { PlaylistModule } from './playlist/playlist.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { CommonModule } from './common/common.module';
-import { APP_GUARD, APP_FILTER } from '@nestjs/core';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
+import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 @Module({
   imports: [
@@ -36,12 +37,13 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           cache: false,
           synchronize: true,
+          // dropSchema: true, // ATTENTION
         };
       }
     }),
     AuthModule,
     UserModule,
-    DatabaseModule,
+    // DatabaseModule,
     MusicModule,
     DeviceModule,
     EmailModule,
@@ -52,16 +54,21 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
   ],
   controllers: [AppController],
   providers: [AppService,
+    // Global Logging Interceptor
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
+    },
     // // Global JWT Guard
-    {
-      provide: APP_GUARD,
-      useClass: JwtAuthGuard,
-    },
-    // 2. Guard de permissions (vérifie @RequirePermissions)
-    {
-      provide: APP_GUARD,
-      useClass: PermissionsGuard,
-    },
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: JwtAuthGuard,
+    // },
+    // // 2. Guard de permissions (vérifie @RequirePermissions)
+    // {
+    //   provide: APP_GUARD,
+    //   useClass: PermissionsGuard,
+    // },
     // // Global Auth Exception Filter
     // {
     //   provide: APP_FILTER,

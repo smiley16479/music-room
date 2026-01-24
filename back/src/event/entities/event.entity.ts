@@ -6,16 +6,16 @@ import {
   UpdateDateColumn,
   ManyToOne,
   OneToMany,
-  ManyToMany,
-  JoinTable,
   JoinColumn,
   OneToOne,
-} from 'typeorm';
+} from 'typeorm'
 import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
 import { Playlist } from 'src/playlist/entities/playlist.entity';
+import { EventType } from './event-type.enum';
+import { EventParticipant } from './event-participant.entity';
 
 export enum EventVisibility {
   PUBLIC = 'public',
@@ -23,9 +23,10 @@ export enum EventVisibility {
 }
 
 export enum EventLicenseType {
-  OPEN = 'open', // Everyone can vote
-  INVITED = 'invited', // Only invited users can vote
-  LOCATION_BASED = 'location_based', // Location + time based voting
+  OPEN = 'open', // Everyone can vote/edit
+  INVITED = 'invited', // Only invited users can vote/edit
+  ADMIN = 'admin', // Only creator can edit
+  LOCATION_BASED = 'location_based', // Access based on location (not implemented yet)
 }
 
 export enum EventStatus {
@@ -45,8 +46,12 @@ export class Event {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column({ nullable: true })
-  playlistName: string;
+  @Column({
+    type: 'enum',
+    enum: EventType,
+    default: EventType.LISTENING_SESSION,
+  })
+  type: EventType;
 
   @Column({
     type: 'enum',
@@ -69,6 +74,9 @@ export class Event {
     default: EventStatus.UPCOMING,
   })
   status: EventStatus;
+
+  @Column({ name: 'voting_enabled', type: 'boolean', default: true })
+  votingEnabled: boolean;
 
   // Location data for location-based voting
   @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true, transformer: {
@@ -99,8 +107,12 @@ export class Event {
   @Column({ name: 'event_date', type: 'timestamp', nullable: true })
   eventDate: Date;
 
-  @Column({ name: 'event_end_date', type: 'timestamp', nullable: true })
-  eventEndDate: Date;
+  // Event dates (optional, for PARTY type events)
+  @Column({ name: 'start_date', type: 'timestamp', nullable: true })
+  startDate: Date;
+
+  @Column({ name: 'end_date', type: 'timestamp', nullable: true })
+  endDate: Date;
 
   // Playback state tracking for accurate synchronization
   @Column({ name: 'is_playing', type: 'boolean', default: false })
@@ -111,9 +123,6 @@ export class Event {
 
   @Column({ name: 'last_position_update', type: 'timestamp', nullable: true })
   lastPositionUpdate: Date; // When position was last updated
-
-  @Column({ name: 'max_votes_per_user', type: 'int', default: 1 })
-  maxVotesPerUser: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
@@ -146,35 +155,15 @@ export class Event {
   @OneToMany(() => Invitation, (invitation) => invitation.event)
   invitations: Invitation[];
 
-  @ManyToMany(() => User, (user) => user.participatedEvents)
-  @JoinTable({
-    name: 'event_participants',
-    joinColumn: { name: 'event_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'user_id', referencedColumnName: 'id' },
-  })
-  participants: User[];
+  @OneToMany(() => EventParticipant, (participant) => participant.event, { cascade: true })
+  participants: EventParticipant[];
 
-  @ManyToMany(() => User, (user) => user.adminOfEvents)
-  @JoinTable({
-    name: 'event_admins',
-    joinColumn: { name: 'event_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'user_id', referencedColumnName: 'id' },
-  })
-  admins: User[];
+  // Removed: ManyToMany participants and admins - now using EventParticipant entity
 
-  // @ManyToMany(() => Track)
-  // @JoinTable({
-  //   name: 'event_playlist', // Simplement la liste des pistes de l'événement
-  //   joinColumn: { name: 'event_id', referencedColumnName: 'id' },
-  //   inverseJoinColumn: { name: 'track_id', referencedColumnName: 'id' },
-  // })
-  // playlist: Track[];
-
-  // Changé pour PlaylistTrack 
-  // @OneToMany(() => EventPlaylist, item => item.event, { cascade: true })
-  // playlistItems: EventPlaylist[];
-
-  @OneToOne(() => Playlist, (playlist) => playlist.event) // ok
-  @JoinColumn()
+  @OneToOne(() => Playlist, (playlist) => playlist.event, { cascade: true })
+  @JoinColumn({ name: 'playlist_id' })
   playlist: Playlist;
+
+  @Column({ name: 'playlist_id', nullable: true })
+  playlistId: string;
 }

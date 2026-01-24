@@ -82,6 +82,11 @@ class AppConfig {
   static const String appName = 'Music Room';
   static const String appVersion = '1.0.0';
   
+  // Debug Settings
+  /// Set to true to skip authentication and go directly to HomeScreen
+  /// ⚠️ WARNING: Set to false in production!
+  static const bool debugSkipAuth = false;
+  
   // Network timeouts (in seconds)
   static const int connectTimeout = 30;
   static const int receiveTimeout = 30;
@@ -130,8 +135,12 @@ class AppConfig {
     Version: $appVersion
     Base URL: $baseUrl
     WS URL: $wsUrl
+<<<<<<< HEAD
     Google Client ID: $googleClientId
     Facebook App ID: $facebookAppId
+=======
+    Debug Skip Auth: $debugSkipAuth
+>>>>>>> origin/main
     =============================
     ''');
   }

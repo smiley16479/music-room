@@ -6,8 +6,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventController } from './event.controller';
 import { EventService } from './event.service';
 import { EventGateway } from './event.gateway';
+import { EventParticipantService } from './event-participant.service';
 
 import { Event } from 'src/event/entities/event.entity';
+import { EventParticipant } from 'src/event/entities/event-participant.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -21,7 +23,7 @@ import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, Vote, Track, User, Invitation, Playlist]),
+    TypeOrmModule.forFeature([Event, EventParticipant, Vote, Track, User, Invitation, Playlist]),
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -39,7 +41,7 @@ import { CommonModule } from '../common/common.module';
     forwardRef(() => PlaylistModule)
   ],
   controllers: [EventController],
-  providers: [EventService, EventGateway],
-  exports: [EventService, EventGateway],
+  providers: [EventService, EventParticipantService, EventGateway],
+  exports: [EventService, EventParticipantService, EventGateway],
 })
 export class EventModule { }

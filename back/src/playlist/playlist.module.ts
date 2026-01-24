@@ -2,7 +2,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PlaylistController } from './playlist.controller';
 import { PlaylistService } from './playlist.service';
-import { PlaylistGateway } from './playlist.gateway';
 
 import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
@@ -27,7 +26,7 @@ import { MusicModule } from '../music/music.module';
     forwardRef(() => EventModule),
   ],
   controllers: [PlaylistController],
-  providers: [PlaylistService, PlaylistGateway],
+  providers: [PlaylistService],
   exports: [PlaylistService],
 })
 export class PlaylistModule {}
