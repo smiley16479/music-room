@@ -8,6 +8,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService authService;
 
   User? _currentUser;
+  String? _token;
   bool _isAuthenticated = false;
   bool _isLoading = false;
   String? _error;
@@ -17,6 +18,7 @@ class AuthProvider extends ChangeNotifier {
   // Getters
   User? get currentUser => _currentUser;
   User? get user => _currentUser; // Alias for easier access
+  String? get token => _token;
   bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -31,6 +33,8 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = user;
       _isAuthenticated = user != null;
       _error = null;
+      // Cache token in memory for quick access
+      _token = await authService.secureStorage.getToken();
     } catch (e) {
       _currentUser = null;
       _isAuthenticated = false;
@@ -52,12 +56,13 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _currentUser = await authService.register(
+      await authService.register(
         email: email,
         password: password,
         displayName: displayName,
       );
-      _isAuthenticated = true;
+      // Don't set _currentUser, _token, or _isAuthenticated
+      // User needs to verify email and login manually
       _isLoading = false;
       notifyListeners();
       return true;
@@ -83,6 +88,7 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         password: password,
       );
+        _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
@@ -101,10 +107,16 @@ class AuthProvider extends ChangeNotifier {
     String? bio,
     String? location,
     String? birthDate,
+    String? displayNameVisibility,
+    String? bioVisibility,
+    String? locationVisibility,
+    String? birthDateVisibility,
+    List<String>? musicPreferences,
+    String? musicPreferenceVisibility,
   }) async {
-    _isLoading = true;
     _error = null;
-    notifyListeners();
+    // Don't set _isLoading = true here to avoid triggering a full UI rebuild
+    // which would navigate away from the profile screen
 
     try {
       final updatedUser = await authService.updateProfile(
@@ -112,8 +124,55 @@ class AuthProvider extends ChangeNotifier {
         bio: bio,
         location: location,
         birthDate: birthDate,
+        displayNameVisibility: displayNameVisibility,
+        bioVisibility: bioVisibility,
+        locationVisibility: locationVisibility,
+        birthDateVisibility: birthDateVisibility,
+        musicPreferences: musicPreferences,
+        musicPreferenceVisibility: musicPreferenceVisibility,
       );
       _currentUser = updatedUser;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Logout
+  Future<void> logout() async {
+    try {
+      await authService.logout();
+    } catch (e) {
+      // Ignore logout errors, we're clearing state anyway
+    }
+    
+    _currentUser = null;
+    _token = null;
+    _isAuthenticated = false;
+    _error = null;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  /// Google Sign In
+  Future<bool> googleSignIn({
+    required String idToken,
+    String platform = 'web',
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.googleSignIn(
+        idToken: idToken,
+        platform: platform,
+      );
+        _token = await authService.secureStorage.getToken();
+      _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
       return true;
@@ -125,39 +184,21 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Logout
-  Future<void> logout() async {
-    _isLoading = true;
-    notifyListeners();
-
-    try {
-      await authService.logout();
-      _currentUser = null;
-      _isAuthenticated = false;
-      _error = null;
-    } catch (e) {
-      _error = e.toString();
-    }
-
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  /// Google Sign In
-  Future<bool> googleSignIn({
-    required String code,
-    required String redirectUri,
+  /// Link Google Account
+  Future<bool> linkGoogleAccount({
+    required String idToken,
+    String platform = 'web',
   }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _currentUser = await authService.googleSignIn(
-        code: code,
-        redirectUri: redirectUri,
-        platform: 'web',
+      _currentUser = await authService.linkGoogleAccount(
+        idToken: idToken,
+        platform: platform,
       );
+        _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;
@@ -181,6 +222,32 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.facebookSignIn(
         accessToken: accessToken,
       );
+        _token = await authService.secureStorage.getToken();
+        _isAuthenticated = true;
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Link Facebook Account
+  Future<bool> linkFacebookAccount({
+    required String accessToken,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _currentUser = await authService.linkFacebookAccount(
+        accessToken: accessToken,
+      );
+        _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext traffic for development (localhost and emulator) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Allow localhost -->
+        <domain includeSubdomains="true">localhost</domain>
+        <!-- Allow Android emulator's special IP for host machine -->
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <!-- Allow local network IPs (for physical device testing) -->
+        <domain includeSubdomains="true">10.16.13.5</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">192.168.1.0</domain>
+    </domain-config>
+    
+    <!-- For production, remove the above and use HTTPS only -->
+    <!-- <base-config cleartextTrafficPermitted="false" /> -->
+</network-security-config>
