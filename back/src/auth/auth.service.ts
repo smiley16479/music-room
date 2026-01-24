@@ -101,6 +101,11 @@ export class AuthService {
     //   throw new UnauthorizedException('Email or password is incorrect');
     // }
 
+    // Check if email is verified
+    if (!user.emailVerified) {
+      throw new UnauthorizedException('Please verify your email before logging in. Check your inbox for the verification link.');
+    }
+
     // Update last seen
     await this.userService.updateLastSeen(user.id);
 

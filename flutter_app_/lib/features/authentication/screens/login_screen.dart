@@ -49,12 +49,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleGoogleSignIn() async {
     if (kIsWeb) {
-      // Web: Use browser-based OAuth flow
+      // Web: Use browser-based OAuth flow - redirect in same window
       try {
         final redirectUri = AppConfig.frontendUrl;
         final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google')
             .replace(queryParameters: {'redirect_uri': redirectUri});
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+        await launchUrl(url, webOnlyWindowName: '_self');
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -108,12 +108,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleFacebookSignIn() async {
     if (kIsWeb) {
-      // Web: Use browser-based OAuth flow
+      // Web: Use browser-based OAuth flow - redirect in same window
       try {
         final redirectUri = AppConfig.frontendUrl;
         final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook')
             .replace(queryParameters: {'redirect_uri': redirectUri});
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+        await launchUrl(url, webOnlyWindowName: '_self');
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

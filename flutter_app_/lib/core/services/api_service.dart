@@ -240,7 +240,15 @@ class ApiService {
 
   /// Auth: Logout
   Future<void> logout() async {
-    await post('${AppConfig.authEndpoint}/logout');
+    try {
+      // Don't use the regular post method to avoid error logging
+      final url = Uri.parse('${AppConfig.baseUrl}${AppConfig.authEndpoint}/logout');
+      final headers = await _getHeaders();
+      await httpClient.post(url, headers: headers)
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      // Silently ignore logout errors - we'll clear tokens anyway
+    }
     await secureStorage.deleteTokens();
   }
 

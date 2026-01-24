@@ -42,6 +42,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
 
     if (success) {
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registration successful! Please check your email to verify your account, then login.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+        ),
+      );
+      // Return to login screen
       Navigator.of(context).pop();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

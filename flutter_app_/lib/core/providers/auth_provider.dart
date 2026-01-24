@@ -56,13 +56,13 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _currentUser = await authService.register(
+      await authService.register(
         email: email,
         password: password,
         displayName: displayName,
       );
-        _token = await authService.secureStorage.getToken();
-      _isAuthenticated = true;
+      // Don't set _currentUser, _token, or _isAuthenticated
+      // User needs to verify email and login manually
       _isLoading = false;
       notifyListeners();
       return true;

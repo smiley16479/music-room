@@ -29,9 +29,8 @@ class AuthService {
     final data = response['data'] as Map<String, dynamic>;
     final userJson = data['user'] as Map<String, dynamic>;
   
-    // Optional: store tokens here
-    final accessToken = data['accessToken'];
-    final refreshToken = data['refreshToken'];
+    // Don't save tokens - user needs to verify email first
+    // The backend sends tokens but we ignore them for registration
   
     return User.fromJson(userJson);
   }

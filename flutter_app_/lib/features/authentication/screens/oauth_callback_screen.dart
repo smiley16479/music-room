@@ -98,10 +98,9 @@ class _OAuthCallbackScreenState extends State<OAuthCallbackScreen> {
       
       if (!mounted) return;
       
-      if (kIsWeb) {
-        Navigator.of(context).pushReplacementNamed('/') ??
-            Navigator.of(context).pop();
-      }
+      // For account linking, go back instead of home
+      // This should return to the profile/settings page
+      Navigator.of(context).pop();
     } else {
       _showError('Invalid callback parameters');
     }

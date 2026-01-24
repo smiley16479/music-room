@@ -39,7 +39,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
     
     try {
       if (kIsWeb) {
-        // Web: Use browser-based OAuth flow
+        // Web: Use browser-based OAuth flow - redirect in same window
         final token = authProvider.token!;
         final redirectUri = AppConfig.frontendUrl;
         final queryParams = {'state': token, 'redirect_uri': redirectUri};
@@ -47,7 +47,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
         final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google/link')
             .replace(queryParameters: queryParams);
         
-        await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
+        await launchUrl(linkUrl, webOnlyWindowName: '_self');
       } else {
         // Mobile: Use native Google Sign-In SDK
         // For Android: don't pass clientId, use serverClientId for backend verification
@@ -124,7 +124,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
     
     try {
       if (kIsWeb) {
-        // Web: Use browser-based OAuth flow
+        // Web: Use browser-based OAuth flow - redirect in same window
         final token = authProvider.token!;
         final redirectUri = AppConfig.frontendUrl;
         final queryParams = {'state': token, 'redirect_uri': redirectUri};
@@ -132,7 +132,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
         final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook/link')
             .replace(queryParameters: queryParams);
         
-        await launchUrl(linkUrl, mode: LaunchMode.externalApplication);
+        await launchUrl(linkUrl, webOnlyWindowName: '_self');
       } else {
         // Mobile: Use native Facebook Login SDK
         final result = await FacebookAuth.instance.login();
