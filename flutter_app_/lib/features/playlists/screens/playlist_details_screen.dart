@@ -20,15 +20,75 @@ class PlaylistDetailsScreen extends StatefulWidget {
 
 // MARK: - PlaylistDetailsScreen
 class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
+  bool _isEditMode = false;
+  
+  // Text Controllers
+  late TextEditingController _nameController;
+  late TextEditingController _descriptionController;
+
   @override
   void initState() {
     super.initState();
+    _initControllers();
     _loadPlaylist();
+  }
+
+  void _initControllers() {
+    _nameController = TextEditingController();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPlaylist() async {
     final playlistProvider = context.read<PlaylistProvider>();
     await playlistProvider.loadPlaylistDetails(widget.playlistId);
+  }
+
+  void _toggleEditMode(dynamic playlist) {
+    setState(() {
+      if (!_isEditMode) {
+        _nameController.text = playlist.name;
+        _descriptionController.text = playlist.description ?? '';
+      }
+      _isEditMode = !_isEditMode;
+    });
+  }
+
+  Future<void> _savePlaylist(PlaylistProvider playlistProvider) async {
+    final success = await playlistProvider.updatePlaylist(
+      widget.playlistId,
+      name: _nameController.text,
+      description: _descriptionController.text,
+    );
+
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Playlist updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        setState(() {
+          _isEditMode = false;
+        });
+        // Reload playlist details to reflect changes
+        await _loadPlaylist();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: ${playlistProvider.error}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -37,6 +97,21 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       appBar: AppBar(
         title: const Text('Playlist Details'),
         elevation: 0,
+        actions: [
+          Consumer<PlaylistProvider>(
+            builder: (context, playlistProvider, _) {
+              final playlist = playlistProvider.currentPlaylist;
+              if (playlist != null) {
+                return IconButton(
+                  icon: Icon(_isEditMode ? Icons.close : Icons.edit),
+                  onPressed: () => _toggleEditMode(playlist),
+                  tooltip: _isEditMode ? 'Cancel' : 'Edit Playlist',
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
+        ],
       ),
       body: Consumer<PlaylistProvider>(
         builder: (context, playlistProvider, _) {
@@ -50,7 +125,23 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
             return const Center(child: Text('Playlist not found'));
           }
 
-          return SingleChildScrollView(
+          return _isEditMode
+              ? _buildEditForm(playlistProvider, playlist)
+              : _buildViewMode(playlistProvider, playlist);
+        },
+      ),
+      floatingActionButton: _isEditMode
+          ? null
+          : FloatingActionButton(
+              onPressed: _showAddTrackDialog,
+              tooltip: 'Add Track',
+              child: const Icon(Icons.add),
+            ),
+    );
+  }
+
+  Widget _buildViewMode(PlaylistProvider playlistProvider, dynamic playlist) {
+    return SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -226,12 +317,157 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
               ],
             ),
           );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddTrackDialog,
-        tooltip: 'Add Track',
-        child: const Icon(Icons.add),
+  }
+
+  Widget _buildEditForm(PlaylistProvider playlistProvider, dynamic playlist) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Edit Playlist',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 24),
+
+          // Basic Information
+          Text(
+            'Basic Information',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.purple,
+                ),
+          ),
+          const SizedBox(height: 12),
+
+          TextField(
+            controller: _nameController,
+            decoration: const InputDecoration(
+              labelText: 'Playlist Name *',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.music_note),
+              helperText: 'Required',
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          TextField(
+            controller: _descriptionController,
+            decoration: const InputDecoration(
+              labelText: 'Description',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.description),
+              helperText: 'Optional',
+            ),
+            maxLines: 3,
+          ),
+          const SizedBox(height: 24),
+
+          // Playlist Stats (Read-only)
+          Text(
+            'Playlist Statistics',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.purple,
+                ),
+          ),
+          const SizedBox(height: 12),
+
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.purple.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.purple.shade200),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    Icon(Icons.queue_music, color: Colors.purple.shade700),
+                    const SizedBox(height: 4),
+                    Text(
+                      playlist.trackCount.toString(),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple.shade700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Tracks',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.purple.shade600,
+                          ),
+                    ),
+                  ],
+                ),
+                Container(
+                  width: 1,
+                  height: 60,
+                  color: Colors.purple.shade200,
+                ),
+                Column(
+                  children: [
+                    Icon(Icons.people, color: Colors.purple.shade700),
+                    const SizedBox(height: 4),
+                    Text(
+                      playlist.collaboratorCount.toString(),
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple.shade700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Collaborators',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.purple.shade600,
+                          ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Action Buttons
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.close),
+                  label: const Text('Cancel'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onPressed: () => _toggleEditMode(playlist),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: const Text('Save Changes'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.purple,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: playlistProvider.isLoading
+                      ? null
+                      : () => _savePlaylist(playlistProvider),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
