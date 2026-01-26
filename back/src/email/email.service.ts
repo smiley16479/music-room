@@ -43,9 +43,18 @@ export class EmailService {
     });
   }
 
-  async sendPasswordResetEmail(email: string, token: string): Promise<void> {
-    const backendUrl = this.configService.get<string>('BACKEND_URL') || 'http://localhost:3000';
-    const resetUrl = `${backendUrl}/api/auth/reset-password?token=${token}`;
+  async sendPasswordResetEmail(email: string, token: string, isMobile: boolean = false): Promise<void> {
+    let resetUrl: string;
+    
+    if (isMobile) {
+      // For mobile: use deep link directly
+      resetUrl = `musicroom://reset-password?token=${token}`;
+    } else {
+      // For web: use frontend URL
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:8080';
+      resetUrl = `${frontendUrl}/#/reset-password?token=${token}`;
+    }
+    
     const template = this.getPasswordResetTemplate(resetUrl);
     await this.sendEmail({
       to: email,

@@ -18,7 +18,7 @@ User _$UserFromJson(Map<String, dynamic> json) => User(
       : DateTime.parse(json['birthDate'] as String),
   googleId: json['googleId'] as String?,
   facebookId: json['facebookId'] as String?,
-  emailVerified: json['emailVerified'] as bool,
+  emailVerified: json['emailVerified'] as bool?,
   displayNameVisibility: json['displayNameVisibility'] as String?,
   bioVisibility: json['bioVisibility'] as String?,
   birthDateVisibility: json['birthDateVisibility'] as String?,

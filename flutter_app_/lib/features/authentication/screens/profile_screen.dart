@@ -260,8 +260,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ListTile(
                       title: const Text('Email Verified'),
                       trailing: Icon(
-                        user.emailVerified ? Icons.check_circle : Icons.cancel,
-                        color: user.emailVerified ? Colors.green : Colors.red,
+                        (user.emailVerified ?? false) ? Icons.check_circle : Icons.cancel,
+                        color: (user.emailVerified ?? false) ? Colors.green : Colors.red,
                       ),
                     ),
                     const Divider(),
@@ -270,6 +270,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       subtitle: Text(
                         user.lastSeen?.toString().split('.')[0] ?? 'Unknown',
                       ),
+                    ),
+                    const Divider(),
+                    // Change Password button
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        final parentCtx = context;
+                        final authProvider = parentCtx.read<AuthProvider>();
+                        final email = authProvider.user?.email;
+                        if (email == null) return;
+
+                        ScaffoldMessenger.of(parentCtx).showSnackBar(
+                          const SnackBar(content: Text('Sending password reset email...')),
+                        );
+
+                        try {
+                          await authProvider.authService.apiService.post(
+                            '/auth/forgot-password',
+                            body: {'email': email},
+                          );
+
+                          if (parentCtx.mounted) {
+                            ScaffoldMessenger.of(parentCtx).showSnackBar(
+                              SnackBar(content: Text('Password reset email sent to $email')),
+                            );
+                          }
+                        } catch (e) {
+                          if (parentCtx.mounted) {
+                            ScaffoldMessenger.of(parentCtx).showSnackBar(
+                              SnackBar(content: Text('Failed to send reset email: ${e.toString()}')),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.lock_reset),
+                      label: const Text('Change Password'),
                     ),
                   ],
                 ),

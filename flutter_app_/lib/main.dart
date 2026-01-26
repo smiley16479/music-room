@@ -10,6 +10,8 @@ import 'core/providers/index.dart';
 import 'core/services/index.dart';
 import 'features/authentication/screens/login_screen.dart';
 import 'features/authentication/screens/oauth_callback_screen.dart';
+import 'features/authentication/screens/reset_password_screen.dart';
+import 'features/authentication/screens/forgot_password_screen.dart';
 import 'features/playlists/screens/home_screen.dart';
 
 void main() async {
@@ -79,7 +81,21 @@ class MyApp extends StatelessWidget {
         '/': (context) => const _InitialScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => const LoginScreen(),
+        '/forgot-password': (context) => const ForgotPasswordScreen(),
         '/auth/callback': (context) => const OAuthCallbackScreen(),
+      },
+      onGenerateRoute: (settings) {
+        // Handle reset-password route with token parameter
+        if (settings.name != null && settings.name!.startsWith('/reset-password')) {
+          final uri = Uri.parse('http://dummy${settings.name}');
+          final token = uri.queryParameters['token'];
+          if (token != null) {
+            return MaterialPageRoute(
+              builder: (context) => ResetPasswordScreen(token: token),
+            );
+          }
+        }
+        return null;
       },
     );
   }
@@ -139,6 +155,14 @@ class _InitialScreenState extends State<_InitialScreen> {
       if (params.containsKey('token') || params.containsKey('success')) {
         // Process OAuth callback
         _processOAuthCallback(params);
+      }
+    }
+    // Check if this is a password reset link (musicroom://reset-password?token=...)
+    else if (uri.scheme == 'musicroom' && uri.host == 'reset-password') {
+      final token = uri.queryParameters['token'];
+      if (token != null) {
+        // Navigate to reset password screen with token
+        Navigator.of(context).pushNamed('/reset-password?token=$token');
       }
     }
   }

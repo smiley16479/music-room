@@ -134,6 +134,8 @@ class AppConfig {
     Base URL: $baseUrl
     WS URL: $wsUrl
     Debug Skip Auth: $debugSkipAuth
+    Google Client ID: $googleClientId
+    Facebook App ID: $facebookAppId
     =============================
     ''');
   }

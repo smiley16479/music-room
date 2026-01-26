@@ -15,7 +15,7 @@ class User extends Equatable {
   final DateTime? birthDate;
   final String? googleId;
   final String? facebookId;
-  final bool emailVerified;
+  final bool? emailVerified;
   final String? displayNameVisibility;
   final String? bioVisibility;
   final String? birthDateVisibility;
@@ -37,7 +37,7 @@ class User extends Equatable {
     this.birthDate,
     this.googleId,
     this.facebookId,
-    required this.emailVerified,
+    this.emailVerified,
     this.displayNameVisibility,
     this.bioVisibility,
     this.birthDateVisibility,

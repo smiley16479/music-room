@@ -421,7 +421,7 @@ private decodeJWT(token: string): any {
     }
   }
 
-  async requestPasswordReset(dto: RequestPasswordResetDto): Promise<void> {
+  async requestPasswordReset(dto: RequestPasswordResetDto, isMobile: boolean = false): Promise<void> {
     const { email } = dto;
     const user = await this.userService.findByEmail(email);
 
@@ -439,8 +439,8 @@ private decodeJWT(token: string): any {
       resetPasswordExpires: resetExpires,
     });
 
-    // Send reset email
-    await this.emailService.sendPasswordResetEmail(user.email, resetToken);
+    // Send reset email with platform-specific link
+    await this.emailService.sendPasswordResetEmail(user.email, resetToken, isMobile);
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {

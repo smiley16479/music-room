@@ -172,8 +172,10 @@ export class AuthController {
       },
     },
   })
-  async requestPasswordReset(@Body() dto: RequestPasswordResetDto) {
-    await this.authService.requestPasswordReset(dto);
+  async requestPasswordReset(@Body() dto: RequestPasswordResetDto, @Req() req: any) {
+    const userAgent = req.headers['user-agent'] || '';
+    const isMobile = /Dart|Android|iPhone|iPad|iPod/i.test(userAgent);
+    await this.authService.requestPasswordReset(dto, isMobile);
     return {
       success: true,
       message: 'If an account with that email exists, a password reset link has been sent.',

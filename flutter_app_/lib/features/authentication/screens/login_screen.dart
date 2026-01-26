@@ -40,7 +40,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!mounted) return;
 
-    if (!success) {
+    if (success) {
+      // Navigate to home screen on successful login
+      Navigator.of(context).pushReplacementNamed('/home');
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(authProvider.error ?? 'Login failed')),
       );
@@ -208,7 +211,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pushNamed('/forgot-password');
+                    },
+                    child: const Text('Forgot Password?'),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 Consumer<AuthProvider>(
                   builder: (context, authProvider, _) {
                     return SizedBox(
