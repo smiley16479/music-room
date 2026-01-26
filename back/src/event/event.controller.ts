@@ -73,10 +73,17 @@ export class EventController {
     description: 'User longitude for location-based event filtering',
     required: false,
   })
+  @ApiQuery({
+    name: 'type',
+    type: String,
+    description: 'Filter by event type (e.g., LISTENING_SESSION)',
+    required: false,
+  })
   async findAll(
     @Query() paginationDto: PaginationDto,
     @Query('latitude') latitude?: string,
     @Query('longitude') longitude?: string,
+    @Query('type') type?: string,
     @CurrentUser() user?: User
   ) {
     let userLocation: LocationDto | undefined;
@@ -90,7 +97,7 @@ export class EventController {
       }
     }
     
-    return this.eventService.findAll(paginationDto, user?.id, userLocation);
+    return this.eventService.findAll(paginationDto, user?.id, userLocation, type);
   }
 
   @Get('nearby')
@@ -133,6 +140,26 @@ export class EventController {
       timestamp: new Date().toISOString(),
       data: events
     };
+  }
+
+  @Get('my-events')
+  @ApiOperation({
+    summary: 'Get user events with filtering',
+    description: 'Returns events created by or participated in by the current user with optional type filtering',
+  })
+  @ApiQuery({ type: PaginationDto })
+  @ApiQuery({
+    name: 'type',
+    type: String,
+    description: 'Filter by event type (e.g., LISTENING_SESSION)',
+    required: false,
+  })
+  async getMyEvents(
+    @Query() paginationDto: PaginationDto,
+    @Query('type') type?: string,
+    @CurrentUser() user?: User,
+  ) {
+    return this.eventService.findMyEvents(paginationDto, user?.id, type);
   }
 
   @Get(':id')

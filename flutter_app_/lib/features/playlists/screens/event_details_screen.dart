@@ -161,7 +161,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                           event.eventEndDate.toString().split('.')[0]),
                       if (event.locationName != null && event.locationName!.isNotEmpty)
                         _buildDetailRow(context, 'Location', event.locationName!),
-                      _buildDetailRow(context, 'Visibility', event.visibility),
+                      _buildDetailRow(context, 'Visibility', event.visibility.name),
                       _buildDetailRow(context, 'License', event.licenseType ?? 'open'),
                       const SizedBox(height: 24),
                       // Participants

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +9,7 @@ import 'config/app_config.dart';
 import 'core/providers/index.dart';
 import 'core/services/index.dart';
 import 'features/authentication/screens/login_screen.dart';
+import 'features/authentication/screens/oauth_callback_screen.dart';
 import 'features/playlists/screens/home_screen.dart';
 
 void main() async {
@@ -24,15 +28,15 @@ void main() async {
     apiService: apiService,
     secureStorage: SecureStorageService(secureStorage),
   );
-  final playlistService = PlaylistService(apiService: apiService);
   final eventService = EventService(apiService: apiService);
+  // PlaylistService is now an alias for EventService
 
   runApp(
     MultiProvider(
       providers: [
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
-        Provider<PlaylistService>(create: (_) => playlistService),
+        Provider<PlaylistService>(create: (_) => eventService), // PlaylistService is typedef for EventService
         Provider<EventService>(create: (_) => eventService),
         Provider<TrackService>(create: (_) => TrackService(apiService: apiService)),
         Provider<InvitationService>(
@@ -42,7 +46,7 @@ void main() async {
           create: (_) => AuthProvider(authService: authService),
         ),
         ChangeNotifierProvider(
-          create: (_) => PlaylistProvider(playlistService: playlistService),
+          create: (_) => PlaylistProvider(eventService: eventService), // PlaylistProvider is typedef for EventProvider
         ),
         ChangeNotifierProvider(
           create: (_) => EventProvider(eventService: eventService),
@@ -71,7 +75,12 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const _InitialScreen(),
+      routes: {
+        '/': (context) => const _InitialScreen(),
+        '/home': (context) => const HomeScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/auth/callback': (context) => const OAuthCallbackScreen(),
+      },
     );
   }
 }
@@ -85,19 +94,133 @@ class _InitialScreen extends StatefulWidget {
 }
 
 class _InitialScreenState extends State<_InitialScreen> {
+  bool _isOAuthCallback = false;
+  StreamSubscription<Uri>? _deepLinkSubscription;
+  late AppLinks _appLinks;
+  
+  // GlobalKey to preserve HomeScreen state across rebuilds
+  static final GlobalKey _homeScreenKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
+    _appLinks = AppLinks();
+    _checkForOAuthCallback();
     _initializeAuth();
+    _initDeepLinks();
+  }
+
+  @override
+  void dispose() {
+    _deepLinkSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _initDeepLinks() {
+    if (kIsWeb) return; // Deep links only for mobile
+    
+    // Handle deep links when app is already running
+    _deepLinkSubscription = _appLinks.uriLinkStream.listen((Uri uri) {
+      _handleDeepLink(uri);
+    });
+    
+    // Handle initial deep link if app was opened via deep link
+    _appLinks.getInitialAppLink().then((Uri? uri) {
+      if (uri != null) {
+        _handleDeepLink(uri);
+      }
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    // Check if this is an OAuth callback (musicroom://oauth?token=...)
+    if (uri.scheme == 'musicroom' && uri.host == 'oauth') {
+      final params = uri.queryParameters;
+      if (params.containsKey('token') || params.containsKey('success')) {
+        // Process OAuth callback
+        _processOAuthCallback(params);
+      }
+    }
+  }
+
+  Future<void> _processOAuthCallback(Map<String, String> params) async {
+    try {
+      if (params.containsKey('error')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('OAuth error: ${params['error']}')),
+        );
+        return;
+      }
+
+      if (params.containsKey('token')) {
+        final token = params['token']!;
+        final refreshToken = params['refresh'];
+
+        final authProvider = context.read<AuthProvider>();
+        
+        // Store tokens
+        await authProvider.authService.secureStorage.saveToken(token);
+        if (refreshToken != null) {
+          await authProvider.authService.secureStorage.saveRefreshToken(refreshToken);
+        }
+
+        // Reinitialize auth state
+        await authProvider.init();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Successfully logged in!')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error processing login: $e')),
+        );
+      }
+    }
+  }
+
+  void _checkForOAuthCallback() {
+    if (kIsWeb) {
+      final uri = Uri.base;
+      // Check if this is an OAuth callback
+      // Look for success=true or token parameter
+      if (uri.queryParameters.containsKey('token') ||
+          uri.queryParameters.containsKey('success')) {
+        setState(() {
+          _isOAuthCallback = true;
+        });
+      }
+    }
   }
 
   Future<void> _initializeAuth() async {
-    final authProvider = context.read<AuthProvider>();
-    await authProvider.init();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AuthProvider>().init();
+    });
+    // final authProvider = context.read<AuthProvider>();
+    // await authProvider.init();
   }
 
   @override
   Widget build(BuildContext context) {
+    // If this is an OAuth callback, show the callback screen
+    if (_isOAuthCallback) {
+      // After showing the callback screen once, clear the flag
+      // This will be called after the callback screen processes
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isOAuthCallback) {
+          setState(() {
+            _isOAuthCallback = false;
+          });
+        }
+      });
+      return const OAuthCallbackScreen();
+    }
+
     return Consumer<AuthProvider>(
       builder: (context, authProvider, _) {
         // Debug mode: skip authentication
@@ -114,7 +237,7 @@ class _InitialScreenState extends State<_InitialScreen> {
         }
 
         if (authProvider.isAuthenticated) {
-          return const HomeScreen();
+          return HomeScreen(key: _homeScreenKey);
         } else {
           return const LoginScreen();
         }

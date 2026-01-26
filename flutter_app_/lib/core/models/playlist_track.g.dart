@@ -9,7 +9,7 @@ part of 'playlist_track.dart';
 PlaylistTrack _$PlaylistTrackFromJson(Map<String, dynamic> json) =>
     PlaylistTrack(
       id: json['id'] as String,
-      playlistId: json['playlistId'] as String,
+      playlistId: json['eventId'] as String,
       trackId: json['trackId'] as String,
       position: (json['position'] as num).toInt(),
       votes: (json['votes'] as num).toInt(),
@@ -25,7 +25,7 @@ PlaylistTrack _$PlaylistTrackFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$PlaylistTrackToJson(PlaylistTrack instance) =>
     <String, dynamic>{
       'id': instance.id,
-      'playlistId': instance.playlistId,
+      'eventId': instance.playlistId,
       'trackId': instance.trackId,
       'position': instance.position,
       'votes': instance.votes,

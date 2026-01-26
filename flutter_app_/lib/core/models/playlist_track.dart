@@ -3,11 +3,13 @@ import 'package:json_annotation/json_annotation.dart';
 
 part 'playlist_track.g.dart';
 
-/// PlaylistTrack model - represents a track in a playlist with position and votes
+/// PlaylistTrack model - represents a track in an event/playlist
+/// Note: playlistId now points to Event (Event IS Playlist when type=LISTENING_SESSION)
 @JsonSerializable()
 class PlaylistTrack extends Equatable {
   final String id;
-  final String playlistId;
+  @JsonKey(name: 'eventId') // Backend uses eventId now
+  final String playlistId; // Kept for compatibility
   final String trackId;
   final int position;
   final int votes;
@@ -21,7 +23,7 @@ class PlaylistTrack extends Equatable {
 
   const PlaylistTrack({
     required this.id,
-    required this.playlistId,
+    required this.playlistId, // Actually eventId from backend
     required this.trackId,
     required this.position,
     required this.votes,

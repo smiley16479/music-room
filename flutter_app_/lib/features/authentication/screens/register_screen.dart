@@ -1,8 +1,10 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:provider/provider.dart';
 
+import '../../../config/app_config.dart';
 import '../../../core/providers/index.dart';
 
 /// Register screen
@@ -40,6 +42,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
 
     if (success) {
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registration successful! Please check your email to verify your account, then login.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 5),
+        ),
+      );
+      // Return to login screen
       Navigator.of(context).pop();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -147,10 +158,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: OutlinedButton.icon(
                         onPressed: () async {
                           try {
-                            final GoogleSignIn googleSignIn = GoogleSignIn(
-                              clientId:
-                                  '734605703797-v6de8ju06pj8nj53d932t2t3isdiotu3.apps.googleusercontent.com',
-                            );
+                            // For Android: use Android client ID + server client ID for backend verification
+                            // For iOS: use the iOS client ID
+                            final GoogleSignIn googleSignIn = Platform.isAndroid 
+                              ? GoogleSignIn(
+                                  clientId: AppConfig.googleAndroidClientId, // Android client ID
+                                  serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
+                                  scopes: ['email', 'profile'],
+                                )
+                              : GoogleSignIn(
+                                  clientId: AppConfig.googleClientId,
+                                  scopes: ['email', 'profile'],
+                                );
                             final GoogleSignInAccount? googleUser =
                                 await googleSignIn.signIn();
 
@@ -161,11 +180,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                               final authProvider =
                                   context.read<AuthProvider>();
+                              final platform = Platform.isAndroid ? 'android' : 'ios';
                               final success =
                                   await authProvider.googleSignIn(
-                                code: googleAuth.idToken ?? '',
-                                redirectUri:
-                                    'http://localhost:3000/api/auth/google/callback',
+                                idToken: googleAuth.idToken ?? '',
+                                platform: platform,
                               );
 
                               if (!mounted) return;

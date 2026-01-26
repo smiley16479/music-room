@@ -20,6 +20,9 @@ class User extends Equatable {
   final String? bioVisibility;
   final String? birthDateVisibility;
   final String? locationVisibility;
+  @JsonKey(fromJson: _musicPreferencesFromJson, toJson: _musicPreferencesToJson)
+  final List<String>? musicPreferences;
+  final String? musicPreferenceVisibility;
   final DateTime? lastSeen;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -39,6 +42,8 @@ class User extends Equatable {
     this.bioVisibility,
     this.birthDateVisibility,
     this.locationVisibility,
+    this.musicPreferences,
+    this.musicPreferenceVisibility,
     this.lastSeen,
     required this.createdAt,
     required this.updatedAt,
@@ -46,6 +51,24 @@ class User extends Equatable {
 
   factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
   Map<String, dynamic> toJson() => _$UserToJson(this);
+
+  static List<String>? _musicPreferencesFromJson(dynamic json) {
+    if (json == null) return null;
+    if (json is List) {
+      return json.map((e) => e.toString()).toList();
+    }
+    if (json is Map) {
+      final favoriteGenres = json['favoriteGenres'];
+      if (favoriteGenres is List) {
+        return favoriteGenres.map((e) => e.toString()).toList();
+      }
+    }
+    return null;
+  }
+
+  static dynamic _musicPreferencesToJson(List<String>? preferences) {
+    return preferences;
+  }
 
   @override
   List<Object?> get props => [
@@ -63,6 +86,8 @@ class User extends Equatable {
         bioVisibility,
         birthDateVisibility,
         locationVisibility,
+        musicPreferences,
+        musicPreferenceVisibility,
         lastSeen,        createdAt,
         updatedAt,
       ];

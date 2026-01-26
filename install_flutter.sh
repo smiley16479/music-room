@@ -115,5 +115,5 @@ echo "emulator lent ? -> emulator -avd flutter_avd -gpu swiftshader_indirect"
 echo "⚠️ Si lock un jour : pkill -f flutter
 rm -f ~/sgoinfre/flutter/bin/cache/lockfile"
 # adb devices # abd ->(android debug bridge)
-# emulator -list-avds -> avoir la liste de e;ulateur
+# emulator -list-avds -> avoir la liste des emulateur
 # emulator -avd NOM_DE_TON_AVD -gpu swiftshader_indirect -no-snapshot -verbose -> lqncer l'emulateur

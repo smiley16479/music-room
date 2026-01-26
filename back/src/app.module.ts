@@ -10,7 +10,6 @@ import { MusicModule } from './music/music.module';
 import { DeviceModule } from './device/device.module';
 import { EmailModule } from './email/email.module';
 import { EventModule } from './event/event.module';
-import { PlaylistModule } from './playlist/playlist.module';
 import { InvitationModule } from './invitation/invitation.module';
 import { CommonModule } from './common/common.module';
 import { AuthExceptionFilter } from './auth/filters/auth-exception.filter';
@@ -36,8 +35,8 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
           url,
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           cache: false,
-          synchronize: true,
-          dropSchema: true, // ATTENTION
+          // synchronize: true, // ATTENTION
+          // dropSchema: true, // ATTENTION
         };
       }
     }),
@@ -48,7 +47,6 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
     DeviceModule,
     EmailModule,
     EventModule,
-    PlaylistModule,
     InvitationModule,
     CommonModule,
   ],
@@ -59,21 +57,21 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
     },
-    // // Global JWT Guard
-    // {
-    //   provide: APP_GUARD,
-    //   useClass: JwtAuthGuard,
-    // },
-    // // 2. Guard de permissions (vérifie @RequirePermissions)
-    // {
-    //   provide: APP_GUARD,
-    //   useClass: PermissionsGuard,
-    // },
-    // // Global Auth Exception Filter
-    // {
-    //   provide: APP_FILTER,
-    //   useClass: AuthExceptionFilter,
-    // },
+    // Global JWT Guard
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    // 2. Guard de permissions (vérifie @RequirePermissions)
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
+    },
+    // Global Auth Exception Filter
+    {
+      provide: APP_FILTER,
+      useClass: AuthExceptionFilter,
+    },
   ],
 })
 export class AppModule {}

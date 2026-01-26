@@ -23,6 +23,8 @@ User _$UserFromJson(Map<String, dynamic> json) => User(
   bioVisibility: json['bioVisibility'] as String?,
   birthDateVisibility: json['birthDateVisibility'] as String?,
   locationVisibility: json['locationVisibility'] as String?,
+  musicPreferences: User._musicPreferencesFromJson(json['musicPreferences']),
+  musicPreferenceVisibility: json['musicPreferenceVisibility'] as String?,
   lastSeen: json['lastSeen'] == null
       ? null
       : DateTime.parse(json['lastSeen'] as String),
@@ -45,6 +47,8 @@ Map<String, dynamic> _$UserToJson(User instance) => <String, dynamic>{
   'bioVisibility': instance.bioVisibility,
   'birthDateVisibility': instance.birthDateVisibility,
   'locationVisibility': instance.locationVisibility,
+  'musicPreferences': User._musicPreferencesToJson(instance.musicPreferences),
+  'musicPreferenceVisibility': instance.musicPreferenceVisibility,
   'lastSeen': instance.lastSeen?.toIso8601String(),
   'createdAt': instance.createdAt.toIso8601String(),
   'updatedAt': instance.updatedAt.toIso8601String(),

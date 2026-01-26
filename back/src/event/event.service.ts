@@ -26,7 +26,6 @@ import { LocationDto } from '../common/dto/location.dto';
 import { CreateVoteDto } from './dto/vote.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
-import { PlaylistService } from 'src/playlist/playlist.service';
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
 import { GeocodingService } from '../common/services/geocoding.service';
@@ -72,8 +71,6 @@ export class EventService {
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
     private readonly eventParticipantService: EventParticipantService,
-    @Inject(forwardRef(() => PlaylistService))
-    private readonly playlistService: PlaylistService,
     private readonly emailService: EmailService,
     private readonly eventGateway: EventGateway,
     private readonly geocodingService: GeocodingService,
@@ -161,28 +158,30 @@ export class EventService {
     return this.findById(savedEvent.id, creatorId);
   }
 
-  async findAll(paginationDto: PaginationDto, userId?: string, userLocation?: LocationDto) {
+  async findAll(paginationDto: PaginationDto, userId?: string, userLocation?: LocationDto, type?: string) {
     const { page, limit, skip } = paginationDto;
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
       .leftJoinAndSelect('event.admins', 'admins')
-      .leftJoinAndSelect('event.currentTrack', 'currentTrack')
-      .leftJoinAndSelect('event.playlist', 'playlist')
-      .leftJoinAndSelect('playlist.collaborators', 'playlistCollaborators');
+      .leftJoinAndSelect('event.currentTrack', 'currentTrack');
 
     if (userId) {
-      // Show public events + private events where user has access (creator, participant, admin, or playlist collaborator)
+      // Show public events + private events where user has access (creator, participant, admin)
       queryBuilder
         .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
         .orWhere('event.creatorId = :userId', { userId })
         .orWhere('participants.id = :userId', { userId })
-        .orWhere('admins.id = :userId', { userId })
-        .orWhere('playlistCollaborators.id = :userId', { userId });
+        .orWhere('admins.id = :userId', { userId });
     } else {
       // For unauthenticated users, only show public events
       queryBuilder.where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC });
+    }
+
+    // Filter by type if provided
+    if (type) {
+      queryBuilder.andWhere('event.type = :type', { type });
     }
 
     queryBuilder
@@ -210,6 +209,51 @@ export class EventService {
         total: filteredEvents.length,
         totalPages: Math.ceil(filteredEvents.length / limit),
         hasNext: page < Math.ceil(filteredEvents.length / limit),
+        hasPrev: page > 1,
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async findMyEvents(paginationDto: PaginationDto, userId?: string, type?: string) {
+    if (!userId) {
+      throw new ForbiddenException('Authentication required');
+    }
+
+    const { page, limit, skip } = paginationDto;
+
+    const queryBuilder = this.eventRepository.createQueryBuilder('event')
+      .leftJoinAndSelect('event.participants', 'participants')
+      .where(
+        '(event.creatorId = :userId OR participants.userId = :userId)',
+        { userId }
+      );
+
+    // Filter by type if provided
+    if (type) {
+      queryBuilder.andWhere('event.type = :type', { type });
+    }
+
+    queryBuilder
+      .orderBy('event.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [events, total] = await queryBuilder.getManyAndCount();
+
+    const eventsWithStats = await Promise.all(
+      events.map(event => this.addEventStats(event, userId)),
+    );
+
+    return {
+      success: true,
+      data: eventsWithStats,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
         hasPrev: page > 1,
       },
       timestamp: new Date().toISOString(),
@@ -249,10 +293,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'admins', 'currentTrack', 
-        'playlist', 'playlist.playlistTracks', 'playlist.collaborators',
-        'votes', 'votes.user', 'votes.track'
-      ],
+      relations: ['creator', 'participants', 'votes', 'votes.user', 'votes.track'],
     });
 
     if (!event) {
@@ -316,7 +357,7 @@ export class EventService {
   async addParticipant(eventId: string, userId: string, userLocation?: LocationDto): Promise<void> {
     const event = await this.eventRepository.findOne({
       where: { id: eventId },
-      relations: ['participants', 'playlist', 'playlist.collaborators'],
+      relations: ['participants'],
     });
 
     if (!event) {
@@ -392,9 +433,7 @@ export class EventService {
       relations: [
         'creator',
         'admins',
-        'participants',
-        'playlist',
-        'playlist.collaborators'
+        'participants'
       ]
     });
 
@@ -1011,13 +1050,8 @@ export class EventService {
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
-      .leftJoinAndSelect('event.admins', 'admin')
-      .leftJoinAndSelect('event.playlist', 'playlist')
-      .leftJoinAndSelect('playlist.collaborators', 'playlistCollaborators')
-      .leftJoinAndSelect('event.creator', 'creator')
       .where('event.creatorId = :userId', { userId })
-      .orWhere('participant.id = :userId', { userId })
-      .orWhere('playlistCollaborators.id = :userId', { userId })
+      .orWhere('participant.userId = :userId', { userId })
       .getMany();
 
     const timeZone = 'Europe/Paris';
@@ -1183,7 +1217,7 @@ export class EventService {
       return; // User has an accepted invitation
     }
 
-    // Check if user is a participant on the event (which now includes playlist collaborators)
+    // Check if user is a participant on the event
     const isParticipant = event.participants?.some(
       participant => participant.userId === userId
     );
@@ -1246,7 +1280,7 @@ export class EventService {
           return;
         }
 
-        // Check if user is a participant on the event (which now includes playlist collaborators)
+        // Check if user is a participant on the event
         const isParticipant = event.participants?.some(
           participant => participant.userId === userId
         );
@@ -1255,7 +1289,7 @@ export class EventService {
           return;
         }
 
-        throw new ForbiddenException('Only invited users or playlist collaborators can vote in this event');
+        throw new ForbiddenException('Only invited users can vote in this event');
         break;
 
       case EventLicenseType.LOCATION_BASED:
@@ -1348,17 +1382,23 @@ export class EventService {
    * Create a playlist event (listening session)
    * This is the event-centric way to create a playlist
    */
-  async createPlaylistEvent(dto: any, creatorId: string): Promise<any> {
-    return this.playlistService.create(dto, creatorId);
+  async createPlaylistEvent(dto: any, creatorId: string): Promise<Event> {
+    const createDto = {
+      ...dto,
+      type: EventType.LISTENING_SESSION,
+      visibility: dto.isPublic ? EventVisibility.PUBLIC : EventVisibility.PRIVATE,
+      licenseType: EventLicenseType.OPEN,
+    };
+    return this.create(createDto, creatorId);
   }
 
   /**
    * Get playlist by event ID
    */
-  async getEventPlaylist(eventId: string, userId?: string): Promise<any> {
+  async getEventPlaylist(eventId: string, userId?: string): Promise<Event> {
     const event = await this.eventRepository.findOne({
       where: { id: eventId },
-      relations: ['tracks'],
+      relations: ['tracks', 'creator', 'participants'],
     });
 
     if (!event) {
@@ -1370,118 +1410,25 @@ export class EventService {
       throw new NotFoundException('This event does not have a playlist');
     }
 
-    return this.playlistService.findById(eventId, userId);
+    await this.checkEventAccess(event, userId);
+    return event;
   }
 
   /**
    * Update playlist metadata (through its event)
    */
-  async updatePlaylistEvent(playlistId: string, dto: any, userId: string): Promise<any> {
-    return this.playlistService.update(playlistId, dto, userId);
+  async updatePlaylistEvent(playlistId: string, dto: any, userId: string): Promise<Event> {
+    return this.update(playlistId, dto, userId);
   }
 
   /**
    * Delete playlist (through its event)
    */
   async deletePlaylistEvent(playlistId: string, userId: string): Promise<void> {
-    return this.playlistService.remove(playlistId, userId);
+    return this.remove(playlistId, userId);
   }
 
-  /**
-   * Add track to event playlist
-   */
-  async addTrackToEventPlaylist(playlistId: string, trackDto: any, userId: string): Promise<any> {
-    return this.playlistService.addTrack(playlistId, userId, trackDto);
-  }
-
-  /**
-   * Remove track from event playlist
-   */
-  async removeTrackFromEventPlaylist(playlistId: string, trackId: string, userId: string): Promise<void> {
-    return this.playlistService.removeTrack(playlistId, trackId, userId);
-  }
-
-  /**
-   * Reorder tracks in event playlist
-   */
-  async reorderEventPlaylistTracks(playlistId: string, reorderDto: any, userId: string): Promise<any> {
-    return this.playlistService.reorderTracks(playlistId, userId, reorderDto);
-  }
-
-  /**
-   * Get tracks from event playlist
-   */
-  async getEventPlaylistTracks(playlistId: string, userId?: string): Promise<any> {
-    return this.playlistService.getPlaylistTracks(playlistId, userId);
-  }
-
-  /**
-   * Get all playlists (event-based)
-   */
-  async getAllPlaylists(paginationDto: any, userId?: string, isPublic?: boolean, ownerId?: string): Promise<any> {
-    return this.playlistService.findAll(paginationDto, userId, isPublic, ownerId);
-  }
-
-  /**
-   * Search playlists
-   */
-  async searchPlaylists(query: string, userId?: string, limit?: number): Promise<any> {
-    return this.playlistService.searchPlaylists(query, userId, limit);
-  }
-
-  /**
-   * Get user's playlists
-   */
-  async getUserPlaylists(userId: string, paginationDto: any): Promise<any> {
-    return this.playlistService.getMyPlaylists(userId, paginationDto);
-  }
-
-  /**
-   * Get recommended playlists for user
-   */
-  async getRecommendedPlaylists(userId: string, limit?: number): Promise<any> {
-    return this.playlistService.getRecommendedPlaylists(userId, limit);
-  }
-
-  /**
-   * Duplicate playlist event
-   */
-  async duplicatePlaylistEvent(playlistId: string, userId: string, newName?: string): Promise<any> {
-    return this.playlistService.duplicatePlaylist(playlistId, userId, newName);
-  }
-
-  /**
-   * Export playlist
-   */
-  async exportPlaylistEvent(playlistId: string, userId: string): Promise<any> {
-    return this.playlistService.exportPlaylist(playlistId, userId);
-  }
-
-  /**
-   * Add collaborator to playlist (through event participants)
-   */
-  async addPlaylistCollaborator(playlistId: string, collaboratorId: string, requesterId: string): Promise<void> {
-    return this.playlistService.addCollaborator(playlistId, collaboratorId, requesterId);
-  }
-
-  /**
-   * Remove collaborator from playlist (through event participants)
-   */
-  async removePlaylistCollaborator(playlistId: string, collaboratorId: string, requesterId: string): Promise<void> {
-    return this.playlistService.removeCollaborator(playlistId, collaboratorId, requesterId);
-  }
-
-  /**
-   * Get playlist collaborators
-   */
-  async getPlaylistCollaborators(playlistId: string, userId?: string): Promise<any> {
-    return this.playlistService.getCollaborators(playlistId, userId);
-  }
-
-  /**
-   * Invite users to playlist
-   */
-  async inviteToPlaylist(playlistId: string, inviterUserId: string, inviteeIds: string[], message?: string): Promise<any> {
-    return this.playlistService.inviteCollaborators(playlistId, inviterUserId, inviteeIds, message);
-  }
+  // Note: Other playlist methods (tracks, collaborators, etc.) are now handled
+  // directly through PlaylistController which delegates to PlaylistService
+  // This EventService focuses on Event-specific operations
 }

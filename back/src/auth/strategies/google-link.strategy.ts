@@ -37,8 +37,18 @@ export class GoogleLinkStrategy extends PassportStrategy(Strategy, 'google-link'
     
     const { id, name, emails, photos } = profile;
     
-    // Get the token from the state parameter (passed through OAuth flow)
-    const linkingToken = req.query.state;
+    // Get the token and redirect_uri from the state parameter (passed through OAuth flow)
+    let linkingToken: string | undefined;
+    let redirectUri: string | undefined;
+    
+    try {
+      const stateData = JSON.parse(req.query.state || '{}');
+      linkingToken = stateData.token;
+      redirectUri = stateData.redirect_uri;
+    } catch (e) {
+      // State might be just a plain token string (backwards compatibility)
+      linkingToken = req.query.state;
+    }
     
     const user = {
       id,
@@ -49,6 +59,7 @@ export class GoogleLinkStrategy extends PassportStrategy(Strategy, 'google-link'
       // This strategy is specifically for linking
       linkingMode: 'link',
       linkingToken: linkingToken,
+      redirectUri: redirectUri,
     };
     
     console.log('Google link user object:', user);

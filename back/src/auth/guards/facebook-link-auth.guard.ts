@@ -3,13 +3,19 @@ import { AuthGuard } from '@nestjs/passport';
 
 @Injectable()
 export class FacebookLinkAuthGuard extends AuthGuard('facebook-link') {
-  getAuthenticateOptions(context: ExecutionContext) {
+  getAuthenticateOptions(context: any) {
     const request = context.switchToHttp().getRequest();
-    const token = request.query.token;
+    const token = request.query.state; // JWT token for user authentication
+    const redirectUri = request.query.redirect_uri;
     
-    if (token) {
+    // Pass both token and redirect_uri through state as JSON
+    const stateData: any = {};
+    if (token) stateData.token = token;
+    if (redirectUri) stateData.redirect_uri = redirectUri;
+    
+    if (Object.keys(stateData).length > 0) {
       return {
-        state: token, // Pass the token through the state parameter
+        state: JSON.stringify(stateData),
       };
     }
     
