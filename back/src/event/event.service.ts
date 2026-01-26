@@ -26,7 +26,7 @@ import { UpdateEventDto } from './dto/event/update-event.dto';
 import { LocationDto } from '../common/dto/location.dto';
 import { CreateVoteDto } from './dto/vote.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { AddTrackToPlaylistDto } from '../playlist/dto/add-track.dto';
+import { AddTrackToPlaylistDto } from './dto/playlist/add-track.dto';
 
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';

@@ -29,6 +29,8 @@ import { User } from 'src/user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { log } from 'console';
 
+import { AddTrackToPlaylistDto } from './dto/playlist/add-track.dto';
+
 @ApiTags('Events')
 @Controller('events')
 @UseGuards(JwtAuthGuard)
@@ -473,6 +475,34 @@ export class EventController {
       success: true,
       message: 'Admin removed from event',
       data: updatedEvent,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // Playlist Tracks
+  @Post(':id/tracks')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Add track to playlist',
+    description: 'Adds a track to the event/playlist. Only creator or admins can add tracks.',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event/playlist',
+    required: true
+  })
+  @ApiBody({ type: AddTrackToPlaylistDto })
+  async addTrackToPlaylist(
+    @Param('id') playlistId: string,
+    @Body() addTrackDto: AddTrackToPlaylistDto,
+    @CurrentUser() user: User,
+  ) {
+    const playlistTrack = await this.eventService.addTrack(playlistId, user.id, addTrackDto);
+    return {
+      success: true,
+      message: 'Track added to playlist successfully',
+      data: playlistTrack,
       timestamp: new Date().toISOString(),
     };
   }

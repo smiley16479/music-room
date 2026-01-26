@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../core/models/track_search_result.dart';
+import '../widgets/music_search_dialog.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -16,6 +18,7 @@ class PlaylistDetailsScreen extends StatefulWidget {
   State<PlaylistDetailsScreen> createState() => _PlaylistDetailsScreenState();
 }
 
+// MARK: - PlaylistDetailsScreen
 class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   @override
   void initState() {
@@ -233,135 +236,43 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
     );
   }
 
-  void _showAddTrackDialog() {
-    final dezerIdController = TextEditingController();
-    final titleController = TextEditingController();
-    final artistController = TextEditingController();
-    final albumController = TextEditingController();
-    final previewUrlController = TextEditingController();
-    final durationController = TextEditingController();
-
-    showDialog(
+  void _showAddTrackDialog() async {
+    final result = await showDialog<TrackSearchResult>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Add Track to Playlist'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: dezerIdController,
-                  decoration: const InputDecoration(
-                    labelText: 'Deezer ID',
-                    border: OutlineInputBorder(),
-                    hintText: 'e.g., 123456789',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: titleController,
-                  decoration: const InputDecoration(
-                    labelText: 'Track Title',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: artistController,
-                  decoration: const InputDecoration(
-                    labelText: 'Artist',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: albumController,
-                  decoration: const InputDecoration(
-                    labelText: 'Album',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: previewUrlController,
-                  decoration: const InputDecoration(
-                    labelText: 'Preview URL (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: durationController,
-                  decoration: const InputDecoration(
-                    labelText: 'Duration in seconds (optional)',
-                    border: OutlineInputBorder(),
-                    hintText: 'e.g., 180',
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (dezerIdController.text.isEmpty ||
-                    titleController.text.isEmpty ||
-                    artistController.text.isEmpty ||
-                    albumController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please fill in all required fields'),
-                    ),
-                  );
-                  return;
-                }
-
-                final playlistProvider = context.read<PlaylistProvider>();
-                int? duration;
-                if (durationController.text.isNotEmpty) {
-                  duration = int.tryParse(durationController.text);
-                }
-
-                final success = await playlistProvider.addTrackToPlaylist(
-                  widget.playlistId,
-                  deezerId: dezerIdController.text,
-                  title: titleController.text,
-                  artist: artistController.text,
-                  album: albumController.text,
-                  previewUrl: previewUrlController.text.isNotEmpty
-                      ? previewUrlController.text
-                      : null,
-                  duration: duration,
-                );
-
-                if (mounted) {
-                  Navigator.pop(context);
-                  if (success) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Track added successfully!'),
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Error: ${playlistProvider.error}'),
-                      ),
-                    );
-                  }
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
+      builder: (context) => const MusicSearchDialog(),
     );
+
+    if (result != null && mounted) {
+      final playlistProvider = context.read<PlaylistProvider>();
+      
+      final success = await playlistProvider.addTrackToPlaylist(
+        widget.playlistId,
+        deezerId: result.id,
+        title: result.title,
+        artist: result.artist,
+        album: result.album ?? '',
+        albumCoverUrl: result.albumCoverUrl,
+        previewUrl: result.previewUrl,
+        duration: result.duration,
+      );
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ ${result.title} added to playlist'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error: ${playlistProvider.error}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 }

@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 
 // Event imports
 import { EventController } from './event.controller';
+import { PlaylistController } from './playlist.controller';
 import { EventService } from './event.service';
 import { EventGateway } from './event.gateway';
 import { EventParticipantService } from './event-participant.service';
@@ -54,7 +55,7 @@ import { CommonModule } from '../common/common.module';
     MusicModule,
     CommonModule,
   ],
-  controllers: [EventController],
+  controllers: [EventController, PlaylistController],
   providers: [EventService, EventParticipantService, EventGateway],
   exports: [EventService, EventParticipantService, EventGateway],
 })

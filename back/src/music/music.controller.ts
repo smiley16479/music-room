@@ -46,6 +46,36 @@ export class MusicController {
     };
   }
 
+  @Get('deezer/search')
+  @Public()
+  @ApiOperation({
+    summary: 'Search Deezer music',
+    description: 'Search for tracks on Deezer music platform',
+  })
+  @ApiQuery({
+    name: 'q',
+    type: String,
+    required: true,
+    description: 'Search query (track name, artist, etc.)',
+    example: 'Shape of You Ed Sheeran',
+  })
+  @ApiQuery({
+    name: 'limit',
+    type: Number,
+    required: false,
+    description: 'Maximum number of results to return',
+    example: 25,
+  })
+  async searchDeezer(@Query('q') query: string, @Query('limit') limit?: number) {
+    const deezerResults = await this.deezerService.searchTracks(query, limit || 25);
+    return {
+      success: true,
+      data: deezerResults.data,
+      total: deezerResults.total,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Get('search/advanced')
   @Public()
   @ApiOperation({

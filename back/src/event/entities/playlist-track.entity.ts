@@ -12,7 +12,6 @@ import {
 } from 'typeorm';
 import { Event } from 'src/event/entities/event.entity';
 import { Track } from 'src/music/entities/track.entity';
-import { User } from 'src/user/entities/user.entity';
 import { BadRequestException } from '@nestjs/common';
 import { Vote } from 'src/event/entities/vote.entity';
 

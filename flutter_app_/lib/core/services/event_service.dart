@@ -394,7 +394,7 @@ class EventService {
     int? duration,
   }) async {
     final response = await apiService.post(
-      '${AppConfig.eventsEndpoint}/$playlistId/tracks',
+      '/playlists/$playlistId/tracks',
       body: {
         'deezerId': deezerId,
         'title': title,
