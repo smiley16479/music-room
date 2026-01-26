@@ -585,7 +585,8 @@ private decodeJWT(token: string): any {
 
     return this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
+      // cast to any to satisfy newer @nestjs/jwt types
+      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d') as any,
     });
   }
 

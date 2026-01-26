@@ -41,7 +41,8 @@ import { EmailService } from 'src/email/email.service';
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
         signOptions: {
-          expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
+          // cast to any to satisfy newer @nestjs/jwt types (accepts number | StringValue)
+          expiresIn: configService.get('JWT_EXPIRES_IN', '24h') as any,
         },
       }),
       inject: [ConfigService],
