@@ -12,6 +12,7 @@ import { Repository, FindOptionsWhere, In } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { Event, EventStatus, EventVisibility, EventLicenseType } from 'src/event/entities/event.entity';
+import { EventType } from 'src/event/entities/event-type.enum';
 import { Vote, VoteType } from 'src/event/entities/vote.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
@@ -29,7 +30,6 @@ import { PlaylistService } from 'src/playlist/playlist.service';
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
 import { GeocodingService } from '../common/services/geocoding.service';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { toZonedTime } from 'date-fns-tz';
 
 export interface EventWithStats extends Event {
@@ -63,8 +63,6 @@ export class EventService {
     private readonly eventRepository: Repository<Event>,
     @InjectRepository(EventParticipant)
     private readonly eventParticipantRepository: Repository<EventParticipant>,
-    @InjectRepository(Playlist)
-    private readonly playlistRepository: Repository<Playlist>,
     @InjectRepository(Vote)
     private readonly voteRepository: Repository<Vote>,
     @InjectRepository(Track)
@@ -128,30 +126,28 @@ export class EventService {
           selectedPlaylistId: originalPlaylistId,
           playlistName: newName
         } = createEventDto
-        const playlistCopied = await this.playlistService.duplicatePlaylist(originalPlaylistId, creator.id, `[Event] ${newName}`);
+        
+        // Initialize event with playlist fields
+        event.trackCount = 0;
+        event.totalDuration = 0;
         
         // Save the event first to get its ID
         savedEvent = await this.eventRepository.save(event);
         
-        // Set the eventId on the playlist to link it to this event
-        playlistCopied.eventId = savedEvent.id;
-        playlistCopied.event = savedEvent;
-        await this.playlistRepository.save(playlistCopied);
+        // Copy playlist tracks from original playlist to this event
+        // This will be done by PlaylistService.duplicatePlaylist or manually copy tracks
+        // For now, just create empty event - tracks can be added later via API
         
-        savedEvent.playlist = playlistCopied;
     } else if (createEventDto.playlistName) {
-        // Save the event first to get its ID
+        // Update event name with playlist name if provided
+        event.name = createEventDto.playlistName.trim();
+        
+        // Initialize playlist fields for this event
+        event.trackCount = 0;
+        event.totalDuration = 0;
+        
+        // Save the event (which now has playlist capabilities)
         savedEvent = await this.eventRepository.save(event);
-        
-        const playlist = new Playlist()
-        playlist.name = `[Event] ${createEventDto.playlistName.trim()}`
-        playlist.eventId = savedEvent.id; // Set the eventId to link it to this event
-        playlist.event = savedEvent;
-        // playlist.creator = creator;
-        // playlist.creatorId = creator.id;
-        await this.playlistRepository.save(playlist);
-        
-        savedEvent.playlist = playlist;
     } else {
         // Save the event without playlist
         savedEvent = await this.eventRepository.save(event);
@@ -297,19 +293,6 @@ export class EventService {
 
     Object.assign(event, updateEventDto);
     const updatedEvent = await this.eventRepository.save(event);
-
-    // Update associated playlist license type if it exists and license type changed
-    if (updatedEvent.playlist && updateEventDto.licenseType && updateEventDto.licenseType !== originalLicenseType) {
-      try {
-        await this.eventRepository.manager.query(
-          'UPDATE playlists SET license_type = $1 WHERE id = $2',
-          [updateEventDto.licenseType, updatedEvent.playlist.id]
-        );
-        console.log(`📝 Updated playlist ${updatedEvent.playlist.id} license type from ${originalLicenseType} to ${updateEventDto.licenseType}`);
-      } catch (error) {
-        console.error(`❌ Failed to update playlist license type:`, error);
-      }
-    }
 
     // Notify participants of changes
     this.eventGateway.notifyEventUpdated(id, updatedEvent);
@@ -532,7 +515,8 @@ export class EventService {
       throw new ConflictException('User has already voted for this track');
     }
 
-    const playlistTrackId = event.playlist?.playlistTracks?.find(pt => pt.trackId === voteDto.trackId)?.id;
+    // Verify track is in the event (now tracks are directly on Event)
+    const playlistTrackId = event.tracks?.find(pt => pt.trackId === voteDto.trackId)?.id;
     if (!playlistTrackId) {
       throw new BadRequestException('Track is not in the event playlist');
     }
@@ -626,10 +610,10 @@ export class EventService {
       // Get the event with its playlist
       const event = await this.eventRepository.findOne({
         where: { id: eventId },
-        relations: ['playlist', 'playlist.playlistTracks'],
+        relations: ['tracks'],
       });
 
-      if (!event?.playlist?.playlistTracks) {
+      if (!event?.tracks) {
         return;
       }
 
@@ -906,12 +890,12 @@ export class EventService {
       console.log("🎵 Current event currentTrackId before update:", event.currentTrackId);
       console.log("🎵 Requested trackId:", trackId);
       console.log("🎵 Available tracks in playlist:");
-      event.playlist?.playlistTracks.forEach(element => {
+      event.tracks?.forEach(element => {
         console.log("  - trackId:", element.trackId, "position:", element.position);
       });
 
-      // Vérifier que la track existe dans la playlist de l'event
-      const trackExists = event.playlist?.playlistTracks.some(pt => pt.trackId === trackId);
+      // Vérifier que la track existe dans la playlist de l'event (tracks are now directly on Event)
+      const trackExists = event.tracks?.some(pt => pt.trackId === trackId);
       if (!trackExists) {
         throw new NotFoundException(`Track ${trackId} not found in event playlist`);
       }
@@ -1199,22 +1183,13 @@ export class EventService {
       return; // User has an accepted invitation
     }
 
-    // Check if user is a collaborator on the event's playlist
-    if (event.playlist && event.playlist.id) {
-      const playlistWithCollaborators = await this.playlistRepository.findOne({
-        where: { id: event.playlist.id },
-        relations: ['collaborators'],
-      });
-
-      if (playlistWithCollaborators && playlistWithCollaborators.event.participants) {
-        const isPlaylistCollaborator = playlistWithCollaborators.event.participants.some(
-          collaborator => collaborator.userId === userId
-        );
-        
-        if (isPlaylistCollaborator) {
-          return; // User is a playlist collaborator
-        }
-      }
+    // Check if user is a participant on the event (which now includes playlist collaborators)
+    const isParticipant = event.participants?.some(
+      participant => participant.userId === userId
+    );
+    
+    if (isParticipant) {
+      return; // User is an event participant
     }
 
     throw new ForbiddenException('You are not invited to this private event');
@@ -1271,22 +1246,13 @@ export class EventService {
           return;
         }
 
-        // Check if user is a collaborator on the event's playlist
-        if (event.playlist && event.playlist.id) {
-          const playlistWithCollaborators = await this.playlistRepository.findOne({
-            where: { id: event.playlist.id },
-            relations: ['collaborators'],
-          });
-
-          if (playlistWithCollaborators && playlistWithCollaborators.event.participants) {
-            const isPlaylistCollaborator = playlistWithCollaborators.event.participants.some(
-              collaborator => collaborator.userId === userId
-            );
-            
-            if (isPlaylistCollaborator) {
-              return;
-            }
-          }
+        // Check if user is a participant on the event (which now includes playlist collaborators)
+        const isParticipant = event.participants?.some(
+          participant => participant.userId === userId
+        );
+        
+        if (isParticipant) {
+          return;
         }
 
         throw new ForbiddenException('Only invited users or playlist collaborators can vote in this event');
@@ -1371,5 +1337,151 @@ export class EventService {
     if (now < start) return EventStatus.UPCOMING;
     if (now >= start && now <= end) return EventStatus.LIVE;
     return EventStatus.ENDED;
+  }
+
+  // =====================================================
+  // PLAYLIST MANAGEMENT (Event-centric approach)
+  // All playlist operations go through Event
+  // =====================================================
+
+  /**
+   * Create a playlist event (listening session)
+   * This is the event-centric way to create a playlist
+   */
+  async createPlaylistEvent(dto: any, creatorId: string): Promise<any> {
+    return this.playlistService.create(dto, creatorId);
+  }
+
+  /**
+   * Get playlist by event ID
+   */
+  async getEventPlaylist(eventId: string, userId?: string): Promise<any> {
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: ['tracks'],
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    // Now Event IS the playlist when type = LISTENING_SESSION
+    if (event.type !== EventType.LISTENING_SESSION) {
+      throw new NotFoundException('This event does not have a playlist');
+    }
+
+    return this.playlistService.findById(eventId, userId);
+  }
+
+  /**
+   * Update playlist metadata (through its event)
+   */
+  async updatePlaylistEvent(playlistId: string, dto: any, userId: string): Promise<any> {
+    return this.playlistService.update(playlistId, dto, userId);
+  }
+
+  /**
+   * Delete playlist (through its event)
+   */
+  async deletePlaylistEvent(playlistId: string, userId: string): Promise<void> {
+    return this.playlistService.remove(playlistId, userId);
+  }
+
+  /**
+   * Add track to event playlist
+   */
+  async addTrackToEventPlaylist(playlistId: string, trackDto: any, userId: string): Promise<any> {
+    return this.playlistService.addTrack(playlistId, userId, trackDto);
+  }
+
+  /**
+   * Remove track from event playlist
+   */
+  async removeTrackFromEventPlaylist(playlistId: string, trackId: string, userId: string): Promise<void> {
+    return this.playlistService.removeTrack(playlistId, trackId, userId);
+  }
+
+  /**
+   * Reorder tracks in event playlist
+   */
+  async reorderEventPlaylistTracks(playlistId: string, reorderDto: any, userId: string): Promise<any> {
+    return this.playlistService.reorderTracks(playlistId, userId, reorderDto);
+  }
+
+  /**
+   * Get tracks from event playlist
+   */
+  async getEventPlaylistTracks(playlistId: string, userId?: string): Promise<any> {
+    return this.playlistService.getPlaylistTracks(playlistId, userId);
+  }
+
+  /**
+   * Get all playlists (event-based)
+   */
+  async getAllPlaylists(paginationDto: any, userId?: string, isPublic?: boolean, ownerId?: string): Promise<any> {
+    return this.playlistService.findAll(paginationDto, userId, isPublic, ownerId);
+  }
+
+  /**
+   * Search playlists
+   */
+  async searchPlaylists(query: string, userId?: string, limit?: number): Promise<any> {
+    return this.playlistService.searchPlaylists(query, userId, limit);
+  }
+
+  /**
+   * Get user's playlists
+   */
+  async getUserPlaylists(userId: string, paginationDto: any): Promise<any> {
+    return this.playlistService.getMyPlaylists(userId, paginationDto);
+  }
+
+  /**
+   * Get recommended playlists for user
+   */
+  async getRecommendedPlaylists(userId: string, limit?: number): Promise<any> {
+    return this.playlistService.getRecommendedPlaylists(userId, limit);
+  }
+
+  /**
+   * Duplicate playlist event
+   */
+  async duplicatePlaylistEvent(playlistId: string, userId: string, newName?: string): Promise<any> {
+    return this.playlistService.duplicatePlaylist(playlistId, userId, newName);
+  }
+
+  /**
+   * Export playlist
+   */
+  async exportPlaylistEvent(playlistId: string, userId: string): Promise<any> {
+    return this.playlistService.exportPlaylist(playlistId, userId);
+  }
+
+  /**
+   * Add collaborator to playlist (through event participants)
+   */
+  async addPlaylistCollaborator(playlistId: string, collaboratorId: string, requesterId: string): Promise<void> {
+    return this.playlistService.addCollaborator(playlistId, collaboratorId, requesterId);
+  }
+
+  /**
+   * Remove collaborator from playlist (through event participants)
+   */
+  async removePlaylistCollaborator(playlistId: string, collaboratorId: string, requesterId: string): Promise<void> {
+    return this.playlistService.removeCollaborator(playlistId, collaboratorId, requesterId);
+  }
+
+  /**
+   * Get playlist collaborators
+   */
+  async getPlaylistCollaborators(playlistId: string, userId?: string): Promise<any> {
+    return this.playlistService.getCollaborators(playlistId, userId);
+  }
+
+  /**
+   * Invite users to playlist
+   */
+  async inviteToPlaylist(playlistId: string, inviterUserId: string, inviteeIds: string[], message?: string): Promise<any> {
+    return this.playlistService.inviteCollaborators(playlistId, inviterUserId, inviteeIds, message);
   }
 }

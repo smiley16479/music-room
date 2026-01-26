@@ -12,7 +12,7 @@ import {
   Logger,
 } from '@nestjs/common';
 
-import { PlaylistService } from './playlist.service';
+import { EventService } from '../event/event.service';
 import { CreatePlaylistDto } from './dto/create-playlist.dto';
 import { UpdatePlaylistDto } from './dto/update-playlist.dto';
 import { AddTrackToPlaylistDto } from './dto/add-track.dto';
@@ -28,23 +28,38 @@ import { User } from 'src/user/entities/user.entity';
 import { ApiTags, ApiOperation, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { UseGuards } from '@nestjs/common/decorators/core/use-guards.decorator';
 
+/**
+ * PlaylistController - API Layer (Facade Pattern)
+ * 
+ * ARCHITECTURE:
+ * This controller maintains backward compatibility for /playlists/* routes
+ * but delegates all logic to EventService (aggregate root pattern).
+ * 
+ * FLOW:
+ * HTTP Request → PlaylistController → EventService → PlaylistService
+ * 
+ * This allows:
+ * - Clean REST API for playlists (/playlists/*)
+ * - Centralized business logic in EventService
+ * - Easy future migration to event-only routes if needed
+ */
 @ApiTags('Playlists')
 @Controller('playlists')
 @UseGuards(JwtAuthGuard)
 export class PlaylistController {
   private readonly logger = new Logger(PlaylistController.name);
   
-  constructor(private readonly playlistService: PlaylistService) {}
+  constructor(private readonly eventService: EventService) {}
 
   @Post()
   @ApiOperation({
     summary: 'Create playlist',
-    description: 'Creates a new playlist owned by the current user',
+    description: 'Creates a new playlist (event-based listening session)',
   })
   @ApiBody({ type: CreatePlaylistDto })
   async create(@Body() createPlaylistDto: CreatePlaylistDto, @CurrentUser() user: User) {
     this.logger.debug('✅ create() entered', createPlaylistDto);
-    const playlist = await this.playlistService.create(createPlaylistDto, user.id);
+    const playlist = await this.eventService.createPlaylistEvent(createPlaylistDto, user.id);
     return {
       success: true,
       message: 'Playlist created successfully',
@@ -79,7 +94,7 @@ export class PlaylistController {
     @CurrentUser() user?: User
   ) {
     const isPublicBool = isPublic !== undefined ? isPublic === 'true' : undefined;
-    return this.playlistService.findAll(paginationDto, user?.id, isPublicBool, ownerId);
+    return this.eventService.getAllPlaylists(paginationDto, user?.id, isPublicBool, ownerId);
   }
 
   @Get('search')
@@ -107,7 +122,7 @@ export class PlaylistController {
     @Query('limit') limit: string = '20',
     @CurrentUser() user?: User,
   ) {
-    const playlists = await this.playlistService.searchPlaylists(
+    const playlists = await this.eventService.searchPlaylists(
       query,
       user?.id,
       parseInt(limit, 10),
@@ -131,7 +146,7 @@ export class PlaylistController {
     @Query('limit') limit: string = '20',
     @CurrentUser() user: User,
   ) {
-    return this.playlistService.getRecommendedPlaylists(
+    return this.eventService.getRecommendedPlaylists(
       user.id,
       parseInt(limit, 10),
     );
@@ -144,7 +159,7 @@ export class PlaylistController {
   })
   @ApiQuery({ type: PaginationDto })
   async getMyPlaylists(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
-    return this.playlistService.getMyPlaylists(user.id, paginationDto);
+    return this.eventService.getUserPlaylists(user.id, paginationDto);
   }
 
   @Get(':id')
@@ -160,7 +175,7 @@ export class PlaylistController {
     required: true
   })
   async findOne(@Param('id') id: string, @CurrentUser() user?: User) {
-    const playlist = await this.playlistService.findById(id, user?.id);
+    const playlist = await this.eventService.getEventPlaylist(id, user?.id);
     return {
       success: true,
       data: playlist,
@@ -181,7 +196,7 @@ export class PlaylistController {
     required: true
   })
   async getPlaylistTracks(@Param('id') id: string, @CurrentUser() user?: User) {
-    const tracks = await this.playlistService.getPlaylistTracks(id, user?.id);
+    const tracks = await this.eventService.getEventPlaylistTracks(id, user?.id);
 
     console.log("tracks", tracks);
 
@@ -205,7 +220,7 @@ export class PlaylistController {
     required: true
   })
   async getCollaborators(@Param('id') id: string, @CurrentUser() user?: User) {
-    const collaborators = await this.playlistService.getCollaborators(id, user?.id);
+    const collaborators = await this.eventService.getPlaylistCollaborators(id, user?.id);
     return {
       success: true,
       data: collaborators,
@@ -233,7 +248,7 @@ export class PlaylistController {
 
     console.log("updatePlaylistDto", updatePlaylistDto);
 
-    const playlist = await this.playlistService.update(id, updatePlaylistDto, user.id);
+    const playlist = await this.eventService.updatePlaylistEvent(id, updatePlaylistDto, user.id);
     return {
       success: true,
       message: 'Playlist updated successfully',
@@ -254,7 +269,7 @@ export class PlaylistController {
     required: true
   })
   async remove(@Param('id') id: string, @CurrentUser() user: User) {
-    await this.playlistService.remove(id, user.id);
+    await this.eventService.deletePlaylistEvent(id, user.id);
     return {
       success: true,
       message: 'Playlist deleted successfully',
@@ -281,7 +296,7 @@ export class PlaylistController {
     @Body() addTrackDto: AddTrackToPlaylistDto,
     @CurrentUser() user: User,
   ) {
-    const track = await this.playlistService.addTrack(id, user.id, addTrackDto);
+    const track = await this.eventService.addTrackToEventPlaylist(id, addTrackDto, user.id);
     return {
       success: true,
       message: 'Track added to playlist successfully',
@@ -312,7 +327,7 @@ export class PlaylistController {
     @Param('trackId') trackId: string,
     @CurrentUser() user: User,
   ) {
-    await this.playlistService.removeTrack(id, trackId, user.id);
+    await this.eventService.removeTrackFromEventPlaylist(id, trackId, user.id);
     return {
       success: true,
       message: 'Track removed from playlist successfully',
@@ -338,7 +353,7 @@ export class PlaylistController {
     @Body() reorderDto: ReorderTracksDto,
     @CurrentUser() user: User,
   ) {
-    const tracks = await this.playlistService.reorderTracks(id, user.id, reorderDto);
+    const tracks = await this.eventService.reorderEventPlaylistTracks(id, reorderDto, user.id);
     return {
       success: true,
       message: 'Tracks reordered successfully',
@@ -371,7 +386,7 @@ export class PlaylistController {
     @Param('userId') collaboratorId: string,
     @CurrentUser() user: User,
   ) {
-    await this.playlistService.addCollaborator(id, collaboratorId, user.id);
+    await this.eventService.addPlaylistCollaborator(id, collaboratorId, user.id);
     return {
       success: true,
       message: 'Collaborator added successfully',
@@ -401,7 +416,7 @@ export class PlaylistController {
     @Param('userId') collaboratorId: string,
     @CurrentUser() user: User,
   ) {
-    await this.playlistService.removeCollaborator(id, collaboratorId, user.id);
+    await this.eventService.removePlaylistCollaborator(id, collaboratorId, user.id);
     return {
       success: true,
       message: 'Collaborator removed successfully',
@@ -439,7 +454,7 @@ export class PlaylistController {
     @Body() { name }: { name?: string },
     @CurrentUser() user: User,
   ) {
-    const duplicatedPlaylist = await this.playlistService.duplicatePlaylist(id, user.id, name);
+    const duplicatedPlaylist = await this.eventService.duplicatePlaylistEvent(id, user.id, name);
     return {
       success: true,
       message: 'Playlist duplicated successfully',
@@ -460,7 +475,7 @@ export class PlaylistController {
     required: true
   })
   async exportPlaylist(@Param('id') id: string, @CurrentUser() user: User) {
-    const exportData = await this.playlistService.exportPlaylist(id, user.id);
+    const exportData = await this.eventService.exportPlaylistEvent(id, user.id);
     return {
       success: true,
       data: exportData,
@@ -490,7 +505,7 @@ export class PlaylistController {
     const inviteeIds = userIds ?? (userId ? [userId] : []);
 
     this.logger.debug(`Inviting collaborators to playlist ${id}: ${inviteeIds.join(', ')}`);
-    const result = await this.playlistService.inviteCollaborators(id, user.id, inviteeIds, message);
+    const result = await this.eventService.inviteToPlaylist(id, user.id, inviteeIds, message);
     return {
       success: true,
       message: 'Invitations processed successfully',

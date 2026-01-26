@@ -37,7 +37,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
           entities: [__dirname + '/**/*.entity{.ts,.js}'],
           cache: false,
           synchronize: true,
-          // dropSchema: true, // ATTENTION
+          dropSchema: true, // ATTENTION
         };
       }
     }),

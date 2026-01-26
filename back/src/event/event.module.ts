@@ -18,12 +18,11 @@ import { Invitation } from 'src/invitation/entities/invitation.entity';
 import { UserModule } from '../user/user.module';
 import { EmailModule } from '../email/email.module';
 import { PlaylistModule } from 'src/playlist/playlist.module';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { CommonModule } from '../common/common.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, EventParticipant, Vote, Track, User, Invitation, Playlist]),
+    TypeOrmModule.forFeature([Event, EventParticipant, Vote, Track, User, Invitation]),
     ConfigModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

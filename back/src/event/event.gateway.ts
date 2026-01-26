@@ -1037,10 +1037,11 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       const room = SOCKET_ROOMS.EVENT(eventId);
       const event = await this.eventService.findById(eventId, adminUserId);
       
-      if (event.playlist && event.playlist.id) {
-        await this.playlistService.removeTrack(event.playlist.id, trackId, adminUserId);
+      // Event IS playlist when type=LISTENING_SESSION
+      if (event.trackCount !== undefined && event.trackCount !== null) {
+        await this.playlistService.removeTrack(event.id, trackId, adminUserId);
         
-        const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
+        const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.id);
         
         if (updatedPlaylist.length > 0) {
           const nextTrack = updatedPlaylist[0];
@@ -1102,12 +1103,13 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       if (isCreator /* || isAdmin */) {
         try {
-          if (event.playlist && event.playlist.id) {
-            await this.playlistService.removeTrack(event.playlist.id, trackId, client.userId);
+          // Event IS playlist when type=LISTENING_SESSION
+          if (event.trackCount !== undefined && event.trackCount !== null) {
+            await this.playlistService.removeTrack(event.id, trackId, client.userId);
             
             this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
             
-            const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.playlist.id);
+            const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.id);
             
             if (updatedPlaylist.length > 0) {
               const nextTrack = updatedPlaylist[0];
@@ -1244,9 +1246,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-created', {
         playlist: {
           id: playlist.id,
-          name: playlist.name,
-          description: playlist.description,
-          coverImageUrl: playlist.coverImageUrl,
+          name: playlist.event?.name,
+          description: playlist.event?.description,
+          coverImageUrl: playlist.event?.coverImageUrl,
           createdAt: playlist.createdAt,
           creator: creator ? {
             id: creator.id,
@@ -1265,9 +1267,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       playlistId,
       playlist: {
         id: playlist.id,
-        name: playlist.name,
-        description: playlist.description,
-        coverImageUrl: playlist.coverImageUrl,
+        name: playlist.event?.name,
+        description: playlist.event?.description,
+        coverImageUrl: playlist.event?.coverImageUrl,
         updatedAt: playlist.updatedAt,
       },
       updatedBy: userId,
@@ -1279,9 +1281,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         playlistId,
         playlist: {
           id: playlist.id,
-          name: playlist.name,
-          description: playlist.description,
-          coverImageUrl: playlist.coverImageUrl,
+          name: playlist.event?.name,
+          description: playlist.event?.description,
+          coverImageUrl: playlist.event?.coverImageUrl,
           updatedAt: playlist.updatedAt,
         },
         updatedBy: userId,

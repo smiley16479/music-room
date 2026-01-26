@@ -9,7 +9,6 @@ import {
   JoinTable,
 } from 'typeorm';
 import { Event } from 'src/event/entities/event.entity';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { Device } from 'src/device/entities/device.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';

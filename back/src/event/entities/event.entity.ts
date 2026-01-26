@@ -13,7 +13,7 @@ import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
+import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 import { EventType } from './event-type.enum';
 import { EventParticipant } from './event-participant.entity';
 
@@ -78,6 +78,9 @@ export class Event {
   @Column({ name: 'voting_enabled', type: 'boolean', default: true })
   votingEnabled: boolean;
 
+  @Column({ name: 'cover_image_url', nullable: true })
+  coverImageUrl: string; // Cover image for event/playlist
+
   // Location data for location-based voting
   @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true, transformer: {
     to: (value: number) => value,
@@ -130,6 +133,17 @@ export class Event {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
+  // ============================================
+  // PLAYLIST-SPECIFIC FIELDS (nullable)
+  // Used only when type = LISTENING_SESSION or events with playlists
+  // Merged from Playlist entity for Single Table Inheritance pattern
+  // ============================================
+  @Column({ name: 'track_count', type: 'int', nullable: true, default: 0 })
+  trackCount?: number;
+
+  @Column({ name: 'total_duration', type: 'int', nullable: true, default: 0, comment: 'Duration in seconds' })
+  totalDuration?: number;
+
   // Relations
   @ManyToOne(() => User, (user) => user.createdEvents, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'creator_id' })
@@ -158,12 +172,9 @@ export class Event {
   @OneToMany(() => EventParticipant, (participant) => participant.event, { cascade: true })
   participants: EventParticipant[];
 
-  // Removed: ManyToMany participants and admins - now using EventParticipant entity
-
-  @OneToOne(() => Playlist, (playlist) => playlist.event, { cascade: true })
-  @JoinColumn({ name: 'playlist_id' })
-  playlist: Playlist;
-
-  @Column({ name: 'playlist_id', nullable: true })
-  playlistId: string;
+  // Tracks are now directly related to Event (merged from Playlist)
+  // For LISTENING_SESSION type, these are the playlist tracks
+  // For other event types, these are the event tracks
+  @OneToMany(() => PlaylistTrack, (track) => track.event, { cascade: true })
+  tracks: PlaylistTrack[];
 }

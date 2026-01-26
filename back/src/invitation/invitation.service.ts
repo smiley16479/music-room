@@ -16,7 +16,6 @@ import {
 } from 'src/invitation/entities/invitation.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
-import { Playlist } from 'src/playlist/entities/playlist.entity';
 
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { RespondInvitationDto } from './dto/respond-invitation.dto';
@@ -28,7 +27,6 @@ export interface InvitationWithDetails extends Invitation {
   inviter: User;
   invitee: User;
   event?: Event;
-  playlist?: Playlist;
 }
 
 export interface InvitationStats {
@@ -53,8 +51,6 @@ export class InvitationService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
-    @InjectRepository(Playlist)
-    private readonly playlistRepository: Repository<Playlist>,
     private readonly emailService: EmailService,
   ) {}
 
@@ -82,16 +78,11 @@ export class InvitationService {
     // Validate and check permissions based on type
     await this.validateInvitationPermissions(type, inviterId, eventId, playlistId);
 
-    // For playlist invitations, get the event ID from the playlist
+    // For playlist invitations, playlistId is now an eventId (Event IS Playlist when type=LISTENING_SESSION)
     let finalEventId = eventId;
     if (type === InvitationType.PLAYLIST && playlistId) {
-      const playlist = await this.playlistRepository.findOne({
-        where: { id: playlistId },
-        relations: ['event']
-      });
-      if (playlist && playlist.event) {
-        finalEventId = playlist.event.id;
-      }
+      // playlistId is actually an eventId now
+      finalEventId = playlistId;
     }
 
     // Check for existing invitation
@@ -550,22 +541,19 @@ export class InvitationService {
           throw new BadRequestException('Playlist ID is required for playlist invitations');
         }
         
-        const playlist = await this.playlistRepository.findOne({ 
+        // playlistId is now an eventId (Event IS Playlist when type=LISTENING_SESSION)
+        const playlistEvent = await this.eventRepository.findOne({ 
           where: { id: playlistId },
-          relations: ['event', 'event.participants']
+          relations: ['participants']
         });
         
-        if (!playlist) {
-          throw new NotFoundException('Playlist not found');
+        if (!playlistEvent) {
+          throw new NotFoundException('Playlist (Event) not found');
         }
         
-        if (!playlist.event) {
-          throw new BadRequestException('Playlist must be associated with an event');
-        }
-        
-        // Check if user can invite to this playlist via event permissions
-        const canInviteToPlaylist = playlist.event.creatorId === inviterId || 
-          playlist.event.participants?.some(p => p.userId === inviterId);
+        // Check if user can invite to this playlist/event
+        const canInviteToPlaylist = playlistEvent.creatorId === inviterId || 
+          playlistEvent.participants?.some(p => p.userId === inviterId);
         
         if (!canInviteToPlaylist) {
           throw new ForbiddenException('You cannot invite users to this playlist');

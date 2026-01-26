@@ -10,21 +10,14 @@ import {
   BeforeUpdate,
   OneToMany,
 } from 'typeorm';
-import { Event } from 'src/event/entities/event.entity';
+import { Playlist } from 'src/playlist/entities/playlist.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { BadRequestException } from '@nestjs/common';
 import { Vote } from 'src/event/entities/vote.entity';
 
-/**
- * PlaylistTrack entity (tracks in an Event)
- * 
- * Since Playlist is merged into Event, this entity now links directly to Event.
- * For LISTENING_SESSION events, these are the playlist tracks.
- * For other event types, these can be the event's track queue.
- */
 @Entity('playlist_tracks')
-@Index(['event', 'position'])
+@Index(['playlist', 'position'])
 export class PlaylistTrack {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -38,32 +31,36 @@ export class PlaylistTrack {
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  // Relations - Now points to Event instead of Playlist
-  @ManyToOne(() => Event, event => event.tracks, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'event_id' })
-  event: Event;
+  // Relations
+  @ManyToOne(() => Playlist, { onDelete: 'CASCADE' }) // ok
+  @JoinColumn({ name: 'playlist_id' })
+  playlist: Playlist;
 
-  @Column({ name: 'event_id', nullable: false })
-  eventId: string;
+  @Column({ name: 'playlist_id', nullable: false })
+  playlistId: string;
 
-  @ManyToOne(() => Track, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Track, { onDelete: 'CASCADE' }) // ok
   @JoinColumn({ name: 'track_id' })
   track: Track;
 
   @Column({ name: 'track_id', nullable: false })
   trackId: string;
 
+  // @ManyToOne(() => User, { onDelete: 'CASCADE' }) // ok
+  // @JoinColumn({ name: 'added_by_id' })
+  // addedBy: User;
+
   @Column({ name: 'added_by_id', nullable: false })
   addedById: string;
 
-  @OneToMany(() => Vote, (vote) => vote.playlistTrack)
+  @OneToMany(() => Vote, (vote) => vote.playlistTrack) // ok
   votes: Vote[];
 
   @BeforeInsert()
   @BeforeUpdate()
   validateRequiredFields() {
-    if (!this.eventId || this.eventId.trim() === '') {
-      throw new BadRequestException('Event ID is required');
+    if (!this.playlistId || this.playlistId.trim() === '') {
+      throw new BadRequestException('Playlist ID is required');
     }
     if (!this.trackId || this.trackId.trim() === '') {
       throw new BadRequestException('Track ID is required');
