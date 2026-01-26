@@ -64,13 +64,18 @@ class EventProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    print('Loading my events for page $page, limit $limit');
     try {
+      // Récupère TOUS les events de l'utilisateur (events + playlists)
       _myEvents = await eventService.getMyEvents(
         page: page,
         limit: limit,
       );
+      print('Loaded my events count: ${_myEvents.length}');
+      print('Playlists in myEvents: ${_myEvents.where((e) => e.isPlaylist).length}');
     } catch (e) {
       _error = e.toString();
+      print('Error loading my events: $e');
     }
 
     _isLoading = false;
@@ -130,12 +135,25 @@ class EventProvider extends ChangeNotifier {
   /// Update event
   Future<bool> updateEvent(
     String id, {
+    String? name,
     String? title,
     String? description,
+    String? type,
+    String? visibility,
+    String? licenseType,
+    bool? votingEnabled,
+    String? coverImageUrl,
+    double? latitude,
+    double? longitude,
+    int? locationRadius,
+    String? locationName,
+    String? votingStartTime,
+    String? votingEndTime,
+    DateTime? eventDate,
     DateTime? startDate,
     DateTime? endDate,
-    String? location,
-    bool? isPublic,
+    String? playlistName,
+    String? selectedPlaylistId,
   }) async {
     _isLoading = true;
     _error = null;
@@ -144,12 +162,25 @@ class EventProvider extends ChangeNotifier {
     try {
       final updated = await eventService.updateEvent(
         id,
+        name: name ?? title,
         title: title,
         description: description,
+        type: type,
+        visibility: visibility,
+        licenseType: licenseType,
+        votingEnabled: votingEnabled,
+        coverImageUrl: coverImageUrl,
+        latitude: latitude,
+        longitude: longitude,
+        locationRadius: locationRadius,
+        locationName: locationName,
+        votingStartTime: votingStartTime,
+        votingEndTime: votingEndTime,
+        eventDate: eventDate,
         startDate: startDate,
         endDate: endDate,
-        location: location,
-        isPublic: isPublic,
+        playlistName: playlistName,
+        selectedPlaylistId: selectedPlaylistId,
       );
 
       final index = _myEvents.indexWhere((e) => e.id == id);
@@ -223,19 +254,17 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final playlists = await eventService.getMyPlaylists(
+      print('Loading my playlists...');
+      // Récupère les events de l'utilisateur (contient playlists + events)
+      _myEvents = await eventService.getMyEvents(
         page: page,
         limit: limit,
       );
-      // Merge with myEvents
-      for (final playlist in playlists) {
-        final index = _myEvents.indexWhere((e) => e.id == playlist.id);
-        if (index == -1) {
-          _myEvents.add(playlist);
-        }
-      }
+      print('Loaded events count: ${_myEvents.length}');
+      print('Playlists count: ${myPlaylists.length}');
     } catch (e) {
       _error = e.toString();
+      print('Error loading my playlists: $e');
     }
 
     _isLoading = false;

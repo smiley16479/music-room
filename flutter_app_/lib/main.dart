@@ -16,6 +16,7 @@ import 'features/playlists/screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  print('🟢 App starting...');
 
   // Initialize app config
   AppConfig.printConfiguration();
@@ -32,6 +33,8 @@ void main() async {
   );
   final eventService = EventService(apiService: apiService);
   // PlaylistService is now an alias for EventService
+
+  print('🟢 Services initialized');
 
   runApp(
     MultiProvider(

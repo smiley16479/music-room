@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Event } from 'src/event/entities/event.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { PlaylistTrack } from 'src/event/entities/playlist-track.entity';
 
 @Entity('tracks')
 export class Track {

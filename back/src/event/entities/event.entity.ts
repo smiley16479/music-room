@@ -13,7 +13,7 @@ import { User } from 'src/user/entities/user.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { PlaylistTrack } from 'src/event/entities/playlist-track.entity';
 import { EventType } from './event-type.enum';
 import { EventParticipant } from './event-participant.entity';
 
@@ -138,6 +138,9 @@ export class Event {
   // Used only when type = LISTENING_SESSION or events with playlists
   // Merged from Playlist entity for Single Table Inheritance pattern
   // ============================================
+  @Column({ nullable: true })
+  playlistName: string;
+
   @Column({ name: 'track_count', type: 'int', nullable: true, default: 0 })
   trackCount?: number;
 

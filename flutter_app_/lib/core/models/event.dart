@@ -6,22 +6,34 @@ part 'event.g.dart';
 
 /// Event Type enum
 enum EventType {
-  @JsonValue('LISTENING_SESSION')
+  @JsonValue('listening_session')
   listeningSession, // = Playlist
-  @JsonValue('PARTY')
+  @JsonValue('party')
   party,
-  @JsonValue('COLLABORATIVE')
+  @JsonValue('collaborative')
   collaborative,
-  @JsonValue('LIVE_SESSION')
+  @JsonValue('live_session')
   liveSession,
 }
 
 /// Event Visibility enum  
 enum EventVisibility {
-  @JsonValue('PUBLIC')
+  @JsonValue('public')
   public,
-  @JsonValue('PRIVATE')
+  @JsonValue('private')
   private,
+}
+
+/// Event License Type enum
+enum EventLicenseType {
+  @JsonValue('open')
+  open,
+  @JsonValue('invited')
+  invited,
+  @JsonValue('admin')
+  admin,
+  @JsonValue('location_based')
+  locationBased,
 }
 
 /// Event model (unifié avec Playlist)
@@ -35,18 +47,24 @@ class Event extends Equatable {
   // Event type (LISTENING_SESSION = playlist)
   final EventType type;
   final EventVisibility visibility;
+  final EventLicenseType? licenseType;
   
   // Playlist-specific fields (nullable, only for LISTENING_SESSION)
   final int? trackCount;
   final int? totalDuration;
   final int? collaboratorCount;
   final String? coverImageUrl;
+  final String? playlistName;
   
   // Event-specific fields
   @JsonKey(name: 'eventDate')
   final DateTime? eventDate;
   @JsonKey(name: 'eventEndDate')
   final DateTime? eventEndDate;
+  @JsonKey(name: 'startDate')
+  final DateTime? startDate;
+  @JsonKey(name: 'endDate')
+  final DateTime? endDate;
   @JsonKey(name: 'locationName')
   final String? locationName;
   final double? latitude;
@@ -69,8 +87,6 @@ class Event extends Equatable {
   final String? creatorId;
   @JsonKey(name: 'creator')
   final User? creator;
-  @JsonKey(name: 'licenseType')
-  final String? licenseType;
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -88,12 +104,16 @@ class Event extends Equatable {
     this.description,
     required this.type,
     required this.visibility,
+    this.licenseType,
     this.trackCount,
     this.totalDuration,
     this.collaboratorCount,
     this.coverImageUrl,
+    this.playlistName,
     this.eventDate,
     this.eventEndDate,
+    this.startDate,
+    this.endDate,
     this.locationName,
     this.latitude,
     this.longitude,
@@ -104,7 +124,6 @@ class Event extends Equatable {
     this.currentTrackId,
     this.creatorId,
     this.creator,
-    this.licenseType,
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -129,12 +148,16 @@ class Event extends Equatable {
         description,
         type,
         visibility,
+        licenseType,
         trackCount,
         totalDuration,
         collaboratorCount,
         coverImageUrl,
+        playlistName,
         eventDate,
         eventEndDate,
+        startDate,
+        endDate,
         creatorId,
         creator,
         locationName,
@@ -145,7 +168,6 @@ class Event extends Equatable {
         votingStartTime,
         votingEndTime,
         currentTrackId,
-        licenseType,
         status,
         participants,
         participantsCount,

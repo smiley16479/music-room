@@ -14,17 +14,19 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Event, EventStatus, EventVisibility, EventLicenseType } from 'src/event/entities/event.entity';
 import { EventType } from 'src/event/entities/event-type.enum';
 import { Vote, VoteType } from 'src/event/entities/vote.entity';
+import { PlaylistTrack } from 'src/event/entities/playlist-track.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation, InvitationType, InvitationStatus } from 'src/invitation/entities/invitation.entity';
 import { EventParticipantService } from './event-participant.service';
 import { EventParticipant, ParticipantRole } from 'src/event/entities/event-participant.entity';
 
-import { CreateEventDto } from './dto/create-event.dto';
-import { UpdateEventDto } from './dto/update-event.dto';
+import { CreateEventDto } from './dto/event/create-event.dto';
+import { UpdateEventDto } from './dto/event/update-event.dto';
 import { LocationDto } from '../common/dto/location.dto';
 import { CreateVoteDto } from './dto/vote.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import { AddTrackToPlaylistDto } from '../playlist/dto/add-track.dto';
 
 import { EmailService } from '../email/email.service';
 import { EventGateway } from './event.gateway';
@@ -150,9 +152,6 @@ export class EventService {
         savedEvent = await this.eventRepository.save(event);
     }
 
-    // Add creator as first participant
-    await this.addParticipant(savedEvent.id, creatorId);
-
     this.eventGateway.notifyEventCreated(savedEvent, creator);
 
     return this.findById(savedEvent.id, creatorId);
@@ -240,6 +239,8 @@ export class EventService {
       .take(limit);
 
     const [events, total] = await queryBuilder.getManyAndCount();
+
+    console.log('Found my events:', events.length);
 
     const eventsWithStats = await Promise.all(
       events.map(event => this.addEventStats(event, userId)),
@@ -330,6 +331,42 @@ export class EventService {
           throw new BadRequestException(`Unable to find location for city "${updateEventDto.cityName}": ${error.message}`);
         }
       }
+    }
+
+    // Handle copying tracks from another playlist if selectedPlaylistId is provided
+    if (updateEventDto.selectedPlaylistId) {
+      const sourcePlaylist = await this.eventRepository.findOne({
+        where: { id: updateEventDto.selectedPlaylistId },
+        relations: ['tracks', 'tracks.track'],
+      });
+
+      if (!sourcePlaylist) {
+        throw new NotFoundException('Source playlist not found');
+      }
+
+      // Only allow copying if user owns the source playlist or is authorized
+      if (sourcePlaylist.creatorId !== userId) {
+        throw new ForbiddenException('You can only copy playlists you own');
+      }
+
+      // Clear existing tracks and copy from source
+      event.tracks = [];
+      await this.eventRepository.save(event);
+
+      // Copy tracks from source playlist
+      if (sourcePlaylist.tracks && sourcePlaylist.tracks.length > 0) {
+        const newTracks = sourcePlaylist.tracks.map(pt => ({
+          ...pt,
+          id: undefined, // Remove ID to create new instances
+          event: event, // Associate with current event
+        }));
+
+        const trackRepository = this.eventRepository.manager.getRepository(PlaylistTrack);
+        await trackRepository.save(newTracks);
+      }
+
+      // Remove selectedPlaylistId from the DTO after copying
+      delete updateEventDto.selectedPlaylistId;
     }
 
     Object.assign(event, updateEventDto);
@@ -1054,6 +1091,7 @@ export class EventService {
       .orWhere('participant.userId = :userId', { userId })
       .getMany();
 
+    console.log('Events user can invite with admins:', events);
     const timeZone = 'Europe/Paris';
     return events.map(event => ({
       ...event,
@@ -1428,7 +1466,117 @@ export class EventService {
     return this.remove(playlistId, userId);
   }
 
-  // Note: Other playlist methods (tracks, collaborators, etc.) are now handled
-  // directly through PlaylistController which delegates to PlaylistService
-  // This EventService focuses on Event-specific operations
+  // =====================================================
+  // PLAYLIST TRACK OPERATIONS (from PlaylistService)
+  // =====================================================
+
+  /**
+   * Get all tracks in an event/playlist
+   */
+  async getPlaylistTracks(eventId: string): Promise<any[]> {
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: ['tracks', 'tracks.track', 'tracks.addedBy'],
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    // Sort by position
+    return event.tracks.sort((a, b) => a.position - b.position);
+  }
+
+  /**
+   * Remove a track from an event/playlist
+   */
+  async removeTrack(eventId: string, trackId: string, userId: string): Promise<void> {
+    const event = await this.findById(eventId, userId);
+
+    // Only creator or admin can remove tracks
+    const isCreator = event.creatorId === userId;
+    const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+
+    if (!isCreator && !isAdmin) {
+      throw new ForbiddenException('Only the creator or admins can remove tracks');
+    }
+
+    // Find and remove the track
+    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
+    const playlistTrack = await playlistTrackRepository.findOne({
+      where: { eventId, trackId },
+    });
+
+    if (!playlistTrack) {
+      throw new NotFoundException('Track not found in this event');
+    }
+
+    // Remove votes for this track
+    await this.removeVotesOfTrack(eventId, trackId);
+
+    // Delete the track
+    await playlistTrackRepository.remove(playlistTrack);
+
+    // Update track count
+    event.trackCount = Math.max(0, (event.trackCount || 0) - 1);
+    await this.eventRepository.save(event);
+
+    // Notify participants
+    this.eventGateway.notifyTrackRemoved(eventId, trackId, userId);
+  }
+
+  /**
+   * Add a track to an event/playlist
+   */
+  async addTrack(eventId: string, userId: string, dto: AddTrackToPlaylistDto): Promise<any> {
+    const event = await this.findById(eventId, userId);
+
+    // Only creator or admin can add tracks
+    const isCreator = event.creatorId === userId;
+    const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+
+    if (!isCreator && !isAdmin) {
+      throw new ForbiddenException('Only the creator or admins can add tracks');
+    }
+
+    // Get or create track from Deezer ID
+    let track = await this.trackRepository.findOne({ where: { deezerId: dto.deezerId } });
+    if (!track) {
+      track = this.trackRepository.create({
+        deezerId: dto.deezerId,
+        title: dto.title,
+        artist: dto.artist,
+        album: dto.album,
+        albumCoverUrl: dto.albumCoverUrl,
+        previewUrl: dto.previewUrl,
+        duration: dto.duration,
+      });
+      track = await this.trackRepository.save(track);
+    }
+
+    // Get current track count to set position
+    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
+    const count = await playlistTrackRepository.count({ where: { eventId } });
+
+    // Create playlist track
+    const playlistTrack = playlistTrackRepository.create({
+      eventId,
+      trackId: track.id,
+      position: dto.position || count + 1,
+      addedById: userId,
+      addedAt: new Date(),
+    });
+
+    const saved = await playlistTrackRepository.save(playlistTrack);
+
+    // Update event track count and duration
+    event.trackCount = (event.trackCount || 0) + 1;
+    event.totalDuration = (event.totalDuration || 0) + (track.duration || 0);
+    await this.eventRepository.save(event);
+
+    // Notify participants
+    this.eventGateway.notifyTrackAdded(eventId, saved, userId);
+
+    return saved;
+  }
 }

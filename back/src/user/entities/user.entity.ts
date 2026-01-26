@@ -12,7 +12,6 @@ import { Event } from 'src/event/entities/event.entity';
 import { Device } from 'src/device/entities/device.entity';
 import { Vote } from 'src/event/entities/vote.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
 
 export enum VisibilityLevel {
   PUBLIC = 'public',

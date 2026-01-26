@@ -52,7 +52,7 @@ class EventService {
         .map((e) => '${e.key}=${e.value}')
         .join('&');
     
-    final endpoint = '${AppConfig.eventsEndpoint}/my-event?$queryString';
+    final endpoint = '${AppConfig.eventsEndpoint}/my-events?$queryString';
     final response = await apiService.get(endpoint);
 
     // Handle both wrapped response (with 'data' field) and direct data response
@@ -140,23 +140,52 @@ class EventService {
   /// Update event
   Future<Event> updateEvent(
     String id, {
+    String? name,
     String? title,
     String? description,
+    String? type,
+    String? visibility,
+    String? licenseType,
+    bool? votingEnabled,
+    String? coverImageUrl,
+    double? latitude,
+    double? longitude,
+    int? locationRadius,
+    String? locationName,
+    String? votingStartTime,
+    String? votingEndTime,
+    DateTime? eventDate,
     DateTime? startDate,
     DateTime? endDate,
-    String? location,
-    bool? isPublic,
+    String? playlistName,
+    String? selectedPlaylistId,
   }) async {
+    final body = <String, dynamic>{};
+    
+    // Map 'title' to 'name' for backend compatibility
+    if (name != null) body['name'] = name;
+    if (title != null) body['name'] = title; // Support both title and name
+    if (description != null) body['description'] = description;
+    if (type != null) body['type'] = type;
+    if (visibility != null) body['visibility'] = visibility;
+    if (licenseType != null) body['licenseType'] = licenseType;
+    if (votingEnabled != null) body['votingEnabled'] = votingEnabled;
+    if (coverImageUrl != null) body['coverImageUrl'] = coverImageUrl;
+    if (latitude != null) body['latitude'] = latitude;
+    if (longitude != null) body['longitude'] = longitude;
+    if (locationRadius != null) body['locationRadius'] = locationRadius;
+    if (locationName != null) body['locationName'] = locationName;
+    if (votingStartTime != null) body['votingStartTime'] = votingStartTime;
+    if (votingEndTime != null) body['votingEndTime'] = votingEndTime;
+    if (eventDate != null) body['eventDate'] = eventDate.toIso8601String();
+    if (startDate != null) body['startDate'] = startDate.toIso8601String();
+    if (endDate != null) body['endDate'] = endDate.toIso8601String();
+    if (playlistName != null) body['playlistName'] = playlistName;
+    if (selectedPlaylistId != null) body['selectedPlaylistId'] = selectedPlaylistId;
+
     final response = await apiService.patch(
       '${AppConfig.eventsEndpoint}/$id',
-      body: {
-        if (title != null) 'title': title,
-        if (description != null) 'description': description,
-        if (startDate != null) 'startDate': startDate.toIso8601String(),
-        if (endDate != null) 'endDate': endDate.toIso8601String(),
-        if (location != null) 'location': location,
-        if (isPublic != null) 'isPublic': isPublic,
-      },
+      body: body,
     );
 
     // Handle both wrapped response (with 'data' field) and direct data response
@@ -193,7 +222,7 @@ class EventService {
         .map((e) => '${e.key}=${e.value}')
         .join('&');
     
-    final endpoint = '${AppConfig.eventsEndpoint}?$queryString&type=LISTENING_SESSION';
+    final endpoint = '${AppConfig.eventsEndpoint}?$queryString&type=listening_session';
     final response = await apiService.get(endpoint);
 
     List<dynamic> dataList;
@@ -216,7 +245,7 @@ class EventService {
     final params = {
       'page': page.toString(),
       'limit': limit.toString(),
-      'type': 'LISTENING_SESSION', // Filter for playlists only
+      'type': 'listening_session', // Filter for playlists only (lowercase)
     };
 
     final queryString = params.entries
@@ -240,7 +269,7 @@ class EventService {
 
   /// Get recommended playlists
   Future<List<Event>> getRecommendedPlaylists({int limit = 20}) async {
-    final endpoint = '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=LISTENING_SESSION';
+    final endpoint = '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=listening_session';
     final response = await apiService.get(endpoint);
     
     if (response is List) {
@@ -251,7 +280,7 @@ class EventService {
 
   /// Search playlists
   Future<List<Event>> searchPlaylists(String query, {int limit = 20}) async {
-    final endpoint = '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=LISTENING_SESSION';
+    final endpoint = '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=listening_session';
     final response = await apiService.get(endpoint);
     
     if (response is List) {
@@ -288,7 +317,7 @@ class EventService {
         'name': name,
         'description': description,
         'isPublic': isPublic,
-        'type': 'LISTENING_SESSION', // Create as playlist
+        'type': 'listening_session', // Create as playlist (lowercase)
       },
     );
 

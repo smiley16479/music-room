@@ -12,16 +12,27 @@ Event _$EventFromJson(Map<String, dynamic> json) => Event(
   description: json['description'] as String?,
   type: $enumDecode(_$EventTypeEnumMap, json['type']),
   visibility: $enumDecode(_$EventVisibilityEnumMap, json['visibility']),
+  licenseType: $enumDecodeNullable(
+    _$EventLicenseTypeEnumMap,
+    json['licenseType'],
+  ),
   trackCount: (json['trackCount'] as num?)?.toInt(),
   totalDuration: (json['totalDuration'] as num?)?.toInt(),
   collaboratorCount: (json['collaboratorCount'] as num?)?.toInt(),
   coverImageUrl: json['coverImageUrl'] as String?,
+  playlistName: json['playlistName'] as String?,
   eventDate: json['eventDate'] == null
       ? null
       : DateTime.parse(json['eventDate'] as String),
   eventEndDate: json['eventEndDate'] == null
       ? null
       : DateTime.parse(json['eventEndDate'] as String),
+  startDate: json['startDate'] == null
+      ? null
+      : DateTime.parse(json['startDate'] as String),
+  endDate: json['endDate'] == null
+      ? null
+      : DateTime.parse(json['endDate'] as String),
   locationName: json['locationName'] as String?,
   latitude: (json['latitude'] as num?)?.toDouble(),
   longitude: (json['longitude'] as num?)?.toDouble(),
@@ -34,7 +45,6 @@ Event _$EventFromJson(Map<String, dynamic> json) => Event(
   creator: json['creator'] == null
       ? null
       : User.fromJson(json['creator'] as Map<String, dynamic>),
-  licenseType: json['licenseType'] as String?,
   status: json['status'] as String,
   createdAt: DateTime.parse(json['createdAt'] as String),
   updatedAt: DateTime.parse(json['updatedAt'] as String),
@@ -51,12 +61,16 @@ Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
   'description': instance.description,
   'type': _$EventTypeEnumMap[instance.type]!,
   'visibility': _$EventVisibilityEnumMap[instance.visibility]!,
+  'licenseType': _$EventLicenseTypeEnumMap[instance.licenseType],
   'trackCount': instance.trackCount,
   'totalDuration': instance.totalDuration,
   'collaboratorCount': instance.collaboratorCount,
   'coverImageUrl': instance.coverImageUrl,
+  'playlistName': instance.playlistName,
   'eventDate': instance.eventDate?.toIso8601String(),
   'eventEndDate': instance.eventEndDate?.toIso8601String(),
+  'startDate': instance.startDate?.toIso8601String(),
+  'endDate': instance.endDate?.toIso8601String(),
   'locationName': instance.locationName,
   'latitude': instance.latitude,
   'longitude': instance.longitude,
@@ -67,7 +81,6 @@ Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
   'currentTrackId': instance.currentTrackId,
   'creatorId': instance.creatorId,
   'creator': instance.creator,
-  'licenseType': instance.licenseType,
   'status': instance.status,
   'createdAt': instance.createdAt.toIso8601String(),
   'updatedAt': instance.updatedAt.toIso8601String(),
@@ -77,13 +90,20 @@ Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
 };
 
 const _$EventTypeEnumMap = {
-  EventType.listeningSession: 'LISTENING_SESSION',
-  EventType.party: 'PARTY',
-  EventType.collaborative: 'COLLABORATIVE',
-  EventType.liveSession: 'LIVE_SESSION',
+  EventType.listeningSession: 'listening_session',
+  EventType.party: 'party',
+  EventType.collaborative: 'collaborative',
+  EventType.liveSession: 'live_session',
 };
 
 const _$EventVisibilityEnumMap = {
-  EventVisibility.public: 'PUBLIC',
-  EventVisibility.private: 'PRIVATE',
+  EventVisibility.public: 'public',
+  EventVisibility.private: 'private',
+};
+
+const _$EventLicenseTypeEnumMap = {
+  EventLicenseType.open: 'open',
+  EventLicenseType.invited: 'invited',
+  EventLicenseType.admin: 'admin',
+  EventLicenseType.locationBased: 'location_based',
 };

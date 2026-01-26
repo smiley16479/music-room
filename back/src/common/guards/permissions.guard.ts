@@ -9,7 +9,6 @@ import {
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import { EventService } from 'src/event/event.service';
-import { PlaylistService } from 'src/playlist/playlist.service';
 import { DeviceService } from 'src/device/device.service';
 import { UserService } from 'src/user/user.service';
 
@@ -20,8 +19,6 @@ export class PermissionsGuard implements CanActivate {
     // Injection des services
     @Inject(forwardRef(() => EventService))
     private eventService: EventService,
-    @Inject(forwardRef(() => PlaylistService))
-    private playlistService: PlaylistService,
     @Inject(forwardRef(() => DeviceService))
     private deviceService: DeviceService,
     @Inject(forwardRef(() => UserService))

@@ -12,6 +12,7 @@ class EventsScreen extends StatefulWidget {
   State<EventsScreen> createState() => _EventsScreenState();
 }
 
+// MARK: - EventsScreenState
 class _EventsScreenState extends State<EventsScreen> {
   @override
   void initState() {
@@ -103,6 +104,8 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
+
+// MARK: - CreateEventDialog
   void _showCreateEventDialog() {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();

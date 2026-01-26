@@ -20,12 +20,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    print('🔵 HomeScreen.initState() - calling _loadPlaylists()');
     _loadPlaylists();
   }
 
   Future<void> _loadPlaylists() async {
+    print('🟡 _loadPlaylists() called');
     final playlistProvider = context.read<PlaylistProvider>();
+    print('🟡 PlaylistProvider obtained');
     await playlistProvider.loadMyPlaylists();
+    print('🟡 loadMyPlaylists() completed');
   }
 
   @override

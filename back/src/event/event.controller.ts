@@ -14,10 +14,10 @@ import {
 } from '@nestjs/common';
 
 import { EventService } from './event.service';
-import { CreateEventDto } from './dto/create-event.dto';
-import { UpdateEventDto } from './dto/update-event.dto';
+import { CreateEventDto } from './dto/event/create-event.dto';
+import { UpdateEventDto } from './dto/event/update-event.dto';
 import { CreateVoteDto } from './dto/vote.dto';
-import { InviteUsersDto } from './dto/invite-users.dto';
+import { InviteUsersDto } from './dto/event/invite-users.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { LocationDto } from '../common/dto/location.dto';
 
@@ -131,6 +131,9 @@ export class EventController {
   @ApiQuery({ type: PaginationDto })
   async getMyEvent(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
     const { page, limit, skip } = paginationDto;
+
+    console.log('Getting my event for user:', user?.id);
+
     // Récupère les events avec les admins
     const events = await this.eventService.getEventsUserCanInviteWithAdmins(user.id);
     
@@ -159,6 +162,7 @@ export class EventController {
     @Query('type') type?: string,
     @CurrentUser() user?: User,
   ) {
+    console.log('Getting my events for user:', user?.id, 'with type filter:', type);
     return this.eventService.findMyEvents(paginationDto, user?.id, type);
   }
 

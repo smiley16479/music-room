@@ -19,7 +19,6 @@ import { Track } from 'src/music/entities/track.entity';
 import { User, VisibilityLevel } from 'src/user/entities/user.entity';
 import { TrackVoteSnapshot } from './event.service';
 import { EventService } from './event.service';
-import { PlaylistService } from 'src/playlist/playlist.service';
 
 import { SOCKET_ROOMS } from '../common/constants/socket-rooms';
 import { IsLatitude } from 'class-validator';
@@ -52,8 +51,6 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     private userService: UserService,
     @Inject(forwardRef(() => EventService))
     private eventService: EventService,
-    @Inject(forwardRef(() => PlaylistService))
-    private playlistService: PlaylistService,
   ) {}
 
   afterInit(server: Server) {
@@ -1039,9 +1036,9 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       
       // Event IS playlist when type=LISTENING_SESSION
       if (event.trackCount !== undefined && event.trackCount !== null) {
-        await this.playlistService.removeTrack(event.id, trackId, adminUserId);
+        await this.eventService.removeTrack(event.id, trackId, adminUserId);
         
-        const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.id);
+        const updatedPlaylist = await this.eventService.getPlaylistTracks(event.id);
         
         if (updatedPlaylist.length > 0) {
           const nextTrack = updatedPlaylist[0];
@@ -1104,14 +1101,12 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       if (isCreator /* || isAdmin */) {
         try {
           // Event IS playlist when type=LISTENING_SESSION
-          if (event.trackCount !== undefined && event.trackCount !== null) {
-            await this.playlistService.removeTrack(event.id, trackId, client.userId);
-            
-            this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
-            
-            const updatedPlaylist = await this.playlistService.getPlaylistTracks(event.id);
-            
-            if (updatedPlaylist.length > 0) {
+            if (event.trackCount !== undefined && event.trackCount !== null) {
+              await this.eventService.removeTrack(event.id, trackId, client.userId);
+              
+              this.trackAccessibilityReports.delete(`${eventId}:${trackId}`);
+              
+              const updatedPlaylist = await this.eventService.getPlaylistTracks(event.id);            if (updatedPlaylist.length > 0) {
               const nextTrack = updatedPlaylist[0];
               
               if (nextTrack && nextTrack.track) {

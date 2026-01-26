@@ -10,7 +10,7 @@ import {
 import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
 import { Track } from 'src/music/entities/track.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { PlaylistTrack } from 'src/event/entities/playlist-track.entity';
 
 export enum VoteType {
   UPVOTE = 'upvote',

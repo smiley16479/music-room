@@ -9,15 +9,11 @@ import { EventService } from './event.service';
 import { EventGateway } from './event.gateway';
 import { EventParticipantService } from './event-participant.service';
 
-// Playlist imports (fusionnés dans EventModule)
-import { PlaylistController } from '../playlist/playlist.controller';
-import { PlaylistService } from '../playlist/playlist.service';
-
 // Entities
 import { Event } from 'src/event/entities/event.entity';
 import { EventParticipant } from 'src/event/entities/event-participant.entity';
 import { Vote } from 'src/event/entities/vote.entity';
-import { PlaylistTrack } from 'src/playlist/entities/playlist-track.entity';
+import { PlaylistTrack } from 'src/event/entities/playlist-track.entity';
 import { Track } from 'src/music/entities/track.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Invitation } from 'src/invitation/entities/invitation.entity';
@@ -58,8 +54,8 @@ import { CommonModule } from '../common/common.module';
     MusicModule,
     CommonModule,
   ],
-  controllers: [EventController, PlaylistController],
-  providers: [EventService, EventParticipantService, EventGateway, PlaylistService],
-  exports: [EventService, EventParticipantService, EventGateway, PlaylistService],
+  controllers: [EventController],
+  providers: [EventService, EventParticipantService, EventGateway],
+  exports: [EventService, EventParticipantService, EventGateway],
 })
 export class EventModule { }

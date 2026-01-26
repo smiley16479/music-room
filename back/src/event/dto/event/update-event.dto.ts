@@ -11,11 +11,11 @@ import {
   MaxLength,
   IsPositive,
 } from 'class-validator';
-import { EventType } from 'src/event/entities/event-type.enum';
+import { EventType } from '../../entities/event-type.enum';
 import {
   EventVisibility,
   EventLicenseType,
-} from 'src/event/entities/event.entity';
+} from '../../entities/event.entity';
 
 export class UpdateEventDto extends PartialType({
   name: String,
