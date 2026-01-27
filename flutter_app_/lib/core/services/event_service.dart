@@ -856,6 +856,22 @@ class EventService {
     return PlaylistTrack.fromJson(trackData);
   }
 
+  /// Get track by id
+  Future<PlaylistTrack> getTrackById(String trackId) async {
+    final response = await apiService.get('/music/track/$trackId');
+    
+    Map<String, dynamic> trackData;
+    if (response is Map<String, dynamic> && response.containsKey('data')) {
+      trackData = response['data'] as Map<String, dynamic>;
+    } else if (response is Map<String, dynamic>) {
+      trackData = response;
+    } else {
+      throw Exception('Invalid response format');
+    }
+    
+    return PlaylistTrack.fromJson(trackData);
+  }
+
   /// Remove track from playlist
   Future<void> removeTrackFromPlaylist(
     String playlistId,
