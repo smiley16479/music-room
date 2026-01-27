@@ -6,3 +6,4 @@ export 'track_service.dart';
 export 'invitation_service.dart';
 export 'event_service.dart';
 export 'friend_service.dart';
+export 'audio_player_service.dart';

@@ -33,6 +33,7 @@ void main() async {
   );
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
+  final audioPlayerService = AudioPlayerService();
   // PlaylistService is now an alias for EventService
 
   print('🟢 Services initialized');
@@ -49,6 +50,7 @@ void main() async {
           create: (_) => InvitationService(apiService: apiService),
         ),
         Provider<FriendService>(create: (_) => friendService),
+        Provider<AudioPlayerService>(create: (_) => audioPlayerService),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(authService: authService),
         ),
@@ -60,6 +62,9 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => FriendProvider(friendService: friendService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AudioPlayerProvider(audioService: audioPlayerService),
         ),
       ],
       child: const MyApp(),

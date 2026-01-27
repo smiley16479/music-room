@@ -17,6 +17,7 @@ class PlaylistTrack extends Equatable {
   final String? trackArtist;
   final String? trackAlbum;
   final String? coverUrl;
+  final String? previewUrl;
   final int? duration;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -31,6 +32,7 @@ class PlaylistTrack extends Equatable {
     this.trackArtist,
     this.trackAlbum,
     this.coverUrl,
+    this.previewUrl,
     this.duration,
     required this.createdAt,
     required this.updatedAt,
@@ -51,6 +53,7 @@ class PlaylistTrack extends Equatable {
         trackArtist,
         trackAlbum,
         coverUrl,
+        previewUrl,
         duration,
         createdAt,
         updatedAt,

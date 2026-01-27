@@ -295,6 +295,26 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Get track by id
+  Future<bool> getTrackById(String trackId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final track = await eventService.getTrackById(trackId);
+      _currentPlaylistTracks = [track];
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Create playlist
   Future<bool> createPlaylist({
     required String name,
