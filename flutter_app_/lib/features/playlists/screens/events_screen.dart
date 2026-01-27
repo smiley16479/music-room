@@ -22,7 +22,10 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Future<void> _loadEvents() async {
     final eventProvider = context.read<EventProvider>();
-    await eventProvider.loadMyEvents();
+    // Only load if not already loaded
+    if (eventProvider.myEvents.isEmpty) {
+      await eventProvider.loadMyEvents();
+    }
   }
 
   @override
@@ -33,7 +36,10 @@ class _EventsScreenState extends State<EventsScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        if (eventProvider.myEvents.isEmpty) {
+        // Filter real events (non-playlists) using getter
+        final events = eventProvider.realEvents;
+
+        if (events.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -61,9 +67,9 @@ class _EventsScreenState extends State<EventsScreen> {
         }
 
         return ListView.builder(
-          itemCount: eventProvider.myEvents.length,
+          itemCount: events.length,
           itemBuilder: (context, index) {
-            final event = eventProvider.myEvents[index];
+            final event = events[index];
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: ListTile(
@@ -71,14 +77,16 @@ class _EventsScreenState extends State<EventsScreen> {
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (event.description != null && event.description!.isNotEmpty)
+                    if (event.description != null &&
+                        event.description!.isNotEmpty)
                       Text(event.description!),
                     if (event.eventDate != null)
                       Text(
                         'Starts: ${event.eventDate.toString().split('.')[0]}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    if (event.locationName != null && event.locationName!.isNotEmpty)
+                    if (event.locationName != null &&
+                        event.locationName!.isNotEmpty)
                       Text(
                         'Location: ${event.locationName}',
                         style: Theme.of(context).textTheme.bodySmall,
@@ -90,9 +98,8 @@ class _EventsScreenState extends State<EventsScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => EventDetailsScreen(
-                        eventId: event.id,
-                      ),
+                      builder: (context) =>
+                          EventDetailsScreen(eventId: event.id),
                     ),
                   );
                 },
@@ -104,8 +111,7 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 
-
-// MARK: - CreateEventDialog
+  // MARK: - CreateEventDialog
   void _showCreateEventDialog() {
     final titleController = TextEditingController();
     final descriptionController = TextEditingController();
@@ -155,7 +161,9 @@ class _EventsScreenState extends State<EventsScreen> {
                           context: context,
                           initialDate: selectedDate,
                           firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
+                          ),
                         );
                         if (picked != null) {
                           setState(() {
@@ -222,6 +230,7 @@ class _EventsScreenState extends State<EventsScreen> {
                             ? locationController.text
                             : null,
                         visibility: isPublic ? 'public' : 'private',
+                        type: 'party', // Create as event (not playlist)
                       );
                       if (mounted) {
                         Navigator.pop(context);
@@ -252,4 +261,3 @@ class _EventsScreenState extends State<EventsScreen> {
     );
   }
 }
-

@@ -49,7 +49,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Registration successful! Please check your email to verify your account, then login.'),
+          content: Text(
+            'Registration successful! Please check your email to verify your account, then login.',
+          ),
           backgroundColor: Colors.green,
           duration: Duration(seconds: 5),
         ),
@@ -110,7 +112,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     prefixIcon: const Icon(Icons.lock),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                        _obscurePassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
                       ),
                       onPressed: () {
                         setState(() {
@@ -139,7 +143,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                        _obscureConfirmPassword
+                            ? Icons.visibility
+                            : Icons.visibility_off,
                       ),
                       onPressed: () {
                         setState(() {
@@ -164,8 +170,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     return SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed:
-                            authProvider.isLoading ? null : _handleRegister,
+                        onPressed: authProvider.isLoading
+                            ? null
+                            : _handleRegister,
                         child: authProvider.isLoading
                             ? const SizedBox(
                                 height: 20,
@@ -203,29 +210,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           try {
                             // For Android: use Android client ID + server client ID for backend verification
                             // For iOS: use the iOS client ID
-                            final GoogleSignIn googleSignIn = Platform.isAndroid 
-                              ? GoogleSignIn(
-                                  clientId: AppConfig.googleAndroidClientId, // Android client ID
-                                  serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
-                                  scopes: ['email', 'profile'],
-                                )
-                              : GoogleSignIn(
-                                  clientId: AppConfig.googleClientId,
-                                  scopes: ['email', 'profile'],
-                                );
+                            final GoogleSignIn googleSignIn = Platform.isAndroid
+                                ? GoogleSignIn(
+                                    clientId: AppConfig
+                                        .googleAndroidClientId, // Android client ID
+                                    serverClientId: AppConfig
+                                        .googleWebClientId, // Web client ID for server verification
+                                    scopes: ['email', 'profile'],
+                                  )
+                                : GoogleSignIn(
+                                    clientId: AppConfig.googleClientId,
+                                    scopes: ['email', 'profile'],
+                                  );
                             final GoogleSignInAccount? googleUser =
                                 await googleSignIn.signIn();
 
                             if (googleUser != null) {
-                              final GoogleSignInAuthentication
-                                  googleAuth =
+                              final GoogleSignInAuthentication googleAuth =
                                   await googleUser.authentication;
 
-                              final authProvider =
-                                  context.read<AuthProvider>();
-                              final platform = Platform.isAndroid ? 'android' : 'ios';
-                              final success =
-                                  await authProvider.googleSignIn(
+                              final authProvider = context.read<AuthProvider>();
+                              final platform = Platform.isAndroid
+                                  ? 'android'
+                                  : 'ios';
+                              final success = await authProvider.googleSignIn(
                                 idToken: googleAuth.idToken ?? '',
                                 platform: platform,
                               );
@@ -233,19 +241,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               if (!mounted) return;
 
                               if (success) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
+                                ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text(
-                                        'Registered with Google!'),
+                                    content: Text('Registered with Google!'),
                                   ),
                                 );
                               } else {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
+                                ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                        'Error: ${authProvider.error}'),
+                                      'Error: ${authProvider.error}',
+                                    ),
                                   ),
                                 );
                               }
@@ -265,46 +271,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       child: OutlinedButton.icon(
                         onPressed: () async {
                           try {
-                            final result =
-                                await FacebookAuth.instance.login();
+                            final result = await FacebookAuth.instance.login();
 
-                            if (result.status ==
-                                LoginStatus.success) {
-                              final accessToken =
-                                  result.accessToken;
-                              final authProvider =
-                                  context.read<AuthProvider>();
-                              final success =
-                                  await authProvider.facebookSignIn(
+                            if (result.status == LoginStatus.success) {
+                              final accessToken = result.accessToken;
+                              final authProvider = context.read<AuthProvider>();
+                              final success = await authProvider.facebookSignIn(
                                 accessToken: accessToken?.tokenString ?? '',
                               );
 
                               if (!mounted) return;
 
                               if (success) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
+                                ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text(
-                                        'Registered with Facebook!'),
+                                    content: Text('Registered with Facebook!'),
                                   ),
                                 );
                               } else {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(
+                                ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(
-                                        'Error: ${authProvider.error}'),
+                                      'Error: ${authProvider.error}',
+                                    ),
                                   ),
                                 );
                               }
-                            } else if (result.status ==
-                                LoginStatus.cancelled) {
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(
+                            } else if (result.status == LoginStatus.cancelled) {
+                              ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content:
-                                      Text('Facebook login cancelled'),
+                                  content: Text('Facebook login cancelled'),
                                 ),
                               );
                             }
