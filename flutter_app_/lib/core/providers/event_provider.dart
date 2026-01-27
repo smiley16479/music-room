@@ -20,22 +20,22 @@ class EventProvider extends ChangeNotifier {
   // Getters
   List<Event> get events => _events;
   List<Event> get myEvents => _myEvents;
-  
+
   /// Get only playlists (Events with type=LISTENING_SESSION)
   List<Event> get playlists => _events.where((e) => e.isPlaylist).toList();
   List<Event> get myPlaylists => _myEvents.where((e) => e.isPlaylist).toList();
-  
-  /// Get only real events (not playlists)
-  List<Event> get realEvents => _events.where((e) => !e.isPlaylist).toList();
-  
+
+  /// Get only real events (not playlists) from MY events
+  List<Event> get realEvents => _myEvents.where((e) => !e.isPlaylist).toList();
+
   Event? get currentEvent => _currentEvent;
-  
+
   /// Backward compatibility: currentPlaylist is the same as currentEvent
   Event? get currentPlaylist => _currentEvent;
-  
+
   /// Get tracks of the current playlist
   List<PlaylistTrack> get currentPlaylistTracks => _currentPlaylistTracks;
-  
+
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -46,10 +46,7 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _events = await eventService.getEvents(
-        page: page,
-        limit: limit,
-      );
+      _events = await eventService.getEvents(page: page, limit: limit);
     } catch (e) {
       _error = e.toString();
     }
@@ -58,7 +55,8 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load my events
+  /// Load my events (all types)
+  /// The UI will filter using myPlaylists or realEvents getters
   Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
     _isLoading = true;
     _error = null;
@@ -67,15 +65,18 @@ class EventProvider extends ChangeNotifier {
     print('Loading my events for page $page, limit $limit');
     try {
       // Récupère TOUS les events de l'utilisateur (events + playlists)
-      _myEvents = await eventService.getMyEvents(
-        page: page,
-        limit: limit,
+      _myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      print('✅ Loaded my events count: ${_myEvents.length}');
+      print('📋 Event details:');
+      for (var e in _myEvents) {
+        print('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
+      }
+      print(
+        '🎵 Playlists: ${myPlaylists.length}, 🎉 Real Events: ${realEvents.length}',
       );
-      print('Loaded my events count: ${_myEvents.length}');
-      print('Playlists in myEvents: ${_myEvents.where((e) => e.isPlaylist).length}');
     } catch (e) {
       _error = e.toString();
-      print('Error loading my events: $e');
+      print('❌ Error loading my events: $e');
     }
 
     _isLoading = false;
@@ -102,15 +103,17 @@ class EventProvider extends ChangeNotifier {
   Future<bool> createEvent({
     required String name,
     String? description,
-    required DateTime eventDate,
+    DateTime? eventDate,
     DateTime? eventEndDate,
     String? locationName,
     String? visibility,
+    String? type,
   }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
+    print('Creating event - Type: $type, Name: $name');
     try {
       final event = await eventService.createEvent(
         name: name,
@@ -119,8 +122,16 @@ class EventProvider extends ChangeNotifier {
         eventEndDate: eventEndDate,
         locationName: locationName,
         visibility: visibility,
+        type: type,
+      );
+      print(
+        'Event created successfully - ID: ${event.id}, Type: ${event.type}',
       );
       _myEvents.add(event);
+      print('Total events in provider: ${_myEvents.length}');
+      print(
+        'Playlists: ${myPlaylists.length}, Real Events: ${realEvents.length}',
+      );
       _isLoading = false;
       notifyListeners();
       return true;
@@ -241,30 +252,6 @@ class EventProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = e.toString();
-    }
-
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  /// Load my playlists
-  Future<void> loadMyPlaylists({int page = 1, int limit = 20}) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      print('Loading my playlists...');
-      // Récupère les events de l'utilisateur (contient playlists + events)
-      _myEvents = await eventService.getMyEvents(
-        page: page,
-        limit: limit,
-      );
-      print('Loaded events count: ${_myEvents.length}');
-      print('Playlists count: ${myPlaylists.length}');
-    } catch (e) {
-      _error = e.toString();
-      print('Error loading my playlists: $e');
     }
 
     _isLoading = false;

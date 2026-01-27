@@ -13,6 +13,7 @@ import {
   EventVisibility,
   EventLicenseType,
 } from 'src/event/entities/event.entity';
+import { EventType } from 'src/event/entities/event-type.enum';
 
 export class CreateEventDto {
   @IsString()
@@ -23,6 +24,10 @@ export class CreateEventDto {
   @IsString()
   @MaxLength(1000)
   description?: string;
+
+  @IsOptional()
+  @IsEnum(EventType)
+  type?: EventType;
 
   @IsOptional()
   @IsEnum(EventVisibility)

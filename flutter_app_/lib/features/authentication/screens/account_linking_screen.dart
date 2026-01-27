@@ -1,4 +1,5 @@
-import 'dart:io' show Platform;import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
@@ -23,7 +24,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
 
   Future<void> _linkGoogleAccount() async {
     final authProvider = context.read<AuthProvider>();
-    
+
     if (authProvider.token == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -34,34 +35,36 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
       );
       return;
     }
-    
+
     setState(() => _isLinkingGoogle = true);
-    
+
     try {
       if (kIsWeb) {
         // Web: Use browser-based OAuth flow - redirect in same window
         final token = authProvider.token!;
         final redirectUri = AppConfig.frontendUrl;
         final queryParams = {'state': token, 'redirect_uri': redirectUri};
-        
-        final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google/link')
-            .replace(queryParameters: queryParams);
-        
+
+        final linkUrl = Uri.parse(
+          '${AppConfig.oauthBaseUrl}/auth/google/link',
+        ).replace(queryParameters: queryParams);
+
         await launchUrl(linkUrl, webOnlyWindowName: '_self');
       } else {
         // Mobile: Use native Google Sign-In SDK
         // For Android: don't pass clientId, use serverClientId for backend verification
         // For iOS: pass the iOS client ID
-        final GoogleSignIn googleSignIn = Platform.isAndroid 
-          ? GoogleSignIn(
-              clientId: AppConfig.googleAndroidClientId, // Android client ID
-              serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
-              scopes: ['email', 'profile'],
-            )
-          : GoogleSignIn(
-              clientId: AppConfig.googleClientId,
-              scopes: ['email', 'profile'],
-            );
+        final GoogleSignIn googleSignIn = Platform.isAndroid
+            ? GoogleSignIn(
+                clientId: AppConfig.googleAndroidClientId, // Android client ID
+                serverClientId: AppConfig
+                    .googleWebClientId, // Web client ID for server verification
+                scopes: ['email', 'profile'],
+              )
+            : GoogleSignIn(
+                clientId: AppConfig.googleClientId,
+                scopes: ['email', 'profile'],
+              );
         final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
         if (googleUser != null) {
@@ -108,7 +111,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
 
   Future<void> _linkFacebookAccount() async {
     final authProvider = context.read<AuthProvider>();
-    
+
     if (authProvider.token == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -119,19 +122,20 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
       );
       return;
     }
-    
+
     setState(() => _isLinkingFacebook = true);
-    
+
     try {
       if (kIsWeb) {
         // Web: Use browser-based OAuth flow - redirect in same window
         final token = authProvider.token!;
         final redirectUri = AppConfig.frontendUrl;
         final queryParams = {'state': token, 'redirect_uri': redirectUri};
-        
-        final linkUrl = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook/link')
-            .replace(queryParameters: queryParams);
-        
+
+        final linkUrl = Uri.parse(
+          '${AppConfig.oauthBaseUrl}/auth/facebook/link',
+        ).replace(queryParameters: queryParams);
+
         await launchUrl(linkUrl, webOnlyWindowName: '_self');
       } else {
         // Mobile: Use native Facebook Login SDK
@@ -186,17 +190,13 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Link Accounts'),
-      ),
+      appBar: AppBar(title: const Text('Link Accounts')),
       body: Consumer<AuthProvider>(
         builder: (context, authProvider, _) {
           final user = authProvider.currentUser;
 
           if (user == null) {
-            return const Center(
-              child: Text('Please log in first'),
-            );
+            return const Center(child: Text('Please log in first'));
           }
 
           return ListView(
@@ -204,10 +204,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
             children: [
               const Text(
                 'Connected Accounts',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -215,7 +212,7 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
                 style: TextStyle(color: Colors.grey),
               ),
               const SizedBox(height: 24),
-              
+
               // Google Account
               _buildAccountCard(
                 icon: Icons.g_mobiledata,
@@ -224,9 +221,9 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
                 onLink: _linkGoogleAccount,
                 isLinking: _isLinkingGoogle,
               ),
-              
+
               const SizedBox(height: 16),
-              
+
               // Facebook Account
               _buildAccountCard(
                 icon: Icons.facebook,
@@ -255,22 +252,17 @@ class _AccountLinkingScreenState extends State<AccountLinkingScreen> {
         title: Text(title),
         subtitle: Text(
           isLinked ? 'Connected' : 'Not connected',
-          style: TextStyle(
-            color: isLinked ? Colors.green : Colors.grey,
-          ),
+          style: TextStyle(color: isLinked ? Colors.green : Colors.grey),
         ),
         trailing: isLinked
             ? const Icon(Icons.check_circle, color: Colors.green)
             : isLinking
-                ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : ElevatedButton(
-                    onPressed: onLink,
-                    child: const Text('Link'),
-                  ),
+            ? const SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : ElevatedButton(onPressed: onLink, child: const Text('Link')),
       ),
     );
   }

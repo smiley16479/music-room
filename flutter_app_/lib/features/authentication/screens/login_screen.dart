@@ -1,4 +1,5 @@
-import 'dart:io' show Platform;import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
@@ -55,8 +56,9 @@ class _LoginScreenState extends State<LoginScreen> {
       // Web: Use browser-based OAuth flow - redirect in same window
       try {
         final redirectUri = AppConfig.frontendUrl;
-        final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/google')
-            .replace(queryParameters: {'redirect_uri': redirectUri});
+        final url = Uri.parse(
+          '${AppConfig.oauthBaseUrl}/auth/google',
+        ).replace(queryParameters: {'redirect_uri': redirectUri});
         await launchUrl(url, webOnlyWindowName: '_self');
       } catch (e) {
         if (!mounted) return;
@@ -69,16 +71,17 @@ class _LoginScreenState extends State<LoginScreen> {
       try {
         // For Android: use Android client ID + server client ID for backend verification
         // For iOS: pass the iOS client ID
-        final GoogleSignIn googleSignIn = Platform.isAndroid 
-          ? GoogleSignIn(
-              clientId: AppConfig.googleAndroidClientId, // Android client ID
-              serverClientId: AppConfig.googleWebClientId, // Web client ID for server verification
-              scopes: ['email', 'profile'],
-            )
-          : GoogleSignIn(
-              clientId: AppConfig.googleClientId,
-              scopes: ['email', 'profile'],
-            );
+        final GoogleSignIn googleSignIn = Platform.isAndroid
+            ? GoogleSignIn(
+                clientId: AppConfig.googleAndroidClientId, // Android client ID
+                serverClientId: AppConfig
+                    .googleWebClientId, // Web client ID for server verification
+                scopes: ['email', 'profile'],
+              )
+            : GoogleSignIn(
+                clientId: AppConfig.googleClientId,
+                scopes: ['email', 'profile'],
+              );
         final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
         if (googleUser != null) {
@@ -102,9 +105,9 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google Sign In failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Google Sign In failed: $e')));
       }
     }
   }
@@ -114,8 +117,9 @@ class _LoginScreenState extends State<LoginScreen> {
       // Web: Use browser-based OAuth flow - redirect in same window
       try {
         final redirectUri = AppConfig.frontendUrl;
-        final url = Uri.parse('${AppConfig.oauthBaseUrl}/auth/facebook')
-            .replace(queryParameters: {'redirect_uri': redirectUri});
+        final url = Uri.parse(
+          '${AppConfig.oauthBaseUrl}/auth/facebook',
+        ).replace(queryParameters: {'redirect_uri': redirectUri});
         await launchUrl(url, webOnlyWindowName: '_self');
       } catch (e) {
         if (!mounted) return;
@@ -152,9 +156,9 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Facebook Sign In failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Facebook Sign In failed: $e')));
       }
     }
   }
@@ -227,8 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     return SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed:
-                            authProvider.isLoading ? null : _handleLogin,
+                        onPressed: authProvider.isLoading ? null : _handleLogin,
                         child: authProvider.isLoading
                             ? const SizedBox(
                                 height: 20,

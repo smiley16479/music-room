@@ -9,19 +9,13 @@ class EventService {
   EventService({required this.apiService});
 
   /// Get all events
-  Future<List<Event>> getEvents({
-    int page = 1,
-    int limit = 20,
-  }) async {
-    final params = {
-      'page': page.toString(),
-      'limit': limit.toString(),
-    };
+  Future<List<Event>> getEvents({int page = 1, int limit = 20}) async {
+    final params = {'page': page.toString(), 'limit': limit.toString()};
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
         .join('&');
-    
+
     final endpoint = '${AppConfig.eventsEndpoint}?$queryString';
     final response = await apiService.get(endpoint);
 
@@ -32,27 +26,29 @@ class EventService {
     } else if (response is List) {
       dataList = response;
     } else {
-      throw Exception('Invalid response format: expected List but got ${response.runtimeType}');
+      throw Exception(
+        'Invalid response format: expected List but got ${response.runtimeType}',
+      );
     }
-    
-    return dataList.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+
+    return dataList
+        .map((e) => Event.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Get my events
-  Future<List<Event>> getMyEvents({
-    int page = 1,
-    int limit = 20,
-  }) async {
+  Future<List<Event>> getMyEvents({int page = 1, int limit = 20}) async {
     final params = {
       'page': page.toString(),
       'limit': limit.toString(),
+      'scope': 'my', // Use unified endpoint with scope parameter
     };
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
         .join('&');
-    
-    final endpoint = '${AppConfig.eventsEndpoint}/my-events?$queryString';
+
+    final endpoint = '${AppConfig.eventsEndpoint}?$queryString';
     final response = await apiService.get(endpoint);
 
     // Handle both wrapped response (with 'data' field) and direct data response
@@ -62,16 +58,20 @@ class EventService {
     } else if (response is List) {
       dataList = response;
     } else {
-      throw Exception('Invalid response format: expected List but got ${response.runtimeType}');
+      throw Exception(
+        'Invalid response format: expected List but got ${response.runtimeType}',
+      );
     }
-    
-    return dataList.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+
+    return dataList
+        .map((e) => Event.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Get event by ID
   Future<Event> getEvent(String id) async {
     final response = await apiService.get('${AppConfig.eventsEndpoint}/$id');
-    
+
     print('Get event response: $response');
     print('Response type: ${response.runtimeType}');
 
@@ -82,9 +82,11 @@ class EventService {
     } else if (response is Map<String, dynamic>) {
       eventData = response;
     } else {
-      throw Exception('Invalid response format: expected Map but got ${response.runtimeType}');
+      throw Exception(
+        'Invalid response format: expected Map but got ${response.runtimeType}',
+      );
     }
-    
+
     try {
       return Event.fromJson(eventData);
     } catch (e) {
@@ -98,20 +100,25 @@ class EventService {
   Future<Event> createEvent({
     required String name,
     String? description,
-    required DateTime eventDate,
+    DateTime? eventDate,
     DateTime? eventEndDate,
     String? locationName,
     String? visibility,
+    String? type,
   }) async {
     final response = await apiService.post(
       AppConfig.eventsEndpoint,
       body: {
         'name': name,
-        if (description != null && description.isNotEmpty) 'description': description,
-        'eventDate': eventDate.toIso8601String(),
-        if (eventEndDate != null) 'eventEndDate': eventEndDate.toIso8601String(),
-        if (locationName != null && locationName.isNotEmpty) 'locationName': locationName,
+        if (description != null && description.isNotEmpty)
+          'description': description,
+        if (eventDate != null) 'eventDate': eventDate.toIso8601String(),
+        if (eventEndDate != null)
+          'eventEndDate': eventEndDate.toIso8601String(),
+        if (locationName != null && locationName.isNotEmpty)
+          'locationName': locationName,
         if (visibility != null) 'visibility': visibility,
+        if (type != null) 'type': type,
       },
     );
 
@@ -125,9 +132,11 @@ class EventService {
     } else if (response is Map<String, dynamic>) {
       eventData = response;
     } else {
-      throw Exception('Invalid response format: expected Map but got ${response.runtimeType}');
+      throw Exception(
+        'Invalid response format: expected Map but got ${response.runtimeType}',
+      );
     }
-    
+
     try {
       return Event.fromJson(eventData);
     } catch (e) {
@@ -161,7 +170,7 @@ class EventService {
     String? selectedPlaylistId,
   }) async {
     final body = <String, dynamic>{};
-    
+
     // Map 'title' to 'name' for backend compatibility
     if (name != null) body['name'] = name;
     if (title != null) body['name'] = title; // Support both title and name
@@ -181,7 +190,8 @@ class EventService {
     if (startDate != null) body['startDate'] = startDate.toIso8601String();
     if (endDate != null) body['endDate'] = endDate.toIso8601String();
     if (playlistName != null) body['playlistName'] = playlistName;
-    if (selectedPlaylistId != null) body['selectedPlaylistId'] = selectedPlaylistId;
+    if (selectedPlaylistId != null)
+      body['selectedPlaylistId'] = selectedPlaylistId;
 
     final response = await apiService.patch(
       '${AppConfig.eventsEndpoint}/$id',
@@ -195,9 +205,11 @@ class EventService {
     } else if (response is Map<String, dynamic>) {
       eventData = response;
     } else {
-      throw Exception('Invalid response format: expected Map but got ${response.runtimeType}');
+      throw Exception(
+        'Invalid response format: expected Map but got ${response.runtimeType}',
+      );
     }
-    
+
     return Event.fromJson(eventData);
   }
 
@@ -209,20 +221,15 @@ class EventService {
   // ========== PLAYLIST METHODS (Event de type LISTENING_SESSION) ==========
 
   /// Get all playlists (Events de type LISTENING_SESSION)
-  Future<List<Event>> getPlaylists({
-    int page = 1,
-    int limit = 20,
-  }) async {
-    final params = {
-      'page': page.toString(),
-      'limit': limit.toString(),
-    };
+  Future<List<Event>> getPlaylists({int page = 1, int limit = 20}) async {
+    final params = {'page': page.toString(), 'limit': limit.toString()};
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
         .join('&');
-    
-    final endpoint = '${AppConfig.eventsEndpoint}?$queryString&type=listening_session';
+
+    final endpoint =
+        '${AppConfig.eventsEndpoint}?$queryString&type=listening_session';
     final response = await apiService.get(endpoint);
 
     List<dynamic> dataList;
@@ -233,26 +240,26 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
-    return dataList.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+
+    return dataList
+        .map((e) => Event.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Get my playlists
-  Future<List<Event>> getMyPlaylists({
-    int page = 1,
-    int limit = 20,
-  }) async {
+  Future<List<Event>> getMyPlaylists({int page = 1, int limit = 20}) async {
     final params = {
       'page': page.toString(),
       'limit': limit.toString(),
+      'scope': 'my', // Use unified endpoint with scope parameter
       'type': 'listening_session', // Filter for playlists only (lowercase)
     };
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
         .join('&');
-    
-    final endpoint = '${AppConfig.eventsEndpoint}/my-events?$queryString';
+
+    final endpoint = '${AppConfig.eventsEndpoint}?$queryString';
     final response = await apiService.get(endpoint);
 
     List<dynamic> dataList;
@@ -263,36 +270,46 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
-    return dataList.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+
+    return dataList
+        .map((e) => Event.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Get recommended playlists
   Future<List<Event>> getRecommendedPlaylists({int limit = 20}) async {
-    final endpoint = '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=listening_session';
+    final endpoint =
+        '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=listening_session';
     final response = await apiService.get(endpoint);
-    
+
     if (response is List) {
-      return response.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+      return response
+          .map((e) => Event.fromJson(e as Map<String, dynamic>))
+          .toList();
     }
     return [];
   }
 
   /// Search playlists
   Future<List<Event>> searchPlaylists(String query, {int limit = 20}) async {
-    final endpoint = '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=listening_session';
+    final endpoint =
+        '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=listening_session';
     final response = await apiService.get(endpoint);
-    
+
     if (response is List) {
-      return response.map((e) => Event.fromJson(e as Map<String, dynamic>)).toList();
+      return response
+          .map((e) => Event.fromJson(e as Map<String, dynamic>))
+          .toList();
     }
     return [];
   }
 
   /// Get playlist by ID
   Future<Event> getPlaylist(String playlistId) async {
-    final response = await apiService.get('${AppConfig.eventsEndpoint}/$playlistId');
-    
+    final response = await apiService.get(
+      '${AppConfig.eventsEndpoint}/$playlistId',
+    );
+
     Map<String, dynamic> eventData;
     if (response is Map<String, dynamic> && response.containsKey('data')) {
       eventData = response['data'] as Map<String, dynamic>;
@@ -301,7 +318,7 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return Event.fromJson(eventData);
   }
 
@@ -329,7 +346,7 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return Event.fromJson(eventData);
   }
 
@@ -357,7 +374,7 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return Event.fromJson(eventData);
   }
 
@@ -368,8 +385,10 @@ class EventService {
 
   /// Get playlist tracks
   Future<List<PlaylistTrack>> getPlaylistTracks(String playlistId) async {
-    final response = await apiService.get('${AppConfig.eventsEndpoint}/$playlistId/tracks');
-    
+    final response = await apiService.get(
+      '${AppConfig.eventsEndpoint}/$playlistId/tracks',
+    );
+
     List<dynamic> dataList;
     if (response is Map<String, dynamic> && response.containsKey('data')) {
       dataList = response['data'] as List;
@@ -378,8 +397,10 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
-    return dataList.map((e) => PlaylistTrack.fromJson(e as Map<String, dynamic>)).toList();
+
+    return dataList
+        .map((e) => PlaylistTrack.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Add track to playlist
@@ -414,13 +435,18 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return PlaylistTrack.fromJson(trackData);
   }
 
   /// Remove track from playlist
-  Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
-    await apiService.delete('${AppConfig.eventsEndpoint}/$playlistId/tracks/$trackId');
+  Future<void> removeTrackFromPlaylist(
+    String playlistId,
+    String trackId,
+  ) async {
+    await apiService.delete(
+      '${AppConfig.eventsEndpoint}/$playlistId/tracks/$trackId',
+    );
   }
 
   /// Invite users to an event (creates invitations for private events)

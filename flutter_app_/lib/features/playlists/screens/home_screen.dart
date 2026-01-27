@@ -20,16 +20,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    print('🔵 HomeScreen.initState() - calling _loadPlaylists()');
-    _loadPlaylists();
+    print('🔵 HomeScreen.initState() - calling _loadAllEvents()');
+    _loadAllEvents();
   }
 
-  Future<void> _loadPlaylists() async {
-    print('🟡 _loadPlaylists() called');
-    final playlistProvider = context.read<PlaylistProvider>();
-    print('🟡 PlaylistProvider obtained');
-    await playlistProvider.loadMyPlaylists();
-    print('🟡 loadMyPlaylists() completed');
+  Future<void> _loadAllEvents() async {
+    print('🟡 _loadAllEvents() called');
+    final eventProvider = context.read<EventProvider>();
+    print('🟡 EventProvider obtained');
+    await eventProvider.loadMyEvents();
+    print(
+      '🟡 loadMyEvents() completed - Total: ${eventProvider.myEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
+    );
   }
 
   @override
@@ -62,14 +64,8 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.music_note),
             label: 'Playlists',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.event),
-            label: 'Events',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.event), label: 'Events'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
     );
@@ -91,13 +87,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildPlaylistsContent() {
     return Stack(
       children: [
-        Consumer<PlaylistProvider>(
-          builder: (context, playlistProvider, _) {
-            if (playlistProvider.isLoading) {
+        Consumer<EventProvider>(
+          builder: (context, eventProvider, _) {
+            if (eventProvider.isLoading) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            if (playlistProvider.myPlaylists.isEmpty) {
+            // Filter only LISTENING_SESSION type events (playlists)
+            final playlists = eventProvider.myPlaylists;
+
+            if (playlists.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -116,9 +115,9 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             return ListView.builder(
-              itemCount: playlistProvider.myPlaylists.length,
+              itemCount: playlists.length,
               itemBuilder: (context, index) {
-                final playlist = playlistProvider.myPlaylists[index];
+                final playlist = playlists[index];
                 return ListTile(
                   title: Text(playlist.name),
                   subtitle: Text(
@@ -129,9 +128,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => PlaylistDetailsScreen(
-                          playlistId: playlist.id,
-                        ),
+                        builder: (context) =>
+                            PlaylistDetailsScreen(playlistId: playlist.id),
                       ),
                     );
                   },
@@ -177,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showCreatePlaylistDialog() {
     final nameController = TextEditingController();
     bool isPublic = true;
-    
+
     showDialog(
       context: context,
       builder: (context) {
@@ -226,22 +224,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 ElevatedButton(
                   onPressed: () async {
                     if (nameController.text.isNotEmpty) {
-                      final playlistProvider = context.read<PlaylistProvider>();
-                      final success = await playlistProvider.createPlaylist(
+                      final eventProvider = context.read<EventProvider>();
+                      final success = await eventProvider.createEvent(
                         name: nameController.text,
-                        isPublic: isPublic,
+                        visibility: isPublic ? 'public' : 'private',
+                        type: 'listening_session', // Create as playlist
                       );
                       if (mounted) {
                         Navigator.pop(context);
                         if (success) {
-                          // Refresh the playlist list to show the new playlist
-                          await playlistProvider.loadMyPlaylists();
+                          // Refresh all events to show the new playlist
+                          await eventProvider.loadMyEvents();
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Playlist created successfully!')),
+                            const SnackBar(
+                              content: Text('Playlist created successfully!'),
+                            ),
                           );
                         } else {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: ${playlistProvider.error}')),
+                            SnackBar(
+                              content: Text('Error: ${eventProvider.error}'),
+                            ),
                           );
                         }
                       }
@@ -306,7 +309,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           context: context,
                           initialDate: selectedDate,
                           firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                          lastDate: DateTime.now().add(
+                            const Duration(days: 365),
+                          ),
                         );
                         if (picked != null) {
                           setState(() {

@@ -111,10 +111,19 @@ export class EventService {
       }
     }
 
+    console.log('Creating event with DTO:', createEventDto);
+    
     const event = this.eventRepository.create({
       ...createEventDto,
       creatorId,
       status: EventStatus.UPCOMING,
+    });
+    
+    console.log('Event object before save:', {
+      name: event.name,
+      type: event.type,
+      visibility: event.visibility,
+      creatorId: event.creatorId,
     });
  
     let savedEvent: Event;
@@ -152,6 +161,8 @@ export class EventService {
         savedEvent = await this.eventRepository.save(event);
     }
 
+    console.log('Event saved with ID:', savedEvent.id, 'Type:', savedEvent.type);
+    
     this.eventGateway.notifyEventCreated(savedEvent, creator);
 
     return this.findById(savedEvent.id, creatorId);
@@ -163,7 +174,6 @@ export class EventService {
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
-      .leftJoinAndSelect('event.admins', 'admins')
       .leftJoinAndSelect('event.currentTrack', 'currentTrack');
 
     if (userId) {
@@ -223,6 +233,7 @@ export class EventService {
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('event.creator', 'creator')
       .where(
         '(event.creatorId = :userId OR participants.userId = :userId)',
         { userId }
@@ -240,7 +251,8 @@ export class EventService {
 
     const [events, total] = await queryBuilder.getManyAndCount();
 
-    console.log('Found my events:', events.length);
+    console.log(`Found my events for user ${userId}:`, events.length);
+    console.log('Events types:', events.map(e => ({ id: e.id, name: e.name, type: e.type })));
 
     const eventsWithStats = await Promise.all(
       events.map(event => this.addEventStats(event, userId)),

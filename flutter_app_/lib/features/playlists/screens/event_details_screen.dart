@@ -4,15 +4,13 @@ import 'package:provider/provider.dart';
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../widgets/invite_friends_dialog.dart';
+import 'playlist_details_screen.dart';
 
 /// Event Details screen with full edit capabilities
 class EventDetailsScreen extends StatefulWidget {
   final String eventId;
 
-  const EventDetailsScreen({
-    super.key,
-    required this.eventId,
-  });
+  const EventDetailsScreen({super.key, required this.eventId});
 
   @override
   State<EventDetailsScreen> createState() => _EventDetailsScreenState();
@@ -20,7 +18,7 @@ class EventDetailsScreen extends StatefulWidget {
 
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   bool _isEditMode = false;
-  
+
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
@@ -51,7 +49,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _descriptionController = TextEditingController();
     _locationNameController = TextEditingController();
     _playlistNameController = TextEditingController();
-    
+
     _selectedType = null;
     _selectedVisibility = null;
     _selectedLicenseType = null;
@@ -78,12 +76,21 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     await eventProvider.loadEventDetails(widget.eventId);
   }
 
+  void _navigateToPlaylist(BuildContext context, String eventId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PlaylistDetailsScreen(playlistId: eventId),
+      ),
+    );
+  }
+
   void _toggleEditMode(Event event) {
     _nameController.text = event.name;
     _descriptionController.text = event.description ?? '';
     _locationNameController.text = event.locationName ?? '';
     _playlistNameController.text = event.playlistName ?? '';
-    
+
     setState(() {
       _selectedType = event.type;
       _selectedVisibility = event.visibility;
@@ -92,7 +99,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       _selectedEventDate = event.eventDate;
       _selectedStartDate = event.startDate;
       _selectedEndDate = event.endDate;
-      _selectedVotingStartTime = event.votingStartTime != null 
+      _selectedVotingStartTime = event.votingStartTime != null
           ? _parseTimeString(event.votingStartTime!)
           : null;
       _selectedVotingEndTime = event.votingEndTime != null
@@ -153,8 +160,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       visibility: _enumToJsonValue(_selectedVisibility),
       licenseType: _enumToJsonValue(_selectedLicenseType),
       votingEnabled: _votingEnabled,
-      locationName: _locationNameController.text.isNotEmpty ? _locationNameController.text : null,
-      playlistName: _playlistNameController.text.isNotEmpty ? _playlistNameController.text : null,
+      locationName: _locationNameController.text.isNotEmpty
+          ? _locationNameController.text
+          : null,
+      playlistName: _playlistNameController.text.isNotEmpty
+          ? _playlistNameController.text
+          : null,
       votingStartTime: _formatTimeToString(_selectedVotingStartTime),
       votingEndTime: _formatTimeToString(_selectedVotingEndTime),
       eventDate: _selectedEventDate,
@@ -236,18 +247,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
         final isAdmin = currentUser?.id == event.creatorId;
 
         return Scaffold(
-          appBar: AppBar(
-            title: Text(event.name),
-            elevation: 0,
-            actions: [
-              if (isAdmin)
-                IconButton(
-                  icon: Icon(_isEditMode ? Icons.close : Icons.edit),
-                  onPressed: () => _toggleEditMode(event),
-                  tooltip: _isEditMode ? 'Cancel' : 'Edit Event',
-                ),
-            ],
-          ),
+          appBar: AppBar(title: Text(event.name), elevation: 0),
           body: _isEditMode
               ? _buildEditForm(eventProvider, event)
               : _buildViewMode(context, event, isAdmin, eventProvider),
@@ -262,12 +262,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Edit Event',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('Edit Event', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 24),
-          
+
           // Basic Info
           _buildSectionTitle('Basic Information'),
           TextField(
@@ -289,7 +286,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 24),
-          
+
           // Event Type & Settings
           _buildSectionTitle('Event Type & Settings'),
           DropdownButton<EventType>(
@@ -307,7 +304,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             }).toList(),
           ),
           const SizedBox(height: 12),
-          
+
           DropdownButton<EventVisibility>(
             isExpanded: true,
             value: _selectedVisibility,
@@ -323,7 +320,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             }).toList(),
           ),
           const SizedBox(height: 12),
-          
+
           DropdownButton<EventLicenseType>(
             isExpanded: true,
             value: _selectedLicenseType,
@@ -339,7 +336,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             }).toList(),
           ),
           const SizedBox(height: 12),
-          
+
           CheckboxListTile(
             title: const Text('Voting Enabled'),
             value: _votingEnabled,
@@ -348,7 +345,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             },
           ),
           const SizedBox(height: 24),
-          
+
           // Dates & Times
           _buildSectionTitle('Dates & Times'),
           _buildDateField(
@@ -369,7 +366,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             (DateTime? date) => setState(() => _selectedEndDate = date),
           ),
           const SizedBox(height: 12),
-          
+
           _buildTimeField(
             'Voting Start Time',
             _selectedVotingStartTime,
@@ -386,7 +383,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             endDate: _selectedEndDate,
           ),
           const SizedBox(height: 24),
-          
+
           // Location Info
           _buildSectionTitle('Location Information'),
           TextField(
@@ -398,7 +395,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          
+
           // Playlist Info
           _buildSectionTitle('Playlist Information'),
           TextField(
@@ -410,7 +407,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          
+
           // Playlist selector - show existing playlists
           Consumer<EventProvider>(
             builder: (context, eventProvider, _) {
@@ -418,7 +415,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               return DropdownButton<String>(
                 isExpanded: true,
                 value: _selectedPlaylistId,
-                hint: const Text('Copy tracks from existing playlist (optional)'),
+                hint: const Text(
+                  'Copy tracks from existing playlist (optional)',
+                ),
                 onChanged: (String? newValue) {
                   setState(() => _selectedPlaylistId = newValue);
                 },
@@ -432,7 +431,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             },
           ),
           const SizedBox(height: 24),
-          
+
           // Action Buttons
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -441,7 +440,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                 icon: const Icon(Icons.close),
                 label: const Text('Cancel'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                 ),
                 onPressed: () => _toggleEditMode(event),
               ),
@@ -449,7 +451,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                 icon: const Icon(Icons.save),
                 label: const Text('Save Changes'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   backgroundColor: Colors.green,
                 ),
                 onPressed: () => _saveEvent(eventProvider),
@@ -466,9 +471,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       padding: const EdgeInsets.only(bottom: 12),
       child: Text(
         title,
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-          fontWeight: FontWeight.bold,
-        ),
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -519,9 +524,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   Widget _buildTimeField(
     String label,
     DateTime? selectedDateTime,
-    Function(DateTime?) onTimeSelected,
-    {DateTime? startDate, DateTime? endDate}
-  ) {
+    Function(DateTime?) onTimeSelected, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) {
     return ElevatedButton(
       onPressed: () async {
         final TimeOfDay? pickedTime = await showTimePicker(
@@ -539,26 +545,30 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             pickedTime.hour,
             pickedTime.minute,
           );
-          
+
           // Validation: votingStartTime and votingEndTime must be during event
           if (startDate != null || endDate != null) {
             final start = startDate ?? _selectedStartDate;
             final end = endDate ?? _selectedEndDate;
-            
+
             if (start != null && newDateTime.isBefore(start)) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Voting time must be after event start')),
+                const SnackBar(
+                  content: Text('Voting time must be after event start'),
+                ),
               );
               return;
             }
             if (end != null && newDateTime.isAfter(end)) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Voting time must be before event end')),
+                const SnackBar(
+                  content: Text('Voting time must be before event end'),
+                ),
               );
               return;
             }
           }
-          
+
           onTimeSelected(newDateTime);
         }
       },
@@ -588,10 +598,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  Colors.blue.shade700,
-                  Colors.blue.shade400,
-                ],
+                colors: [Colors.blue.shade700, Colors.blue.shade400],
               ),
             ),
             child: Column(
@@ -604,11 +611,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     color: Colors.white.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.event,
-                    size: 60,
-                    color: Colors.white,
-                  ),
+                  child: const Icon(Icons.event, size: 60, color: Colors.white),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -625,6 +628,40 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     backgroundColor: Colors.amber,
                     labelStyle: const TextStyle(color: Colors.black),
                   ),
+                const SizedBox(height: 16),
+                // Action Buttons
+                Row(
+                  children: [
+                    if (isAdmin)
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => _toggleEditMode(event),
+                          icon: const Icon(Icons.edit),
+                          label: const Text('Edit Event'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.blue.shade700,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    if (isAdmin && !event.isPlaylist) const SizedBox(width: 12),
+                    if (!event.isPlaylist)
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () =>
+                              _navigateToPlaylist(context, event.id),
+                          icon: const Icon(Icons.queue_music),
+                          label: const Text('View Playlist'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.blue.shade700,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -634,45 +671,73 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (event.description != null && event.description!.isNotEmpty) ...[
+                if (event.description != null &&
+                    event.description!.isNotEmpty) ...[
                   _buildDetailSection('Description', event.description!),
                   const SizedBox(height: 24),
                 ],
-                
+
                 _buildDetailSection('Type', _getEnumLabel(event.type)),
-                _buildDetailSection('Visibility', _getEnumLabel(event.visibility)),
+                _buildDetailSection(
+                  'Visibility',
+                  _getEnumLabel(event.visibility),
+                ),
                 if (event.licenseType != null)
-                  _buildDetailSection('License Type', _getEnumLabel(event.licenseType!)),
-                _buildDetailSection('Voting Enabled', (event.votingEnabled ?? true) ? 'Yes' : 'No'),
-                
+                  _buildDetailSection(
+                    'License Type',
+                    _getEnumLabel(event.licenseType!),
+                  ),
+                _buildDetailSection(
+                  'Voting Enabled',
+                  (event.votingEnabled ?? true) ? 'Yes' : 'No',
+                ),
+
                 if (event.eventDate != null)
-                  _buildDetailSection('Event Date', event.eventDate.toString().split('.')[0]),
+                  _buildDetailSection(
+                    'Event Date',
+                    event.eventDate.toString().split('.')[0],
+                  ),
                 if (event.startDate != null)
-                  _buildDetailSection('Start Date', event.startDate.toString().split('.')[0]),
+                  _buildDetailSection(
+                    'Start Date',
+                    event.startDate.toString().split('.')[0],
+                  ),
                 if (event.endDate != null)
-                  _buildDetailSection('End Date', event.endDate.toString().split('.')[0]),
-                
-                if (event.locationName != null && event.locationName!.isNotEmpty)
+                  _buildDetailSection(
+                    'End Date',
+                    event.endDate.toString().split('.')[0],
+                  ),
+
+                if (event.locationName != null &&
+                    event.locationName!.isNotEmpty)
                   _buildDetailSection('Location', event.locationName!),
-                
+
                 if (event.votingStartTime != null)
-                  _buildDetailSection('Voting Start Time', event.votingStartTime!),
+                  _buildDetailSection(
+                    'Voting Start Time',
+                    event.votingStartTime!,
+                  ),
                 if (event.votingEndTime != null)
                   _buildDetailSection('Voting End Time', event.votingEndTime!),
-                
-                if (event.playlistName != null && event.playlistName!.isNotEmpty)
+
+                if (event.playlistName != null &&
+                    event.playlistName!.isNotEmpty)
                   _buildDetailSection('Playlist Name', event.playlistName!),
-                
+
                 if (event.trackCount != null && event.trackCount! > 0)
-                  _buildDetailSection('Track Count', event.trackCount.toString()),
-                
+                  _buildDetailSection(
+                    'Track Count',
+                    event.trackCount.toString(),
+                  ),
+
                 const SizedBox(height: 24),
                 Text(
                   'Participants (${event.participants?.length ?? 0})',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 12),
-                if (event.participants != null && event.participants!.isNotEmpty)
+                if (event.participants != null &&
+                    event.participants!.isNotEmpty)
                   ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -680,21 +745,25 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     itemBuilder: (context, index) {
                       final participant = event.participants![index];
                       final name = participant.displayName ?? 'Unknown User';
-                      final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                      final initial = name.isNotEmpty
+                          ? name[0].toUpperCase()
+                          : '?';
                       return ListTile(
                         leading: CircleAvatar(child: Text(initial)),
                         title: Text(name),
-                        subtitle: Text(participant.email ?? 'No email'),
+                        subtitle: Text(
+                          participant.email ?? 'No email',
+                        ), // ⚠️ Attention
                       );
                     },
                   )
                 else
                   const Text('No participants yet'),
-                
+
                 const SizedBox(height: 24),
-                
+
                 // Invite Friends Button - only visible for private/friends_only events if user is owner/collaborator
-                if (isAdmin && 
+                if (isAdmin &&
                     (event.visibility == EventVisibility.private)) ...[
                   SizedBox(
                     width: double.infinity,
@@ -709,15 +778,15 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                   ),
                   const SizedBox(height: 24),
                 ],
-                
+
                 if (isAdmin) ...[
                   const Divider(),
                   const SizedBox(height: 16),
                   Text(
                     'Admin Actions',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.red,
-                    ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: Colors.red),
                   ),
                   const SizedBox(height: 16),
                   SizedBox(
@@ -749,16 +818,16 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
         children: [
           Text(
             label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.grey,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: Colors.grey),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -770,7 +839,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Event'),
-        content: const Text('Are you sure you want to delete this event? This action cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this event? This action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),

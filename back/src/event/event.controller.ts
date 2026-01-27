@@ -11,6 +11,8 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 
 import { EventService } from './event.service';
@@ -59,113 +61,87 @@ export class EventController {
   @Get()
   @Public()
   @ApiOperation({
-    summary: 'Get all events',
-    description: 'Returns a paginated list of all accessible events. Location-based events are filtered by user location.',
+    summary: 'Get events',
+    description: `Unified endpoint to retrieve events with flexible filtering options.
+    
+    Scope options:
+    - all: Public events accessible to everyone (default)
+    - my: Events created by or participated in by the current user (requires auth)
+    - nearby: Events within a specified radius of a location
+    
+    Filters:
+    - type: Filter by event type (listening_session, party, collaborative, live_session)
+    - latitude/longitude/radius: For nearby events
+    - Pagination: page, limit`,
   })
   @ApiQuery({ type: PaginationDto })
   @ApiQuery({
+    name: 'scope',
+    type: String,
+    description: 'Scope of events to retrieve: "all" (default), "my", or "nearby"',
+    required: false,
+    enum: ['all', 'my', 'nearby'],
+  })
+  @ApiQuery({
+    name: 'type',
+    type: String,
+    description: 'Filter by event type (listening_session, party, collaborative, live_session)',
+    required: false,
+  })
+  @ApiQuery({
     name: 'latitude',
     type: Number,
-    description: 'User latitude for location-based event filtering',
+    description: 'User latitude (required for scope=nearby, optional for location filtering)',
     required: false,
   })
   @ApiQuery({
     name: 'longitude',
     type: Number,
-    description: 'User longitude for location-based event filtering',
+    description: 'User longitude (required for scope=nearby, optional for location filtering)',
     required: false,
   })
   @ApiQuery({
-    name: 'type',
-    type: String,
-    description: 'Filter by event type (e.g., LISTENING_SESSION)',
+    name: 'radius',
+    type: Number,
+    description: 'Radius in kilometers for nearby events (default: 10)',
     required: false,
   })
   async findAll(
     @Query() paginationDto: PaginationDto,
+    @Query('scope') scope: string = 'all',
+    @Query('type') type?: string,
     @Query('latitude') latitude?: string,
     @Query('longitude') longitude?: string,
-    @Query('type') type?: string,
-    @CurrentUser() user?: User
+    @Query('radius') radius?: string,
+    @CurrentUser() user?: User,
   ) {
-    let userLocation: LocationDto | undefined;
-    
-    if (latitude && longitude) {
-      const lat = parseFloat(latitude);
-      const lng = parseFloat(longitude);
-      
-      if (!isNaN(lat) && !isNaN(lng)) {
-        userLocation = { latitude: lat, longitude: lng };
+    const lat = latitude ? parseFloat(latitude) : undefined;
+    const lng = longitude ? parseFloat(longitude) : undefined;
+    const radiusKm = radius ? parseInt(radius, 10) : 10;
+
+    // Validate location data for nearby scope
+    if (scope === 'nearby') {
+      if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+        throw new BadRequestException('Latitude and longitude are required for nearby events');
       }
+      const locationDto: LocationDto = { latitude: lat, longitude: lng };
+      return this.eventService.findNearbyEvents(locationDto, radiusKm, user?.id);
     }
-    
+
+    // My events scope
+    if (scope === 'my') {
+      if (!user) {
+        throw new ForbiddenException('Authentication required for my events');
+      }
+      return this.eventService.findMyEvents(paginationDto, user.id, type);
+    }
+
+    // All events scope (default)
+    const userLocation = (lat && lng && !isNaN(lat) && !isNaN(lng))
+      ? { latitude: lat, longitude: lng }
+      : undefined;
+
     return this.eventService.findAll(paginationDto, user?.id, userLocation, type);
-  }
-
-  @Get('nearby')
-  @Public()
-  @ApiOperation({
-    summary: 'Find nearby events',
-    description: 'Returns events within a specified radius of a location',
-  })
-  @ApiQuery({ type: LocationDto })
-  @ApiQuery({ 
-    name: 'radius', 
-    type: String, 
-    description: 'Radius in kilometers to search for events',
-    required: false,
-    example: '10'
-  })
-  async findNearby(
-    @Query() locationDto: LocationDto,
-    @Query('radius') radius: string = '10',
-    @CurrentUser() user?: User,
-  ) {
-    const radiusKm = parseInt(radius, 10);
-    return this.eventService.findNearbyEvents(locationDto, radiusKm, user?.id);
-  }
-
-  @Get('my-event')
-  @ApiOperation({
-    summary: 'Get user events',
-    description: 'Returns events created by or participated in by the current user',
-  })
-  @ApiQuery({ type: PaginationDto })
-  async getMyEvent(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
-    const { page, limit, skip } = paginationDto;
-
-    console.log('Getting my event for user:', user?.id);
-
-    // Récupère les events avec les admins
-    const events = await this.eventService.getEventsUserCanInviteWithAdmins(user.id);
-    
-    return {
-      success: true,
-      message: 'User event retrieved successfully',
-      timestamp: new Date().toISOString(),
-      data: events
-    };
-  }
-
-  @Get('my-events')
-  @ApiOperation({
-    summary: 'Get user events with filtering',
-    description: 'Returns events created by or participated in by the current user with optional type filtering',
-  })
-  @ApiQuery({ type: PaginationDto })
-  @ApiQuery({
-    name: 'type',
-    type: String,
-    description: 'Filter by event type (e.g., LISTENING_SESSION)',
-    required: false,
-  })
-  async getMyEvents(
-    @Query() paginationDto: PaginationDto,
-    @Query('type') type?: string,
-    @CurrentUser() user?: User,
-  ) {
-    console.log('Getting my events for user:', user?.id, 'with type filter:', type);
-    return this.eventService.findMyEvents(paginationDto, user?.id, type);
   }
 
   @Get(':id')
