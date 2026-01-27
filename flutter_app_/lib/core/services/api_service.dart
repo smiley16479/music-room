@@ -140,27 +140,38 @@ class ApiService {
   /// Handle HTTP response
   dynamic _handleResponse(http.Response response) {
     logger.d('Response status: ${response.statusCode}');
+    logger.d('Response headers: ${response.headers}');
     logger.d('Response body: ${response.body}');
 
     dynamic body;
-    try {
-      if (response.body.isEmpty || response.body == 'null' || response.body.trim() == 'null') {
-        body = null;
-      } else {
-        body = jsonDecode(response.body);
-      }
-      logger.d('Decoded body type: ${body.runtimeType}');
-    } catch (e) {
-      logger.e('JSON decode error: $e');
-      // If decoding fails and it's a success status, return null (e.g., for logout)
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        logger.w('Successful response with invalid JSON, treating as null');
-        body = null;
-      } else {
-        // For error responses, treat the body as a plain error message
-        body = {'error': response.body, 'message': response.body};
+    
+    // Handle empty or null responses
+    final trimmedBody = response.body.trim();
+    if (trimmedBody.isEmpty) {
+      body = null;
+    } else if (trimmedBody == 'null' || trimmedBody == '"null"') {
+      // Handle literal null or quoted null
+      body = null;
+    } else {
+      // Try to parse JSON
+      try {
+        body = jsonDecode(trimmedBody);
+      } catch (e) {
+        logger.e('JSON decode error for body: $trimmedBody');
+        logger.e('Error: $e');
+        
+        // If it's a success response with invalid JSON, treat as null
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          logger.w('Successful response with invalid JSON, treating as null');
+          body = null;
+        } else {
+          // For error responses, wrap the body as an error message
+          body = {'error': 'Invalid JSON', 'message': trimmedBody};
+        }
       }
     }
+    
+    logger.d('Decoded body type: ${body.runtimeType}');
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return body;

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
+import '../widgets/invite_friends_dialog.dart';
 
 /// Event Details screen with full edit capabilities
 class EventDetailsScreen extends StatefulWidget {
@@ -691,6 +692,24 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                   const Text('No participants yet'),
                 
                 const SizedBox(height: 24),
+                
+                // Invite Friends Button - only visible for private/friends_only events if user is owner/collaborator
+                if (isAdmin && 
+                    (event.visibility == EventVisibility.private)) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.person_add),
+                      label: const Text('Invite Friends'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => _showInviteFriendsDialog(context, event),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+                
                 if (isAdmin) ...[
                   const Divider(),
                   const SizedBox(height: 16),
@@ -777,6 +796,17 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showInviteFriendsDialog(BuildContext context, Event event) {
+    showDialog(
+      context: context,
+      builder: (context) => InviteFriendsDialog(
+        eventId: event.id,
+        eventName: event.name,
+        isPlaylist: event.isPlaylist,
       ),
     );
   }

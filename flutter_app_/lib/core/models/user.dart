@@ -7,7 +7,7 @@ part 'user.g.dart';
 @JsonSerializable()
 class User extends Equatable {
   final String id;
-  final String email;
+  final String? email;
   final String? displayName;
   final String? avatarUrl;
   final String? bio;
@@ -25,11 +25,11 @@ class User extends Equatable {
   final String? musicPreferenceVisibility;
   final DateTime? lastSeen;
   final DateTime createdAt;
-  final DateTime updatedAt;
+  final DateTime? updatedAt;
 
   const User({
     required this.id,
-    required this.email,
+    this.email,
     this.displayName,
     this.avatarUrl,
     this.bio,
@@ -46,7 +46,7 @@ class User extends Equatable {
     this.musicPreferenceVisibility,
     this.lastSeen,
     required this.createdAt,
-    required this.updatedAt,
+    this.updatedAt,
   });
 
   factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);

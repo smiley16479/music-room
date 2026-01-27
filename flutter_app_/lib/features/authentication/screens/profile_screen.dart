@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
 import 'account_linking_screen.dart';
+import 'friends_screen.dart';
 
 /// Profile screen - user profile and settings
 class ProfileScreen extends StatefulWidget {
@@ -117,7 +118,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 16),
                     // User Name
                     Text(
-                      user.displayName ?? user.email,
+                      user.displayName ?? user.email ?? 'Unknown',
                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                             color: Colors.white,
                           ),
@@ -125,12 +126,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 8),
                     // Email
-                    Text(
-                      user.email,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.white70,
-                          ),
-                    ),
+                    if (user.email != null)
+                      Text(
+                        user.email!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.white70,
+                            ),
+                      ),
                   ],
                 ),
               ),
@@ -198,6 +200,83 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       onPressed: _showEditProfileDialog,
                       icon: const Icon(Icons.edit),
                       label: const Text('Edit Profile'),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Friends Section
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Friends',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const FriendsScreen(),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.link),
+                          label: const Text('Manage'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Consumer<FriendProvider>(
+                      builder: (context, friendProvider, _) {
+                        final receivedCount = friendProvider.pendingReceivedInvitations.length;
+                        final sentCount = friendProvider.pendingSentInvitations.length;
+                        
+                        if (receivedCount == 0 && sentCount == 0) {
+                          return const SizedBox.shrink();
+                        }
+                        
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.blue.withOpacity(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.notifications_active,
+                                color: Colors.blue,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  receivedCount > 0 && sentCount > 0
+                                      ? '$receivedCount pending request${receivedCount > 1 ? 's' : ''} received • $sentCount sent'
+                                      : receivedCount > 0
+                                          ? '$receivedCount pending request${receivedCount > 1 ? 's' : ''} received'
+                                          : '$sentCount pending request${sentCount > 1 ? 's' : ''} sent',
+                                  style: TextStyle(
+                                    color: Colors.blue.shade700,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

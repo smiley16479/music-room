@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
 import '../../../core/models/track_search_result.dart';
+import '../../../core/models/event.dart';
 import '../widgets/music_search_dialog.dart';
+import '../widgets/invite_friends_dialog.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -314,6 +316,37 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     ],
                   ),
                 ),
+                
+                // Invite Friends Button - only visible for private playlists if user is owner
+                const SizedBox(height: 24),
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, _) {
+                    final currentUser = authProvider.currentUser;
+                    final isOwner = currentUser?.id == playlist.creatorId;
+                    final isPrivate = playlist.visibility == EventVisibility.private;
+                    
+                    if (isOwner && isPrivate) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.person_add),
+                            label: const Text('Invite Friends'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              backgroundColor: Colors.purple,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => _showInviteFriendsDialog(context, playlist),
+                          ),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                const SizedBox(height: 24),
               ],
             ),
           );
@@ -510,5 +543,16 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         }
       }
     }
+  }
+
+  void _showInviteFriendsDialog(BuildContext context, dynamic playlist) {
+    showDialog(
+      context: context,
+      builder: (context) => InviteFriendsDialog(
+        eventId: playlist.id,
+        eventName: playlist.name,
+        isPlaylist: true,
+      ),
+    );
   }
 }

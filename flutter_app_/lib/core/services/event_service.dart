@@ -422,4 +422,41 @@ class EventService {
   Future<void> removeTrackFromPlaylist(String playlistId, String trackId) async {
     await apiService.delete('${AppConfig.eventsEndpoint}/$playlistId/tracks/$trackId');
   }
+
+  /// Add participant to event (allows owner/collaborator to invite friends)
+  Future<Event> addParticipant(String eventId, String userId) async {
+    final response = await apiService.post(
+      '${AppConfig.eventsEndpoint}/$eventId/participant/$userId',
+      body: {},
+    );
+
+    Map<String, dynamic> eventData;
+    if (response is Map<String, dynamic> && response.containsKey('data')) {
+      eventData = response['data'] as Map<String, dynamic>;
+    } else if (response is Map<String, dynamic>) {
+      eventData = response;
+    } else {
+      throw Exception('Invalid response format');
+    }
+    
+    return Event.fromJson(eventData);
+  }
+
+  /// Remove participant from event
+  Future<Event> removeParticipant(String eventId, String userId) async {
+    final response = await apiService.delete(
+      '${AppConfig.eventsEndpoint}/$eventId/participant/$userId',
+    );
+
+    Map<String, dynamic> eventData;
+    if (response is Map<String, dynamic> && response.containsKey('data')) {
+      eventData = response['data'] as Map<String, dynamic>;
+    } else if (response is Map<String, dynamic>) {
+      eventData = response;
+    } else {
+      throw Exception('Invalid response format');
+    }
+    
+    return Event.fromJson(eventData);
+  }
 }

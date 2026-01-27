@@ -428,6 +428,66 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
+  /// Add participant to event/playlist
+  Future<bool> addParticipant(String eventId, String userId) async {
+    try {
+      final updatedEvent = await eventService.addParticipant(eventId, userId);
+      
+      // Update current event if it's the same one
+      if (_currentEvent?.id == eventId) {
+        _currentEvent = updatedEvent;
+      }
+      
+      // Update in the lists
+      final index = _events.indexWhere((e) => e.id == eventId);
+      if (index != -1) {
+        _events[index] = updatedEvent;
+      }
+      
+      final myIndex = _myEvents.indexWhere((e) => e.id == eventId);
+      if (myIndex != -1) {
+        _myEvents[myIndex] = updatedEvent;
+      }
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Remove participant from event/playlist
+  Future<bool> removeParticipant(String eventId, String userId) async {
+    try {
+      final updatedEvent = await eventService.removeParticipant(eventId, userId);
+      
+      // Update current event if it's the same one
+      if (_currentEvent?.id == eventId) {
+        _currentEvent = updatedEvent;
+      }
+      
+      // Update in the lists
+      final index = _events.indexWhere((e) => e.id == eventId);
+      if (index != -1) {
+        _events[index] = updatedEvent;
+      }
+      
+      final myIndex = _myEvents.indexWhere((e) => e.id == eventId);
+      if (myIndex != -1) {
+        _myEvents[myIndex] = updatedEvent;
+      }
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Clear error
   void clearError() {
     _error = null;
