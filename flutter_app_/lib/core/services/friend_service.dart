@@ -90,18 +90,39 @@ class FriendService {
     return Invitation.fromJson(data);
   }
 
-  /// Get received friend invitations
+  /// Get received invitations (friend and event invitations)
   Future<List<Invitation>> getReceivedInvitations({
     String? status,
   }) async {
-    String url = '/invitations/received?type=friend';
-    if (status != null) {
-      url += '&status=$status';
-    }
+    // Get both friend and event invitations that have been received
+    final friendUrl = '/invitations/received?type=friend${status != null ? '&status=$status' : ''}';
+    final eventUrl = '/invitations/received?type=event${status != null ? '&status=$status' : ''}';
     
-    final response = await apiService.get(url);
-    final data = response['data'] as List? ?? response as List? ?? [];
-    return data.map((i) => Invitation.fromJson(i as Map<String, dynamic>)).toList();
+    try {
+      final results = await Future.wait([
+        apiService.get(friendUrl),
+        apiService.get(eventUrl),
+      ]);
+      
+      final friendInvitations = (results[0]['data'] as List? ?? results[0] as List? ?? [])
+          .map((i) => Invitation.fromJson(i as Map<String, dynamic>))
+          .toList();
+      
+      final eventInvitations = (results[1]['data'] as List? ?? results[1] as List? ?? [])
+          .map((i) => Invitation.fromJson(i as Map<String, dynamic>))
+          .toList();
+      
+      // Combine and sort by creation date (newest first)
+      final combined = [...friendInvitations, ...eventInvitations];
+      combined.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      
+      return combined;
+    } catch (e) {
+      // Fallback to friend invitations only if event fetch fails
+      final response = await apiService.get('/invitations/received?type=friend${status != null ? '&status=$status' : ''}');
+      final data = response['data'] as List? ?? response as List? ?? [];
+      return data.map((i) => Invitation.fromJson(i as Map<String, dynamic>)).toList();
+    }
   }
 
   /// Get sent friend invitations

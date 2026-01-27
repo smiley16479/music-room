@@ -305,17 +305,41 @@ export class InvitationService {
       throw new BadRequestException('This invitation has expired');
     }
 
-    // Update invitation status
+    // Process the response based on status
+    if (respondDto.status === InvitationStatus.ACCEPTED) {
+      try {
+        await this.processAcceptedInvitation(invitation);
+      } catch (e) {
+        console.error('Error processing accepted invitation:', e);
+        // Don't throw - the response should still succeed
+      }
+
+      // Send notification email to inviter (async, don't wait or fail)
+      try {
+        await this.sendResponseNotificationEmail(invitation, respondDto.status);
+      } catch (e) {
+        console.error('Error sending response notification email:', e);
+      }
+
+      // For friend invitations, delete the invitation after accepting
+      if (invitation.type === InvitationType.FRIEND) {
+        // Get the full details before deletion for the return value
+        const invitationDetails = await this.findByIdWithDetails(invitation.id);
+        await this.invitationRepository.remove(invitation);
+        return invitationDetails;
+      }
+    }
+
+    // For non-accepted responses or non-friend invitations, update the status
     invitation.status = respondDto.status;
     const updatedInvitation = await this.invitationRepository.save(invitation);
 
-    // Process the response
-    if (respondDto.status === InvitationStatus.ACCEPTED) {
-      await this.processAcceptedInvitation(invitation);
+    // Send notification email to inviter (async, don't wait or fail)
+    try {
+      await this.sendResponseNotificationEmail(invitation, respondDto.status);
+    } catch (e) {
+      console.error('Error sending response notification email:', e);
     }
-
-    // Send notification email to inviter
-    await this.sendResponseNotificationEmail(invitation, respondDto.status);
 
     return this.findByIdWithDetails(updatedInvitation.id);
   }
@@ -607,38 +631,40 @@ export class InvitationService {
       case InvitationType.EVENT:
         if (invitation.eventId) {
           // Add user to event participants
-          await this.eventRepository
-            .createQueryBuilder()
-            .relation(Event, 'participants')
-            .of(invitation.eventId)
-            .add(invitation.inviteeId);
+          try {
+            await this.eventRepository
+              .createQueryBuilder()
+              .relation(Event, 'participants')
+              .of(invitation.eventId)
+              .add(invitation.inviteeId);
+          } catch (e) {
+            console.error('Error adding user to event participants:', e);
+          }
         }
         break;
 
       case InvitationType.PLAYLIST:
-        if (invitation.eventId) {
-          // Add user to event participants (playlists inherit permissions from events)
-          await this.eventRepository
-            .createQueryBuilder()
-            .relation(Event, 'participants')
-            .of(invitation.eventId)
-            .add(invitation.inviteeId);
-        }
+        // TODO: Implement playlist participant addition if needed
+        // For now, just handle the friend relationship if it's a playlist invite
         break;
 
       case InvitationType.FRIEND:
         // Add bidirectional friend relationship
-        await this.userRepository
-          .createQueryBuilder()
-          .relation(User, 'friends')
-          .of(invitation.inviterId)
-          .add(invitation.inviteeId);
-        
-        await this.userRepository
-          .createQueryBuilder()
-          .relation(User, 'friends')
-          .of(invitation.inviteeId)
-          .add(invitation.inviterId);
+        try {
+          await this.userRepository
+            .createQueryBuilder()
+            .relation(User, 'friends')
+            .of(invitation.inviterId)
+            .add(invitation.inviteeId);
+          
+          await this.userRepository
+            .createQueryBuilder()
+            .relation(User, 'friends')
+            .of(invitation.inviteeId)
+            .add(invitation.inviterId);
+        } catch (e) {
+          console.error('Error adding friend relationship:', e);
+        }
         break;
     }
   }

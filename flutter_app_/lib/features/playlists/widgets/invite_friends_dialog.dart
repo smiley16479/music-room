@@ -90,21 +90,32 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
     try {
       final eventProvider = context.read<EventProvider>();
       
-      // Add each selected friend as a participant
-      for (final friendId in _selectedFriendIds) {
-        await eventProvider.addParticipant(widget.eventId, friendId);
-      }
+      // Use the invitation system (for private events)
+      // This sends invitations instead of directly adding as participants
+      final success = await eventProvider.inviteUsers(
+        widget.eventId,
+        _selectedFriendIds.toList(),
+      );
 
       if (mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Successfully invited ${_selectedFriendIds.length} friend${_selectedFriendIds.length > 1 ? 's' : ''}',
+        if (success) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Successfully invited ${_selectedFriendIds.length} friend${_selectedFriendIds.length > 1 ? 's' : ''}',
+              ),
+              backgroundColor: Colors.green,
             ),
-            backgroundColor: Colors.green,
-          ),
-        );
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to send invitations: ${eventProvider.error}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

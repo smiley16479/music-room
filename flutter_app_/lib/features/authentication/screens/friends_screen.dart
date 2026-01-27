@@ -456,6 +456,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
 
   Widget _buildReceivedInvitationTile(Invitation invitation, FriendProvider provider) {
     final inviter = invitation.inviter;
+    final isEventInvitation = invitation.type == 'event';
     
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -469,9 +470,23 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 _buildAvatar(inviter),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    inviter?.displayName ?? 'Unknown User',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        inviter?.displayName ?? 'Unknown User',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (isEventInvitation)
+                        Text(
+                          'Invited you to an event',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 Text(
@@ -495,11 +510,12 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton.icon(
-                  icon: const Icon(Icons.person),
-                  label: const Text('View Profile'),
-                  onPressed: () => _showUserProfileDialog(invitation.senderId),
-                ),
+                if (!isEventInvitation)
+                  TextButton.icon(
+                    icon: const Icon(Icons.person),
+                    label: const Text('View Profile'),
+                    onPressed: () => _showUserProfileDialog(invitation.senderId),
+                  ),
                 const SizedBox(width: 8),
                 OutlinedButton(
                   onPressed: () => _handleDeclineInvitation(invitation, provider),
@@ -522,9 +538,14 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   Future<void> _handleAcceptInvitation(Invitation invitation, FriendProvider provider) async {
     final success = await provider.acceptInvitation(invitation.id);
     if (mounted) {
+      final isEventInvitation = invitation.type == 'event';
+      final message = isEventInvitation
+          ? 'Event invitation accepted!'
+          : 'Friend request accepted!';
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Friend request accepted!' : 'Failed to accept request: ${provider.error ?? "Unknown error"}'),
+          content: Text(success ? message : 'Failed to accept: ${provider.error ?? "Unknown error"}'),
         ),
       );
       if (success) {
@@ -536,9 +557,14 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   Future<void> _handleDeclineInvitation(Invitation invitation, FriendProvider provider) async {
     final success = await provider.declineInvitation(invitation.id);
     if (mounted) {
+      final isEventInvitation = invitation.type == 'event';
+      final message = isEventInvitation
+          ? 'Event invitation declined'
+          : 'Friend request declined';
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? 'Friend request declined' : 'Failed to decline request: ${provider.error ?? "Unknown error"}'),
+          content: Text(success ? message : 'Failed to decline: ${provider.error ?? "Unknown error"}'),
         ),
       );
     }

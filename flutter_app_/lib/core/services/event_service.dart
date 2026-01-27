@@ -423,6 +423,28 @@ class EventService {
     await apiService.delete('${AppConfig.eventsEndpoint}/$playlistId/tracks/$trackId');
   }
 
+  /// Invite users to an event (creates invitations for private events)
+  /// This is the correct method for inviting friends to events
+  Future<Map<String, dynamic>> inviteUsers(
+    String eventId,
+    List<String> userIds, {
+    String? message,
+  }) async {
+    final response = await apiService.post(
+      '${AppConfig.eventsEndpoint}/$eventId/invite',
+      body: {
+        'userIds': userIds,
+        if (message != null) 'message': message,
+      },
+    );
+
+    if (response is Map<String, dynamic>) {
+      return response;
+    } else {
+      throw Exception('Invalid response format');
+    }
+  }
+
   /// Add participant to event (allows owner/collaborator to invite friends)
   Future<Event> addParticipant(String eventId, String userId) async {
     final response = await apiService.post(

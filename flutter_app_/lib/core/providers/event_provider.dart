@@ -488,6 +488,34 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
+  /// Invite users to an event (creates invitations instead of adding as direct participants)
+  /// This is the correct method for inviting friends to private events
+  Future<bool> inviteUsers(
+    String eventId,
+    List<String> userIds, {
+    String? message,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final result = await eventService.inviteUsers(
+        eventId,
+        userIds,
+        message: message,
+      );
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Clear error
   void clearError() {
     _error = null;
