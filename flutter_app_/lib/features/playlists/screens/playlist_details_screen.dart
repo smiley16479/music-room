@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../core/providers/audio_player_provider.dart';
 import '../../../core/models/track_search_result.dart';
 import '../../../core/models/event.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/invite_friends_dialog.dart';
+import '../widgets/mini_player_scaffold.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -107,46 +109,42 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_isEditMode,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _isEditMode) {
-          // Close edit mode instead of popping
-          setState(() {
-            _isEditMode = false;
-          });
-        }
-      },
+    return MiniPlayerScaffold(
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Playlists'),
+          title: const Text('Playlist Details'),
           elevation: 0,
           actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-              onPressed: () async {
-                final authProvider = context.read<AuthProvider>();
-                await authProvider.logout();
+            Consumer<PlaylistProvider>(
+              builder: (context, playlistProvider, _) {
+                final playlist = playlistProvider.currentPlaylist;
+                if (playlist != null) {
+                  return IconButton(
+                    icon: Icon(_isEditMode ? Icons.close : Icons.edit),
+                    onPressed: () => _toggleEditMode(playlist),
+                    tooltip: _isEditMode ? 'Cancel' : 'Edit Playlist',
+                  );
+                }
+                return const SizedBox.shrink();
               },
             ),
           ],
         ),
-        body: Consumer<EventProvider>(
-          builder: (context, eventProvider, _) {
-            if (eventProvider.isLoading) {
+        body: Consumer<PlaylistProvider>(
+          builder: (context, playlistProvider, _) {
+            if (playlistProvider.isLoading) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final playlist = eventProvider.currentPlaylist;
+            final playlist = playlistProvider.currentPlaylist;
 
             if (playlist == null) {
               return const Center(child: Text('Playlist not found'));
             }
 
             return _isEditMode
-                ? _buildEditForm(eventProvider, playlist)
-                : _buildViewMode(eventProvider, playlist);
+                ? _buildEditForm(playlistProvider, playlist)
+                : _buildViewMode(playlistProvider, playlist);
           },
         ),
         floatingActionButton: _isEditMode
@@ -192,12 +190,137 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     color: Colors.white,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  playlist.name,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                const SizedBox(height: 24),
+
+                // Tracks Section
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Tracks',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (playlistProvider.currentPlaylistTracks.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.music_note,
+                                  size: 48,
+                                  color: Colors.grey.shade400,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No tracks yet',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: Colors.grey,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount:
+                              playlistProvider.currentPlaylistTracks.length,
+                          itemBuilder: (context, index) {
+                            final track =
+                                playlistProvider.currentPlaylistTracks[index];
+                            return Consumer<AudioPlayerProvider>(
+                              builder: (context, audioProvider, _) {
+                                final isCurrentTrack = audioProvider.currentTrack?.id == track.id;
+                                final isPlaying = isCurrentTrack && audioProvider.isPlaying;
+                                
+                                return ListTile(
+                                  leading: Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(4),
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    child: track.coverUrl != null && track.coverUrl!.isNotEmpty
+                                        ? ClipRRect(
+                                            borderRadius: BorderRadius.circular(4),
+                                            child: Image.network(
+                                              track.coverUrl!,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) {
+                                                return Center(
+                                                  child: Text(
+                                                    (index + 1).toString(),
+                                                    style: Theme.of(context).textTheme.bodyMedium,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          )
+                                        : Center(
+                                            child: Text(
+                                              (index + 1).toString(),
+                                              style: Theme.of(context).textTheme.bodyMedium,
+                                            ),
+                                          ),
+                                  ),
+                                  title: Text(
+                                    track.trackTitle ?? 'Unknown Track',
+                                    style: TextStyle(
+                                      fontWeight: isCurrentTrack ? FontWeight.bold : FontWeight.normal,
+                                      color: isCurrentTrack ? Theme.of(context).colorScheme.primary : null,
+                                    ),
+                                  ),
+                                  subtitle: Text(track.trackArtist ?? 'Unknown Artist'),
+                                  trailing: IconButton(
+                                    icon: Icon(
+                                      isPlaying ? Icons.pause : Icons.play_arrow,
+                                      color: isCurrentTrack ? Theme.of(context).colorScheme.primary : null,
+                                    ),
+                                    onPressed: () {
+                                      if (isPlaying) {
+                                        audioProvider.pause();
+                                      } else if (isCurrentTrack) {
+                                        audioProvider.resume();
+                                      } else {
+                                        // Play this track and set the playlist
+                                        audioProvider.playPlaylist(
+                                          playlistProvider.currentPlaylistTracks,
+                                          startIndex: index,
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  onTap: () {
+                                    if (isPlaying) {
+                                      audioProvider.pause();
+                                    } else if (isCurrentTrack) {
+                                      audioProvider.resume();
+                                    } else {
+                                      // Play this track and set the playlist
+                                      audioProvider.playPlaylist(
+                                        playlistProvider.currentPlaylistTracks,
+                                        startIndex: index,
+                                      );
+                                    }
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        ),
+                    ],
                   ),
                 ),
 

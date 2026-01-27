@@ -6,6 +6,7 @@ import '../../../core/providers/index.dart';
 import '../../../core/services/index.dart';
 import '../widgets/invite_friends_dialog.dart';
 import 'playlist_details_screen.dart';
+import '../widgets/mini_player_scaffold.dart';
 
 /// Event Details screen with full edit capabilities
 class EventDetailsScreen extends StatefulWidget {
@@ -272,89 +273,78 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<EventProvider, AuthProvider>(
-      builder: (context, eventProvider, authProvider, _) {
-        if (eventProvider.isLoading && _localEvent == null) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Event Details')),
-            body: const Center(child: CircularProgressIndicator()),
-          );
-        }
+    return MiniPlayerScaffold(
+      child: Consumer2<EventProvider, AuthProvider>(
+        builder: (context, eventProvider, authProvider, _) {
+          if (eventProvider.isLoading) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Event Details')),
+              body: const Center(child: CircularProgressIndicator()),
+            );
+          }
 
-        if (eventProvider.error != null && _localEvent == null) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Event Details')),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Error loading event',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      eventProvider.error ?? 'Unknown error',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
+          if (eventProvider.error != null) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Event Details')),
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    Text(
+                      'Error loading event',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        eventProvider.error ?? 'Unknown error',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        }
+            );
+          }
 
-        // Use local event copy to avoid issues when navigating
-        final event = _localEvent;
-        if (event == null) {
+          final event = eventProvider.currentEvent;
+          if (event == null) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Event Details')),
+              body: const Center(child: Text('Event not found')),
+            );
+          }
+
+          final currentUser = authProvider.currentUser;
+          final isAdmin = currentUser?.id == event.creatorId;
+
           return Scaffold(
-            appBar: AppBar(title: const Text('Event Details')),
-            body: const Center(child: Text('Event not found')),
-          );
-        }
-
-        final currentUser = authProvider.currentUser;
-        final isAdmin = currentUser?.id == event.creatorId;
-
-        return PopScope(
-          canPop: !_isEditMode,
-          onPopInvokedWithResult: (didPop, result) {
-            if (!didPop && _isEditMode) {
-              // Close edit mode instead of popping
-              setState(() {
-                _isEditMode = false;
-              });
-            }
-          },
-          child: Scaffold(
             appBar: AppBar(
-              title: const Text('Events'),
+              title: Text(event.name),
               elevation: 0,
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.logout),
-                  tooltip: 'Logout',
-                  onPressed: () async {
-                    await authProvider.logout();
-                  },
-                ),
+                if (isAdmin)
+                  IconButton(
+                    icon: Icon(_isEditMode ? Icons.close : Icons.edit),
+                    onPressed: () => _toggleEditMode(event),
+                    tooltip: _isEditMode ? 'Cancel' : 'Edit Event',
+                  ),
               ],
             ),
-            body: _isEditMode
-                ? _buildEditForm(eventProvider, event)
-                : _buildViewMode(context, event, isAdmin, eventProvider),
-          ),
+          body: _isEditMode
+              ? _buildEditForm(eventProvider, event)
+              : _buildViewMode(context, event, isAdmin, eventProvider),
         );
       },
+      ),
     );
   }
 

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../core/providers/audio_player_provider.dart';
 import '../../authentication/screens/profile_screen.dart';
 import '../widgets/create_event_dialog.dart';
+import '../widgets/mini_player_widget.dart';
 import 'events_screen.dart';
 import 'playlist_details_screen.dart';
 import '../../../core/models/event.dart';
@@ -68,7 +70,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _buildContent(),
+      body: Column(
+        children: [
+          Expanded(child: _buildContent()),
+          // Mini player - shows only when a track is playing
+          const MiniPlayerWidget(),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {
