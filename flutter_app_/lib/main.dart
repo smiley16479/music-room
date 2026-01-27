@@ -26,13 +26,16 @@ void main() async {
   final localStorage = LocalStorageService();
   await localStorage.init();
 
-  final apiService = ApiService(secureStorage: SecureStorageService(secureStorage));
+  final apiService = ApiService(
+    secureStorage: SecureStorageService(secureStorage),
+  );
   final authService = AuthService(
     apiService: apiService,
     secureStorage: SecureStorageService(secureStorage),
   );
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
+  final webSocketService = WebSocketService();
   // PlaylistService is now an alias for EventService
 
   print('🟢 Services initialized');
@@ -42,18 +45,28 @@ void main() async {
       providers: [
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
-        Provider<PlaylistService>(create: (_) => eventService), // PlaylistService is typedef for EventService
+        Provider<WebSocketService>(create: (_) => webSocketService),
+        Provider<PlaylistService>(
+          create: (_) => eventService,
+        ), // PlaylistService is typedef for EventService
         Provider<EventService>(create: (_) => eventService),
-        Provider<TrackService>(create: (_) => TrackService(apiService: apiService)),
+        Provider<TrackService>(
+          create: (_) => TrackService(apiService: apiService),
+        ),
         Provider<InvitationService>(
           create: (_) => InvitationService(apiService: apiService),
         ),
         Provider<FriendService>(create: (_) => friendService),
         ChangeNotifierProvider(
-          create: (_) => AuthProvider(authService: authService),
+          create: (_) => AuthProvider(
+            authService: authService,
+            webSocketService: webSocketService,
+          ),
         ),
         ChangeNotifierProvider(
-          create: (_) => PlaylistProvider(eventService: eventService), // PlaylistProvider is typedef for EventProvider
+          create: (_) => PlaylistProvider(
+            eventService: eventService,
+          ), // PlaylistProvider is typedef for EventProvider
         ),
         ChangeNotifierProvider(
           create: (_) => EventProvider(eventService: eventService),
@@ -94,7 +107,8 @@ class MyApp extends StatelessWidget {
       },
       onGenerateRoute: (settings) {
         // Handle reset-password route with token parameter
-        if (settings.name != null && settings.name!.startsWith('/reset-password')) {
+        if (settings.name != null &&
+            settings.name!.startsWith('/reset-password')) {
           final uri = Uri.parse('http://dummy${settings.name}');
           final token = uri.queryParameters['token'];
           if (token != null) {
@@ -121,7 +135,7 @@ class _InitialScreenState extends State<_InitialScreen> {
   bool _isOAuthCallback = false;
   StreamSubscription<Uri>? _deepLinkSubscription;
   late AppLinks _appLinks;
-  
+
   // GlobalKey to preserve HomeScreen state across rebuilds
   static final GlobalKey _homeScreenKey = GlobalKey();
 
@@ -142,12 +156,12 @@ class _InitialScreenState extends State<_InitialScreen> {
 
   void _initDeepLinks() {
     if (kIsWeb) return; // Deep links only for mobile
-    
+
     // Handle deep links when app is already running
     _deepLinkSubscription = _appLinks.uriLinkStream.listen((Uri uri) {
       _handleDeepLink(uri);
     });
-    
+
     // Handle initial deep link if app was opened via deep link
     _appLinks.getInitialAppLink().then((Uri? uri) {
       if (uri != null) {
@@ -189,11 +203,13 @@ class _InitialScreenState extends State<_InitialScreen> {
         final refreshToken = params['refresh'];
 
         final authProvider = context.read<AuthProvider>();
-        
+
         // Store tokens
         await authProvider.authService.secureStorage.saveToken(token);
         if (refreshToken != null) {
-          await authProvider.authService.secureStorage.saveRefreshToken(refreshToken);
+          await authProvider.authService.secureStorage.saveRefreshToken(
+            refreshToken,
+          );
         }
 
         // Reinitialize auth state
@@ -207,9 +223,9 @@ class _InitialScreenState extends State<_InitialScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error processing login: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error processing login: $e')));
       }
     }
   }
@@ -229,7 +245,6 @@ class _InitialScreenState extends State<_InitialScreen> {
   }
 
   Future<void> _initializeAuth() async {
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<AuthProvider>().init();
     });
@@ -259,12 +274,10 @@ class _InitialScreenState extends State<_InitialScreen> {
         if (AppConfig.debugSkipAuth) {
           return const HomeScreen();
         }
-        
+
         if (authProvider.isLoading) {
           return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
+            body: Center(child: CircularProgressIndicator()),
           );
         }
 

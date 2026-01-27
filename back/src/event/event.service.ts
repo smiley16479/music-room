@@ -172,9 +172,7 @@ export class EventService {
     const { page, limit, skip } = paginationDto;
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
-      .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
-      .leftJoinAndSelect('event.currentTrack', 'currentTrack');
 
     if (userId) {
       // Show public events + private events where user has access (creator, participant, admin)
@@ -1302,11 +1300,10 @@ export class EventService {
       throw new BadRequestException('Voting is only allowed during live events');
     }
 
-    switch (event.licenseType) {
-      case EventLicenseType.OPEN:
+    if (event.visibility === EventVisibility.PUBLIC && event.licenseType === EventLicenseType.NONE)
         return; // Everyone can vote
 
-      case EventLicenseType.INVITED:
+    if ( event.visibility === EventVisibility.PRIVATE ) {
         // Check if user is the event creator
         if (event.creatorId === userId) {
           return;
@@ -1340,10 +1337,12 @@ export class EventService {
         }
 
         throw new ForbiddenException('Only invited users can vote in this event');
-        break;
 
-      case EventLicenseType.LOCATION_BASED:
-        // Event creators can always vote in their own events
+      }
+
+      // Event creators can always vote in their own events
+      if ( event.licenseType === EventLicenseType.LOCATION_BASED ) {
+        
         if (event.creatorId === userId) {
           return;
         }
@@ -1358,9 +1357,7 @@ export class EventService {
         if (!canVoteByTime) {
           throw new ForbiddenException('Voting is not allowed outside the specified voting hours for this location-based event');
         }
-        
-        break;
-    }
+      }
   }
 
   private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -1426,60 +1423,6 @@ export class EventService {
   // =====================================================
   // PLAYLIST MANAGEMENT (Event-centric approach)
   // All playlist operations go through Event
-  // =====================================================
-
-  /**
-   * Create a playlist event (listening session)
-   * This is the event-centric way to create a playlist
-   */
-  async createPlaylistEvent(dto: any, creatorId: string): Promise<Event> {
-    const createDto = {
-      ...dto,
-      type: EventType.LISTENING_SESSION,
-      visibility: dto.isPublic ? EventVisibility.PUBLIC : EventVisibility.PRIVATE,
-      licenseType: EventLicenseType.OPEN,
-    };
-    return this.create(createDto, creatorId);
-  }
-
-  /**
-   * Get playlist by event ID
-   */
-  async getEventPlaylist(eventId: string, userId?: string): Promise<Event> {
-    const event = await this.eventRepository.findOne({
-      where: { id: eventId },
-      relations: ['tracks', 'creator', 'participants'],
-    });
-
-    if (!event) {
-      throw new NotFoundException('Event not found');
-    }
-
-    // Now Event IS the playlist when type = LISTENING_SESSION
-    if (event.type !== EventType.LISTENING_SESSION) {
-      throw new NotFoundException('This event does not have a playlist');
-    }
-
-    await this.checkEventAccess(event, userId);
-    return event;
-  }
-
-  /**
-   * Update playlist metadata (through its event)
-   */
-  async updatePlaylistEvent(playlistId: string, dto: any, userId: string): Promise<Event> {
-    return this.update(playlistId, dto, userId);
-  }
-
-  /**
-   * Delete playlist (through its event)
-   */
-  async deletePlaylistEvent(playlistId: string, userId: string): Promise<void> {
-    return this.remove(playlistId, userId);
-  }
-
-  // =====================================================
-  // PLAYLIST TRACK OPERATIONS (from PlaylistService)
   // =====================================================
 
   /**

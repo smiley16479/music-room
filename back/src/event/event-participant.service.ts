@@ -53,18 +53,11 @@ export class EventParticipantService {
     return count > 0;
   }
 
-  async isCreator(eventId: string, userId: string): Promise<boolean> {
-    const participant = await this.participantRepository.findOne({
-      where: { eventId, userId },
-    });
-    return participant?.role === ParticipantRole.CREATOR;
-  }
-
   async isCollaborator(eventId: string, userId: string): Promise<boolean> {
     const participant = await this.participantRepository.findOne({
       where: { eventId, userId },
     });
-    return participant?.role === ParticipantRole.COLLABORATOR || participant?.role === ParticipantRole.CREATOR;
+    return participant?.role === ParticipantRole.COLLABORATOR || participant?.role === ParticipantRole.PARTICIPANT;
   }
 
   async canEdit(event: Event, userId: string): Promise<boolean> {
@@ -80,7 +73,7 @@ export class EventParticipantService {
       return false;
     }
 
-    return participant.role === ParticipantRole.CREATOR || 
+    return participant.role === ParticipantRole.PARTICIPANT || 
            participant.role === ParticipantRole.COLLABORATOR;
   }
 
@@ -131,7 +124,7 @@ export class EventParticipantService {
   async getCollaboratorCount(eventId: string): Promise<number> {
     return this.participantRepository.count({
       where: [
-        { eventId, role: ParticipantRole.CREATOR },
+        { eventId, role: ParticipantRole.PARTICIPANT },
         { eventId, role: ParticipantRole.COLLABORATOR },
       ],
     });
@@ -143,7 +136,7 @@ export class EventParticipantService {
     });
 
     return participant ? 
-      (participant.role === ParticipantRole.CREATOR || participant.role === ParticipantRole.COLLABORATOR) : 
+      (participant.role === ParticipantRole.PARTICIPANT || participant.role === ParticipantRole.COLLABORATOR) : 
       false;
   }
 

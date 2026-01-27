@@ -11,7 +11,6 @@ import { Event } from 'src/event/entities/event.entity';
 
 export enum ParticipantRole {
   ADMIN = 'admin',
-  CREATOR = 'creator',
   COLLABORATOR = 'collaborator',
   PARTICIPANT = 'participant', // Simple viewer/voter
 }

@@ -77,8 +77,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         setState(() {
           _isEditMode = false;
         });
-        // Reload playlist details to reflect changes
-        await _loadPlaylist();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -92,32 +90,56 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Playlist Details'), elevation: 0),
-      body: Consumer<EventProvider>(
-        builder: (context, eventProvider, _) {
-          if (eventProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final playlist = eventProvider.currentPlaylist;
-
-          if (playlist == null) {
-            return const Center(child: Text('Playlist not found'));
-          }
-
-          return _isEditMode
-              ? _buildEditForm(eventProvider, playlist)
-              : _buildViewMode(eventProvider, playlist);
-        },
-      ),
-      floatingActionButton: _isEditMode
-          ? null
-          : FloatingActionButton(
-              onPressed: _showAddTrackDialog,
-              tooltip: 'Add Track',
-              child: const Icon(Icons.add),
+    return PopScope(
+      canPop: !_isEditMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isEditMode) {
+          // Close edit mode instead of popping
+          setState(() {
+            _isEditMode = false;
+          });
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Playlists'),
+          elevation: 0,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              onPressed: () async {
+                final authProvider = context.read<AuthProvider>();
+                await authProvider.logout();
+              },
             ),
+          ],
+        ),
+        body: Consumer<EventProvider>(
+          builder: (context, eventProvider, _) {
+            if (eventProvider.isLoading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final playlist = eventProvider.currentPlaylist;
+
+            if (playlist == null) {
+              return const Center(child: Text('Playlist not found'));
+            }
+
+            return _isEditMode
+                ? _buildEditForm(eventProvider, playlist)
+                : _buildViewMode(eventProvider, playlist);
+          },
+        ),
+        floatingActionButton: _isEditMode
+            ? null
+            : FloatingActionButton(
+                onPressed: _showAddTrackDialog,
+                tooltip: 'Add Track',
+                child: const Icon(Icons.add),
+              ),
+      ),
     );
   }
 

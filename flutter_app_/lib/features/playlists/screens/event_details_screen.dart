@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
+import '../../../core/services/index.dart';
 import '../widgets/invite_friends_dialog.dart';
 import 'playlist_details_screen.dart';
 
@@ -18,12 +19,20 @@ class EventDetailsScreen extends StatefulWidget {
 
 class _EventDetailsScreenState extends State<EventDetailsScreen> {
   bool _isEditMode = false;
+  Event? _localEvent; // Local copy to avoid provider being overwritten
 
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
   late TextEditingController _locationNameController;
   late TextEditingController _playlistNameController;
+  late TextEditingController _radiusController;
+  late TextEditingController _latitudeController;
+  late TextEditingController _longitudeController;
+
+  // Geolocation
+  double? _latitude;
+  double? _longitude;
 
   // Form state
   late EventType? _selectedType;
@@ -44,11 +53,23 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _loadEvent();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload event when returning from navigation
+    if (_localEvent == null) {
+      _loadEvent();
+    }
+  }
+
   void _initControllers() {
     _nameController = TextEditingController();
     _descriptionController = TextEditingController();
     _locationNameController = TextEditingController();
     _playlistNameController = TextEditingController();
+    _radiusController = TextEditingController();
+    _latitudeController = TextEditingController();
+    _longitudeController = TextEditingController();
 
     _selectedType = null;
     _selectedVisibility = null;
@@ -68,12 +89,21 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _descriptionController.dispose();
     _locationNameController.dispose();
     _playlistNameController.dispose();
+    _radiusController.dispose();
+    _latitudeController.dispose();
+    _longitudeController.dispose();
     super.dispose();
   }
 
   Future<void> _loadEvent() async {
     final eventProvider = context.read<EventProvider>();
     await eventProvider.loadEventDetails(widget.eventId);
+    // Store local copy to avoid it being overwritten
+    if (mounted && eventProvider.currentEvent != null) {
+      setState(() {
+        _localEvent = eventProvider.currentEvent;
+      });
+    }
   }
 
   void _navigateToPlaylist(BuildContext context, String eventId) {
@@ -90,6 +120,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _descriptionController.text = event.description ?? '';
     _locationNameController.text = event.locationName ?? '';
     _playlistNameController.text = event.playlistName ?? '';
+    _radiusController.text = event.locationRadius?.toString() ?? '';
+    _latitudeController.text = event.latitude?.toString() ?? '';
+    _longitudeController.text = event.longitude?.toString() ?? '';
 
     setState(() {
       _selectedType = event.type;
@@ -105,6 +138,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       _selectedVotingEndTime = event.votingEndTime != null
           ? _parseTimeString(event.votingEndTime!)
           : null;
+      _latitude = event.latitude;
+      _longitude = event.longitude;
       _isEditMode = !_isEditMode;
     });
   }
@@ -151,7 +186,47 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     return null;
   }
 
+  /// Geocode a place name to get coordinates
+  Future<void> _geocodeLocation() async {
+    if (_locationNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a location name')),
+      );
+      return;
+    }
+
+    final geocodingService = GeocodingService();
+    final coords = await geocodingService.getCoordinatesFromPlace(
+      _locationNameController.text,
+    );
+
+    if (coords != null) {
+      setState(() {
+        _latitude = coords['latitude'];
+        _longitude = coords['longitude'];
+        _latitudeController.text = _latitude.toString();
+        _longitudeController.text = _longitude.toString();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Location found: ${_latitude?.toStringAsFixed(4)}, ${_longitude?.toStringAsFixed(4)}',
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Location not found')));
+    }
+  }
+
   Future<void> _saveEvent(EventProvider eventProvider) async {
+    final int? radius =
+        (_selectedLicenseType == EventLicenseType.locationBased &&
+            _radiusController.text.isNotEmpty)
+        ? int.tryParse(_radiusController.text)
+        : null;
     final success = await eventProvider.updateEvent(
       widget.eventId,
       name: _nameController.text,
@@ -172,18 +247,21 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       startDate: _selectedStartDate,
       endDate: _selectedEndDate,
       selectedPlaylistId: _selectedPlaylistId,
+      locationRadius: radius,
+      latitude: _latitude,
+      longitude: _longitude,
     );
 
     if (mounted) {
       if (success) {
+        // Reload event to get updated data
+        await _loadEvent();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Event updated successfully')),
         );
         setState(() {
           _isEditMode = false;
         });
-        // Reload event details to reflect changes
-        await _loadEvent();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: ${eventProvider.error}')),
@@ -196,14 +274,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   Widget build(BuildContext context) {
     return Consumer2<EventProvider, AuthProvider>(
       builder: (context, eventProvider, authProvider, _) {
-        if (eventProvider.isLoading) {
+        if (eventProvider.isLoading && _localEvent == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Event Details')),
             body: const Center(child: CircularProgressIndicator()),
           );
         }
 
-        if (eventProvider.error != null) {
+        if (eventProvider.error != null && _localEvent == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Event Details')),
             body: Center(
@@ -235,7 +313,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           );
         }
 
-        final event = eventProvider.currentEvent;
+        // Use local event copy to avoid issues when navigating
+        final event = _localEvent;
         if (event == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Event Details')),
@@ -246,11 +325,34 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
         final currentUser = authProvider.currentUser;
         final isAdmin = currentUser?.id == event.creatorId;
 
-        return Scaffold(
-          appBar: AppBar(title: Text(event.name), elevation: 0),
-          body: _isEditMode
-              ? _buildEditForm(eventProvider, event)
-              : _buildViewMode(context, event, isAdmin, eventProvider),
+        return PopScope(
+          canPop: !_isEditMode,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop && _isEditMode) {
+              // Close edit mode instead of popping
+              setState(() {
+                _isEditMode = false;
+              });
+            }
+          },
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('Events'),
+              elevation: 0,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  tooltip: 'Logout',
+                  onPressed: () async {
+                    await authProvider.logout();
+                  },
+                ),
+              ],
+            ),
+            body: _isEditMode
+                ? _buildEditForm(eventProvider, event)
+                : _buildViewMode(context, event, isAdmin, eventProvider),
+          ),
         );
       },
     );
@@ -284,6 +386,58 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               prefixIcon: Icon(Icons.description),
             ),
             maxLines: 3,
+          ),
+          const SizedBox(height: 24),
+
+          // Location Info
+          _buildSectionTitle('Location Information'),
+          TextField(
+            controller: _locationNameController,
+            decoration: InputDecoration(
+              labelText: 'Location Name (City)',
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.location_on),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: 'Find coordinates',
+                onPressed: _geocodeLocation,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Latitude & Longitude côte à côte
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _latitudeController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Latitude',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.public),
+                  ),
+                  readOnly: true,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _longitudeController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Longitude',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.public),
+                  ),
+                  readOnly: true,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
 
@@ -335,6 +489,19 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               );
             }).toList(),
           ),
+          if (_selectedLicenseType == EventLicenseType.locationBased)
+            Padding(
+              padding: const EdgeInsets.only(top: 12.0),
+              child: TextField(
+                controller: _radiusController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Voting radius (m)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.circle),
+                ),
+              ),
+            ),
           const SizedBox(height: 12),
 
           CheckboxListTile(
@@ -348,52 +515,64 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
           // Dates & Times
           _buildSectionTitle('Dates & Times'),
-          _buildDateField(
-            'Event Date',
-            _selectedEventDate,
-            (DateTime? date) => setState(() => _selectedEventDate = date),
-          ),
-          const SizedBox(height: 12),
-          _buildDateField(
-            'Start Date',
-            _selectedStartDate,
-            (DateTime? date) => setState(() => _selectedStartDate = date),
-          ),
-          const SizedBox(height: 12),
-          _buildDateField(
-            'End Date',
-            _selectedEndDate,
-            (DateTime? date) => setState(() => _selectedEndDate = date),
-          ),
-          const SizedBox(height: 12),
-
-          _buildTimeField(
-            'Voting Start Time',
-            _selectedVotingStartTime,
-            (DateTime? time) => setState(() => _selectedVotingStartTime = time),
-            startDate: _selectedStartDate,
-            endDate: _selectedEndDate,
-          ),
-          const SizedBox(height: 12),
-          _buildTimeField(
-            'Voting End Time',
-            _selectedVotingEndTime,
-            (DateTime? time) => setState(() => _selectedVotingEndTime = time),
-            startDate: _selectedStartDate,
-            endDate: _selectedEndDate,
-          ),
-          const SizedBox(height: 24),
-
-          // Location Info
-          _buildSectionTitle('Location Information'),
-          TextField(
-            controller: _locationNameController,
-            decoration: const InputDecoration(
-              labelText: 'Location Name',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.location_on),
+          // Event Date sur toute la largeur
+          SizedBox(
+            width: double.infinity,
+            child: _buildDateField(
+              'Event Date',
+              _selectedEventDate,
+              (DateTime? date) => setState(() => _selectedEventDate = date),
             ),
           ),
+          const SizedBox(width: double.infinity, height: 12),
+          // Start Date & End Date côte à côte
+          Row(
+            children: [
+              Expanded(
+                child: _buildDateField(
+                  'Start Date',
+                  _selectedStartDate,
+                  (DateTime? date) => setState(() => _selectedStartDate = date),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildDateField(
+                  'End Date',
+                  _selectedEndDate,
+                  (DateTime? date) => setState(() => _selectedEndDate = date),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Voting Start Time & Voting End Time côte à côte
+          Row(
+            children: [
+              Expanded(
+                child: _buildTimeField(
+                  'Voting Start Time',
+                  _selectedVotingStartTime,
+                  (DateTime? time) =>
+                      setState(() => _selectedVotingStartTime = time),
+                  startDate: _selectedStartDate,
+                  endDate: _selectedEndDate,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildTimeField(
+                  'Voting End Time',
+                  _selectedVotingEndTime,
+                  (DateTime? time) =>
+                      setState(() => _selectedVotingEndTime = time),
+                  startDate: _selectedStartDate,
+                  endDate: _selectedEndDate,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           const SizedBox(height: 24),
 
           // Playlist Info

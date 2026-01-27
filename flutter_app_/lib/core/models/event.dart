@@ -6,17 +6,13 @@ part 'event.g.dart';
 
 /// Event Type enum
 enum EventType {
-  @JsonValue('listening_session')
-  listeningSession, // = Playlist
-  @JsonValue('party')
-  party,
-  @JsonValue('collaborative')
-  collaborative,
-  @JsonValue('live_session')
-  liveSession,
+  @JsonValue('playlist')
+  playlist, // = Playlist
+  @JsonValue('event')
+  event,
 }
 
-/// Event Visibility enum  
+/// Event Visibility enum
 enum EventVisibility {
   @JsonValue('public')
   public,
@@ -26,12 +22,8 @@ enum EventVisibility {
 
 /// Event License Type enum
 enum EventLicenseType {
-  @JsonValue('open')
-  open,
-  @JsonValue('invited')
-  invited,
-  @JsonValue('admin')
-  admin,
+  @JsonValue('none')
+  none,
   @JsonValue('location_based')
   locationBased,
 }
@@ -43,19 +35,19 @@ class Event extends Equatable {
   final String id;
   final String name;
   final String? description;
-  
+
   // Event type (LISTENING_SESSION = playlist)
   final EventType type;
   final EventVisibility visibility;
   final EventLicenseType? licenseType;
-  
+
   // Playlist-specific fields (nullable, only for LISTENING_SESSION)
   final int? trackCount;
   final int? totalDuration;
   final int? collaboratorCount;
   final String? coverImageUrl;
   final String? playlistName;
-  
+
   // Event-specific fields
   @JsonKey(name: 'eventDate')
   final DateTime? eventDate;
@@ -71,7 +63,7 @@ class Event extends Equatable {
   final double? longitude;
   @JsonKey(name: 'locationRadius')
   final int? locationRadius;
-  
+
   // Voting
   @JsonKey(name: 'votingEnabled')
   final bool? votingEnabled;
@@ -81,7 +73,7 @@ class Event extends Equatable {
   final String? votingEndTime;
   @JsonKey(name: 'currentTrackId')
   final String? currentTrackId;
-  
+
   // Common fields
   @JsonKey(name: 'creatorId')
   final String? creatorId;
@@ -90,7 +82,7 @@ class Event extends Equatable {
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
-  
+
   // Relations
   final List<User>? participants;
   @JsonKey(name: 'participantsCount', fromJson: _participantsCountFromJson)
@@ -131,10 +123,10 @@ class Event extends Equatable {
     this.participantsCount,
     this.votes,
   });
-  
+
   /// Helper: Est-ce une playlist ?
-  bool get isPlaylist => type == EventType.listeningSession;
-  
+  bool get isPlaylist => type == EventType.playlist;
+
   /// Helper: Nombre de pistes (alias pour UI)
   int get numberOfTracks => trackCount ?? 0;
 
@@ -143,36 +135,36 @@ class Event extends Equatable {
 
   @override
   List<Object?> get props => [
-        id,
-        name,
-        description,
-        type,
-        visibility,
-        licenseType,
-        trackCount,
-        totalDuration,
-        collaboratorCount,
-        coverImageUrl,
-        playlistName,
-        eventDate,
-        eventEndDate,
-        startDate,
-        endDate,
-        creatorId,
-        creator,
-        locationName,
-        latitude,
-        longitude,
-        locationRadius,
-        votingEnabled,
-        votingStartTime,
-        votingEndTime,
-        currentTrackId,
-        status,
-        participants,
-        participantsCount,
-        votes,
-      ];
+    id,
+    name,
+    description,
+    type,
+    visibility,
+    licenseType,
+    trackCount,
+    totalDuration,
+    collaboratorCount,
+    coverImageUrl,
+    playlistName,
+    eventDate,
+    eventEndDate,
+    startDate,
+    endDate,
+    creatorId,
+    creator,
+    locationName,
+    latitude,
+    longitude,
+    locationRadius,
+    votingEnabled,
+    votingStartTime,
+    votingEndTime,
+    currentTrackId,
+    status,
+    participants,
+    participantsCount,
+    votes,
+  ];
 }
 
 /// Convert votes from various formats to int

@@ -70,7 +70,7 @@ export class EventController {
     - nearby: Events within a specified radius of a location
     
     Filters:
-    - type: Filter by event type (listening_session, party, collaborative, live_session)
+    - type: Filter by event type (playlist, event)
     - latitude/longitude/radius: For nearby events
     - Pagination: page, limit`,
   })
@@ -85,7 +85,7 @@ export class EventController {
   @ApiQuery({
     name: 'type',
     type: String,
-    description: 'Filter by event type (listening_session, party, collaborative, live_session)',
+    description: 'Filter by event type (playlist, event)',
     required: false,
   })
   @ApiQuery({

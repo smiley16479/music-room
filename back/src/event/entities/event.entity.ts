@@ -18,15 +18,13 @@ import { EventType } from './event-type.enum';
 import { EventParticipant } from './event-participant.entity';
 
 export enum EventVisibility {
-  PUBLIC = 'public',
-  PRIVATE = 'private',
+  PUBLIC = 'public', // Everyone can vote/edit
+  PRIVATE = 'private', // Only invited users can vote/edit
 }
 
 export enum EventLicenseType {
-  OPEN = 'open', // Everyone can vote/edit
-  INVITED = 'invited', // Only invited users can vote/edit
-  ADMIN = 'admin', // Only creator can edit
-  LOCATION_BASED = 'location_based', // Access based on location (not implemented yet)
+  NONE = 'none',
+  LOCATION_BASED = 'location_based', // Ajoute l'Access based on location à public/private
 }
 
 export enum EventStatus {
@@ -49,7 +47,7 @@ export class Event {
   @Column({
     type: 'enum',
     enum: EventType,
-    default: EventType.LISTENING_SESSION,
+    default: EventType.EVENT,
   })
   type: EventType;
 
@@ -64,7 +62,7 @@ export class Event {
     name: 'license_type',
     type: 'enum',
     enum: EventLicenseType,
-    default: EventLicenseType.OPEN,
+    default: EventLicenseType.NONE,
   })
   licenseType: EventLicenseType;
 

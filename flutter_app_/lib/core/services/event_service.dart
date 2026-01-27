@@ -228,8 +228,7 @@ class EventService {
         .map((e) => '${e.key}=${e.value}')
         .join('&');
 
-    final endpoint =
-        '${AppConfig.eventsEndpoint}?$queryString&type=listening_session';
+    final endpoint = '${AppConfig.eventsEndpoint}?$queryString&type=playlist';
     final response = await apiService.get(endpoint);
 
     List<dynamic> dataList;
@@ -252,7 +251,7 @@ class EventService {
       'page': page.toString(),
       'limit': limit.toString(),
       'scope': 'my', // Use unified endpoint with scope parameter
-      'type': 'listening_session', // Filter for playlists only (lowercase)
+      'type': 'playlist', // Filter for playlists only (lowercase)
     };
 
     final queryString = params.entries
@@ -279,7 +278,7 @@ class EventService {
   /// Get recommended playlists
   Future<List<Event>> getRecommendedPlaylists({int limit = 20}) async {
     final endpoint =
-        '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=listening_session';
+        '${AppConfig.eventsEndpoint}/recommended?limit=$limit&type=playlist';
     final response = await apiService.get(endpoint);
 
     if (response is List) {
@@ -293,7 +292,7 @@ class EventService {
   /// Search playlists
   Future<List<Event>> searchPlaylists(String query, {int limit = 20}) async {
     final endpoint =
-        '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=listening_session';
+        '${AppConfig.eventsEndpoint}/search?q=$query&limit=$limit&type=playlist';
     final response = await apiService.get(endpoint);
 
     if (response is List) {
@@ -334,7 +333,7 @@ class EventService {
         'name': name,
         'description': description,
         'isPublic': isPublic,
-        'type': 'listening_session', // Create as playlist (lowercase)
+        'type': 'playlist', // Create as playlist (lowercase)
       },
     );
 
@@ -458,10 +457,7 @@ class EventService {
   }) async {
     final response = await apiService.post(
       '${AppConfig.eventsEndpoint}/$eventId/invite',
-      body: {
-        'userIds': userIds,
-        if (message != null) 'message': message,
-      },
+      body: {'userIds': userIds, if (message != null) 'message': message},
     );
 
     if (response is Map<String, dynamic>) {
@@ -486,7 +482,7 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return Event.fromJson(eventData);
   }
 
@@ -504,7 +500,7 @@ class EventService {
     } else {
       throw Exception('Invalid response format');
     }
-    
+
     return Event.fromJson(eventData);
   }
 }
