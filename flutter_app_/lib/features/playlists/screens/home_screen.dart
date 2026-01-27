@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../core/providers/audio_player_provider.dart';
 import '../../authentication/screens/profile_screen.dart';
 import '../widgets/create_event_dialog.dart';
 import '../widgets/mini_player_widget.dart';

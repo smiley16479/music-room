@@ -5,6 +5,7 @@ import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
+import '../widgets/invite_friends_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
 
 /// Playlist Details screen
@@ -94,10 +95,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
     }
   }
 
-  /// Get display name for any enum (just the part after the last dot)
-  String _getEnumLabel(dynamic enumValue) {
-    return enumValue.toString().split('.').last;
-  }
+  /// (Removed unused) Get display name for any enum (just the part after the last dot)
 
   @override
   Widget build(BuildContext context) {
@@ -151,9 +149,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   Widget _buildViewMode(EventProvider eventProvider, dynamic playlist) {
-    final String? headerCover = eventProvider.currentPlaylistTracks.isNotEmpty
-        ? eventProvider.currentPlaylistTracks.first.coverUrl
-        : null;
+    // header cover removed (unused)
 
     return SingleChildScrollView(
       child: Column(
@@ -181,29 +177,142 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     color: Colors.white.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: headerCover != null && headerCover.isNotEmpty
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            headerCover,
-                            fit: BoxFit.cover,
-                            width: 120,
-                            height: 120,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Center(
-                              child: Icon(
-                                Icons.music_note,
-                                size: 60,
-                                color: Colors.white,
-                              ),
+                  child: const Icon(
+                    Icons.music_note,
+                    size: 60,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Tracks Section
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Tracks',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (eventProvider.currentPlaylistTracks.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.music_note,
+                                  size: 48,
+                                  color: Colors.grey.shade400,
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No tracks yet',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: Colors.grey,
+                                      ),
+                                ),
+                              ],
                             ),
                           ),
                         )
-                      : const Icon(
-                          Icons.music_note,
-                          size: 60,
-                          color: Colors.white,
+                      else
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                            itemCount: eventProvider.currentPlaylistTracks.length,
+                          itemBuilder: (context, index) {
+                            final track = eventProvider.currentPlaylistTracks[index];
+                            return Consumer<AudioPlayerProvider>(
+                              builder: (context, audioProvider, _) {
+                                final isCurrentTrack = audioProvider.currentTrack?.id == track.id;
+                                final isPlaying = isCurrentTrack && audioProvider.isPlaying;
+                                
+                                return ListTile(
+                                  leading: Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(4),
+                                      color: Colors.grey.shade300,
+                                    ),
+                                    child: track.coverUrl != null && track.coverUrl!.isNotEmpty
+                                        ? ClipRRect(
+                                            borderRadius: BorderRadius.circular(4),
+                                            child: Image.network(
+                                              track.coverUrl!,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) {
+                                                return Center(
+                                                  child: Text(
+                                                    (index + 1).toString(),
+                                                    style: Theme.of(context).textTheme.bodyMedium,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          )
+                                        : Center(
+                                            child: Text(
+                                              (index + 1).toString(),
+                                              style: Theme.of(context).textTheme.bodyMedium,
+                                            ),
+                                          ),
+                                  ),
+                                  title: Text(
+                                    track.trackTitle ?? 'Unknown Track',
+                                    style: TextStyle(
+                                      fontWeight: isCurrentTrack ? FontWeight.bold : FontWeight.normal,
+                                      color: isCurrentTrack ? Theme.of(context).colorScheme.primary : null,
+                                    ),
+                                  ),
+                                  subtitle: Text(track.trackArtist ?? 'Unknown Artist'),
+                                  trailing: IconButton(
+                                    icon: Icon(
+                                      isPlaying ? Icons.pause : Icons.play_arrow,
+                                      color: isCurrentTrack ? Theme.of(context).colorScheme.primary : null,
+                                    ),
+                                    onPressed: () {
+                                      if (isPlaying) {
+                                        audioProvider.pause();
+                                      } else if (isCurrentTrack) {
+                                        audioProvider.resume();
+                                      } else {
+                                        // Play this track and set the playlist
+                                        audioProvider.playPlaylist(
+                                          eventProvider.currentPlaylistTracks,
+                                          startIndex: index,
+                                        );
+                                      }
+                                    },
+                                  ),
+                                  onTap: () {
+                                    if (isPlaying) {
+                                      audioProvider.pause();
+                                    } else if (isCurrentTrack) {
+                                      audioProvider.resume();
+                                    } else {
+                                      // Play this track and set the playlist
+                                      audioProvider.playPlaylist(
+                                        eventProvider.currentPlaylistTracks,
+                                        startIndex: index,
+                                      );
+                                    }
+                                  },
+                                );
+                              },
+                            );
+                          },
                         ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 16),
 
@@ -430,23 +539,22 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           newOrder,
                         );
 
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                success
-                                    ? '✅ Tracks reordered'
-                                    : '❌ Failed to save track order',
-                              ),
-                              backgroundColor: success ? Colors.green : Colors.red,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
+                        if (!mounted) return;
 
-                          if (!success) {
-                            // On failure, reload playlist to restore server state
-                            await eventProvider.loadPlaylistDetails(widget.playlistId);
-                          }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              success ? '✅ Tracks reordered' : '❌ Failed to save track order',
+                            ),
+                            backgroundColor: success ? Colors.green : Colors.red,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+
+                        if (!success) {
+                          // On failure, reload playlist to restore server state
+                          await eventProvider.loadPlaylistDetails(widget.playlistId);
+                          if (!mounted) return;
                         }
                       },
                       itemBuilder: (context, index) {
