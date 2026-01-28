@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
@@ -23,6 +24,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
+  late EventVisibility? _selectedVisibility;
+
+  // Playlist settings
+  late bool _votingInvitedOnly;
 
   @override
   void initState() {
@@ -34,6 +39,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   void _initControllers() {
     _nameController = TextEditingController();
     _descriptionController = TextEditingController();
+
+    _selectedVisibility = null;
+    _votingInvitedOnly = false;
   }
 
   @override
@@ -53,6 +61,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
+        _selectedVisibility = playlist.visibility;
+        _votingInvitedOnly =
+            playlist.eventLicenseType == EventLicenseType.invited;
       }
       _isEditMode = !_isEditMode;
     });
@@ -63,6 +74,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       widget.playlistId,
       name: _nameController.text,
       description: _descriptionController.text,
+      eventLicenseType: _votingInvitedOnly
+          ? EventLicenseType.invited.name
+          : EventLicenseType.none.name,
     );
 
     if (mounted) {
@@ -76,8 +90,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         setState(() {
           _isEditMode = false;
         });
-        // Reload playlist details to reflect changes
-        await _loadPlaylist();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -87,6 +99,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         );
       }
     }
+  }
+
+  /// Get display name for any enum (just the part after the last dot)
+  String _getEnumLabel(dynamic enumValue) {
+    return enumValue.toString().split('.').last;
   }
 
   @override
@@ -646,6 +663,36 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 24),
+
+          DropdownButton<EventVisibility>(
+            isExpanded: true,
+            value: _selectedVisibility,
+            hint: const Text('Select Visibility'),
+            onChanged: (EventVisibility? newValue) {
+              setState(() => _selectedVisibility = newValue);
+            },
+            items: EventVisibility.values.map((EventVisibility visibility) {
+              return DropdownMenuItem<EventVisibility>(
+                value: visibility,
+                child: Text(_getEnumLabel(visibility)),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+
+          // Voting Settings
+          CheckboxListTile(
+            title: const Text('Only invited guests can vote'),
+            subtitle: const Text(
+              'Restrict voting to invited collaborators only',
+            ),
+            value: _votingInvitedOnly,
+            onChanged: (bool? newValue) {
+              setState(() => _votingInvitedOnly = newValue ?? false);
+            },
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          const SizedBox(height: 12),
 
           // Playlist Stats (Read-only)
           Text(

@@ -90,10 +90,8 @@ Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
 };
 
 const _$EventTypeEnumMap = {
-  EventType.listeningSession: 'listening_session',
-  EventType.party: 'party',
-  EventType.collaborative: 'collaborative',
-  EventType.liveSession: 'live_session',
+  EventType.playlist: 'playlist',
+  EventType.event: 'event',
 };
 
 const _$EventVisibilityEnumMap = {
@@ -102,8 +100,6 @@ const _$EventVisibilityEnumMap = {
 };
 
 const _$EventLicenseTypeEnumMap = {
-  EventLicenseType.open: 'open',
-  EventLicenseType.invited: 'invited',
-  EventLicenseType.admin: 'admin',
+  EventLicenseType.none: 'none',
   EventLicenseType.locationBased: 'location_based',
 };

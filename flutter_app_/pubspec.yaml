@@ -42,6 +42,10 @@ dependencies:
   url_launcher: ^6.2.5
   app_links: ^3.4.5
   
+  # Geolocation & Geocoding
+  geocoding: ^2.1.2
+  geolocator: ^9.0.2
+  
   # OAuth & Social Login
   google_sign_in: ^5.4.3
   flutter_facebook_auth: ^7.0.0

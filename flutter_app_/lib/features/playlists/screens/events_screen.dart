@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
+import '../../../core/models/event.dart';
+import '../widgets/create_event_dialog.dart';
 import 'event_details_screen.dart';
 
 /// Events screen - shows upcoming events
@@ -14,10 +16,22 @@ class EventsScreen extends StatefulWidget {
 
 // MARK: - EventsScreenState
 class _EventsScreenState extends State<EventsScreen> {
+  // Filter states for events
+  EventVisibility? _eventVisibilityFilter;
+  EventLicenseType? _eventLicenseTypeFilter;
+  late TextEditingController _eventSearchController;
+
   @override
   void initState() {
     super.initState();
+    _eventSearchController = TextEditingController();
     _loadEvents();
+  }
+
+  @override
+  void dispose() {
+    _eventSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEvents() async {
@@ -37,225 +51,191 @@ class _EventsScreenState extends State<EventsScreen> {
         }
 
         // Filter real events (non-playlists) using getter
-        final events = eventProvider.realEvents;
+        var events = eventProvider.realEvents;
 
-        if (events.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.event,
-                  size: 80,
-                  color: Theme.of(context).primaryColor,
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'No Events Yet',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 12),
-                const Text('Create your first event to get started'),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _showCreateEventDialog,
-                  child: const Text('Create Event'),
-                ),
-              ],
-            ),
-          );
+        // Apply search filter
+        final searchTerm = _eventSearchController.text.toLowerCase();
+        if (searchTerm.isNotEmpty) {
+          events = events
+              .where((e) => e.name.toLowerCase().contains(searchTerm))
+              .toList();
         }
 
-        return ListView.builder(
-          itemCount: events.length,
-          itemBuilder: (context, index) {
-            final event = events[index];
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: ListTile(
-                title: Text(event.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (event.description != null &&
-                        event.description!.isNotEmpty)
-                      Text(event.description!),
-                    if (event.eventDate != null)
-                      Text(
-                        'Starts: ${event.eventDate.toString().split('.')[0]}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    if (event.locationName != null &&
-                        event.locationName!.isNotEmpty)
-                      Text(
-                        'Location: ${event.locationName}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          EventDetailsScreen(eventId: event.id),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
+        // Apply visibility filter
+        if (_eventVisibilityFilter != null) {
+          events = events
+              .where((e) => e.visibility == _eventVisibilityFilter)
+              .toList();
+        }
 
-  // MARK: - CreateEventDialog
-  void _showCreateEventDialog() {
-    final titleController = TextEditingController();
-    final descriptionController = TextEditingController();
-    final locationController = TextEditingController();
-    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
-    bool isPublic = true;
+        // Apply license type filter
+        if (_eventLicenseTypeFilter != null) {
+          events = events
+              .where((e) => e.licenseType == _eventLicenseTypeFilter)
+              .toList();
+        }
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: const Text('Create Event'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Event Title',
-                        border: OutlineInputBorder(),
+        return Column(
+          children: [
+            // Search and Filter section
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Search field
+                  TextField(
+                    controller: _eventSearchController,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Search events...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _eventSearchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _eventSearchController.clear();
+                                setState(() {});
+                              },
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: descriptionController,
-                      decoration: const InputDecoration(
-                        labelText: 'Description (optional)',
-                        border: OutlineInputBorder(),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Filters',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  // Visibility filter
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      FilterChip(
+                        label: const Text('All'),
+                        selected: _eventVisibilityFilter == null,
+                        onSelected: (_) {
+                          setState(() => _eventVisibilityFilter = null);
+                        },
                       ),
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: locationController,
-                      decoration: const InputDecoration(
-                        labelText: 'Location (optional)',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    GestureDetector(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDate,
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 365),
-                          ),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            selectedDate = picked;
-                          });
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              selectedDate.toString().split(' ')[0],
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            const Icon(Icons.calendar_today),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Visibility'),
-                        SegmentedButton<bool>(
-                          segments: const [
-                            ButtonSegment(label: Text('Public'), value: true),
-                            ButtonSegment(label: Text('Private'), value: false),
-                          ],
-                          selected: <bool>{isPublic},
-                          onSelectionChanged: (Set<bool> newSelection) {
-                            setState(() {
-                              isPublic = newSelection.first;
-                            });
+                      ...EventVisibility.values.map((visibility) {
+                        return FilterChip(
+                          label: Text(visibility.name),
+                          selected: _eventVisibilityFilter == visibility,
+                          onSelected: (_) {
+                            setState(() => _eventVisibilityFilter = visibility);
                           },
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // License type filter
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      FilterChip(
+                        label: const Text('All types'),
+                        selected: _eventLicenseTypeFilter == null,
+                        onSelected: (_) {
+                          setState(() => _eventLicenseTypeFilter = null);
+                        },
+                      ),
+                      ...EventLicenseType.values.map((licenseType) {
+                        return FilterChip(
+                          label: Text(licenseType.name),
+                          selected: _eventLicenseTypeFilter == licenseType,
+                          onSelected: (_) {
+                            setState(
+                              () => _eventLicenseTypeFilter = licenseType,
+                            );
+                          },
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // List of events
+            if (events.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.event,
+                        size: 80,
+                        color: Theme.of(context).primaryColor,
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'No Events Found',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('Create your first event to get started'),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () => showCreateEventDialog(context),
+                        child: const Text('Create Event'),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              Expanded(
+                child: ListView.builder(
+                  itemCount: events.length,
+                  itemBuilder: (context, index) {
+                    final event = events[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: ListTile(
+                        title: Text(event.name),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (event.description != null &&
+                                event.description!.isNotEmpty)
+                              Text(event.description!),
+                            if (event.eventDate != null)
+                              Text(
+                                'Starts: ${event.eventDate.toString().split('.')[0]}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            if (event.locationName != null &&
+                                event.locationName!.isNotEmpty)
+                              Text(
+                                'Location: ${event.locationName}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ],
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EventDetailsScreen(eventId: event.id),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (titleController.text.isNotEmpty) {
-                      final eventProvider = context.read<EventProvider>();
-                      final success = await eventProvider.createEvent(
-                        name: titleController.text,
-                        description: descriptionController.text.isNotEmpty
-                            ? descriptionController.text
-                            : null,
-                        eventDate: selectedDate,
-                        locationName: locationController.text.isNotEmpty
-                            ? locationController.text
-                            : null,
-                        visibility: isPublic ? 'public' : 'private',
-                        type: 'party', // Create as event (not playlist)
-                      );
-                      if (mounted) {
-                        Navigator.pop(context);
-                        if (success) {
-                          await eventProvider.loadMyEvents();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Event created successfully!'),
-                            ),
-                          );
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Error: ${eventProvider.error}'),
-                            ),
-                          );
-                        }
-                      }
-                    }
-                  },
-                  child: const Text('Create'),
-                ),
-              ],
-            );
-          },
+          ],
         );
       },
     );

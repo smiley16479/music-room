@@ -6,6 +6,7 @@ import '../services/index.dart';
 /// Auth Provider - manages authentication state
 class AuthProvider extends ChangeNotifier {
   final AuthService authService;
+  final WebSocketService? webSocketService;
 
   User? _currentUser;
   String? _token;
@@ -13,7 +14,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
-  AuthProvider({required this.authService});
+  AuthProvider({required this.authService, this.webSocketService});
 
   // Getters
   User? get currentUser => _currentUser;
@@ -35,6 +36,12 @@ class AuthProvider extends ChangeNotifier {
       _error = null;
       // Cache token in memory for quick access
       _token = await authService.secureStorage.getToken();
+
+      // Connect to WebSocket if authenticated
+      if (_isAuthenticated && _token != null && webSocketService != null) {
+        await webSocketService!.connect(_token!);
+        webSocketService!.joinEventsRoom();
+      }
     } catch (e) {
       _currentUser = null;
       _isAuthenticated = false;
@@ -75,21 +82,22 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Login
-  Future<bool> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<bool> login({required String email, required String password}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _currentUser = await authService.login(
-        email: email,
-        password: password,
-      );
-        _token = await authService.secureStorage.getToken();
+      _currentUser = await authService.login(email: email, password: password);
+      _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
+
+      // Connect to WebSocket after successful login
+      if (_token != null && webSocketService != null) {
+        await webSocketService!.connect(_token!);
+        webSocketService!.joinEventsRoom();
+      }
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -148,7 +156,10 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       // Ignore logout errors, we're clearing state anyway
     }
-    
+
+    // Disconnect WebSocket
+    webSocketService?.disconnect();
+
     _currentUser = null;
     _token = null;
     _isAuthenticated = false;
@@ -171,7 +182,7 @@ class AuthProvider extends ChangeNotifier {
         idToken: idToken,
         platform: platform,
       );
-        _token = await authService.secureStorage.getToken();
+      _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
@@ -198,7 +209,7 @@ class AuthProvider extends ChangeNotifier {
         idToken: idToken,
         platform: platform,
       );
-        _token = await authService.secureStorage.getToken();
+      _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;
@@ -211,19 +222,15 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Facebook Sign In
-  Future<bool> facebookSignIn({
-    required String accessToken,
-  }) async {
+  Future<bool> facebookSignIn({required String accessToken}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _currentUser = await authService.facebookSignIn(
-        accessToken: accessToken,
-      );
-        _token = await authService.secureStorage.getToken();
-        _isAuthenticated = true;
+      _currentUser = await authService.facebookSignIn(accessToken: accessToken);
+      _token = await authService.secureStorage.getToken();
+      _isAuthenticated = true;
       _isLoading = false;
       notifyListeners();
       return true;
@@ -236,9 +243,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   /// Link Facebook Account
-  Future<bool> linkFacebookAccount({
-    required String accessToken,
-  }) async {
+  Future<bool> linkFacebookAccount({required String accessToken}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -247,7 +252,7 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.linkFacebookAccount(
         accessToken: accessToken,
       );
-        _token = await authService.secureStorage.getToken();
+      _token = await authService.secureStorage.getToken();
       _isLoading = false;
       notifyListeners();
       return true;

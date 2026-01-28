@@ -7,3 +7,5 @@ export 'invitation_service.dart';
 export 'event_service.dart';
 export 'friend_service.dart';
 export 'audio_player_service.dart';
+export 'websocket_service.dart';
+export 'geocoding_service.dart';

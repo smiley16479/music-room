@@ -73,5 +73,10 @@
 	  <string>fbapi</string>
 	  <string>fb-messenger-share-api</string>
 	</array>
+	<!-- Permissions for geocoding -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs access to your location for geocoding</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs access to your location for geocoding</string>
 </dict>
 </plist>

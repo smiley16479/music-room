@@ -7,17 +7,13 @@ part 'event.g.dart';
 
 /// Event Type enum
 enum EventType {
-  @JsonValue('listening_session')
-  listeningSession, // = Playlist
-  @JsonValue('party')
-  party,
-  @JsonValue('collaborative')
-  collaborative,
-  @JsonValue('live_session')
-  liveSession,
+  @JsonValue('playlist')
+  playlist, // = Playlist
+  @JsonValue('event')
+  event,
 }
 
-/// Event Visibility enum  
+/// Event Visibility enum
 enum EventVisibility {
   @JsonValue('public')
   public,
@@ -27,36 +23,33 @@ enum EventVisibility {
 
 /// Event License Type enum
 enum EventLicenseType {
-  @JsonValue('open')
-  open,
+  @JsonValue('none')
+  none,
   @JsonValue('invited')
   invited,
-  @JsonValue('admin')
-  admin,
   @JsonValue('location_based')
   locationBased,
 }
 
 /// Event model (unifié avec Playlist)
-/// Un Event de type LISTENING_SESSION EST une playlist
 @JsonSerializable()
 class Event extends Equatable {
   final String id;
   final String name;
   final String? description;
-  
-  // Event type (LISTENING_SESSION = playlist)
+
+  // Event type
   final EventType type;
   final EventVisibility visibility;
   final EventLicenseType? licenseType;
-  
-  // Playlist-specific fields (nullable, only for LISTENING_SESSION)
+
+  // Playlist-specific fields
   final int? trackCount;
   final int? totalDuration;
   final int? collaboratorCount;
   final String? coverImageUrl;
   final String? playlistName;
-  
+
   // Event-specific fields
   @JsonKey(name: 'eventDate')
   final DateTime? eventDate;
@@ -72,7 +65,7 @@ class Event extends Equatable {
   final double? longitude;
   @JsonKey(name: 'locationRadius')
   final int? locationRadius;
-  
+
   // Voting
   @JsonKey(name: 'votingEnabled')
   final bool? votingEnabled;
@@ -82,7 +75,7 @@ class Event extends Equatable {
   final String? votingEndTime;
   @JsonKey(name: 'currentTrackId')
   final String? currentTrackId;
-  
+
   // Common fields
   @JsonKey(name: 'creatorId')
   final String? creatorId;
@@ -91,7 +84,7 @@ class Event extends Equatable {
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
-  
+
   // Relations
   final List<EventParticipant>? participants;
   @JsonKey(name: 'participantsCount', fromJson: _participantsCountFromJson)
@@ -132,48 +125,52 @@ class Event extends Equatable {
     this.participantsCount,
     this.votes,
   });
-  
+
   /// Helper: Est-ce une playlist ?
-  bool get isPlaylist => type == EventType.listeningSession;
-  
+  bool get isPlaylist => type == EventType.playlist;
+
   /// Helper: Nombre de pistes (alias pour UI)
   int get numberOfTracks => trackCount ?? 0;
+
+  /// Helper: Is this event created by the current user? ⚠️ assure toi que ça marche
+  /// Returns true if creatorId is not null (assumption: we're checking against current user in provider)
+  bool get isCreatedByMe => creatorId != null;
 
   factory Event.fromJson(Map<String, dynamic> json) => _$EventFromJson(json);
   Map<String, dynamic> toJson() => _$EventToJson(this);
 
   @override
   List<Object?> get props => [
-        id,
-        name,
-        description,
-        type,
-        visibility,
-        licenseType,
-        trackCount,
-        totalDuration,
-        collaboratorCount,
-        coverImageUrl,
-        playlistName,
-        eventDate,
-        eventEndDate,
-        startDate,
-        endDate,
-        creatorId,
-        creator,
-        locationName,
-        latitude,
-        longitude,
-        locationRadius,
-        votingEnabled,
-        votingStartTime,
-        votingEndTime,
-        currentTrackId,
-        status,
-        participants,
-        participantsCount,
-        votes,
-      ];
+    id,
+    name,
+    description,
+    type,
+    visibility,
+    licenseType,
+    trackCount,
+    totalDuration,
+    collaboratorCount,
+    coverImageUrl,
+    playlistName,
+    eventDate,
+    eventEndDate,
+    startDate,
+    endDate,
+    creatorId,
+    creator,
+    locationName,
+    latitude,
+    longitude,
+    locationRadius,
+    votingEnabled,
+    votingStartTime,
+    votingEndTime,
+    currentTrackId,
+    status,
+    participants,
+    participantsCount,
+    votes,
+  ];
 }
 
 /// Convert votes from various formats to int
