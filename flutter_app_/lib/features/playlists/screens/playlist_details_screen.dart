@@ -151,7 +151,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   Widget _buildViewMode(EventProvider eventProvider, dynamic playlist) {
-    // header cover removed (unused)
+    final String? headerCover = eventProvider.currentPlaylistTracks.isNotEmpty
+        ? eventProvider.currentPlaylistTracks.first.coverUrl
+        : null;
 
     return SingleChildScrollView(
       child: Column(
@@ -179,11 +181,29 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     color: Colors.white.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.music_note,
-                    size: 60,
-                    color: Colors.white,
-                  ),
+                  child: headerCover != null && headerCover.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            headerCover,
+                            fit: BoxFit.cover,
+                            width: 120,
+                            height: 120,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                              child: Icon(
+                                Icons.music_note,
+                                size: 60,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.music_note,
+                          size: 60,
+                          color: Colors.white,
+                        ),
                 ),
                 const SizedBox(height: 24),
 
