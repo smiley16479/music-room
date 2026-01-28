@@ -226,7 +226,7 @@ class FriendProvider extends ChangeNotifier {
     _error = null;
 
     try {
-      final updatedInvitation = await friendService.acceptInvitation(invitationId);
+      await friendService.acceptInvitation(invitationId);
       
       // Remove the invitation from the list (backend deletes it after accepting)
       final index = _receivedInvitations.indexWhere((i) => i.id == invitationId);

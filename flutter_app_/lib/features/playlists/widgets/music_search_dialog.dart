@@ -6,7 +6,9 @@ import '../../../core/services/api_service.dart';
 
 /// Music search dialog with live search
 class MusicSearchDialog extends StatefulWidget {
-  const MusicSearchDialog({super.key});
+  final Future<bool> Function(TrackSearchResult track)? onTrackAdded;
+
+  const MusicSearchDialog({super.key, this.onTrackAdded});
 
   @override
   State<MusicSearchDialog> createState() => _MusicSearchDialogState();
@@ -268,14 +270,36 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
             ),
           ],
         ),
-        trailing: ElevatedButton.icon(
-          onPressed: () => Navigator.pop(context, track),
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('Add'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          ),
-        ),
+        trailing: widget.onTrackAdded != null
+            ? ElevatedButton.icon(
+                onPressed: () async {
+                  // Call the callback instead of closing
+                  await widget.onTrackAdded!(track);
+                  // Don't close the dialog, just show a snackbar
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('✅ ${track.title} added to playlist'),
+                        duration: const Duration(seconds: 2),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              )
+            : ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, track),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
         isThreeLine: true,
       ),
     );

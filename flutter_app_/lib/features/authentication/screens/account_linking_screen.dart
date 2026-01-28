@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/providers/index.dart';
-import '../../../core/models/index.dart';
 import '../../../config/app_config.dart';
 
 /// Account Linking Screen - allows users to link Google/Facebook accounts

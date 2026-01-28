@@ -33,6 +33,11 @@ class AudioPlayerService {
   /// Play audio from URL
   Future<void> playFromUrl(String url) async {
     try {
+      // Stop any currently playing audio first
+      await _audioPlayer.stop();
+      // Reset position to start
+      await _audioPlayer.seek(Duration.zero);
+      // Set new URL and play
       await _audioPlayer.setUrl(url);
       await _audioPlayer.play();
     } catch (e) {

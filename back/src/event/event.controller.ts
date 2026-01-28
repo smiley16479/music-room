@@ -456,6 +456,29 @@ export class EventController {
   }
 
   // Playlist Tracks
+  @Get(':id/tracks')
+  @Public()
+  @ApiOperation({
+    summary: 'Get playlist tracks',
+    description: 'Returns all tracks in the event/playlist',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event/playlist',
+    required: true
+  })
+  async getPlaylistTracks(
+    @Param('id') playlistId: string,
+  ) {
+    const tracks = await this.eventService.getPlaylistTracks(playlistId);
+    return {
+      success: true,
+      data: tracks,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Post(':id/tracks')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
