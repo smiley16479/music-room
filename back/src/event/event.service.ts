@@ -1481,11 +1481,28 @@ export class EventService {
       throw new NotFoundException('Track not found in this event');
     }
 
+    // Store position before removal
+    const removedPosition = playlistTrack.position;
+
     // Remove votes for this track
     await this.removeVotesOfTrack(eventId, trackId);
 
     // Delete the track
     await playlistTrackRepository.remove(playlistTrack);
+
+    // Recompute positions for tracks after the removed one
+    const tracksToUpdate = await playlistTrackRepository.find({
+      where: { eventId },
+      order: { position: 'ASC' },
+    });
+
+    // Update positions to fill the gap
+    for (const track of tracksToUpdate) {
+      if (track.position > removedPosition) {
+        track.position = track.position - 1;
+      }
+    }
+    await playlistTrackRepository.save(tracksToUpdate);
 
     // Update track count
     event.trackCount = Math.max(0, (event.trackCount || 0) - 1);
@@ -1563,5 +1580,51 @@ export class EventService {
       createdAt: saved.createdAt,
       updatedAt: saved.addedAt || saved.createdAt,
     };
+  }
+
+  /**
+   * Reorder playlist tracks using an ordered list of playlist-track IDs
+   */
+  async reorderPlaylistTracks(playlistId: string, userId: string, trackIds: string[]): Promise<void> {
+    const event = await this.findById(playlistId, userId);
+
+    // Permission: only creator or admins
+    const isCreator = event.creatorId === userId;
+    const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+
+    if (!isCreator && !isAdmin) {
+      throw new ForbiddenException('Only the creator or admins can reorder tracks');
+    }
+
+    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
+    const existingTracks = await playlistTrackRepository.find({ where: { eventId: playlistId } });
+
+    if (!existingTracks || existingTracks.length === 0) {
+      throw new NotFoundException('No tracks found for this playlist');
+    }
+
+    // Ensure provided list covers exactly the existing tracks
+    if (trackIds.length !== existingTracks.length) {
+      throw new BadRequestException('trackIds length does not match current playlist track count');
+    }
+
+    // Map by id for quick lookup
+    const byId = new Map(existingTracks.map((t: any) => [t.id, t]));
+
+    const toSave: any[] = [];
+    for (let i = 0; i < trackIds.length; i++) {
+      const id = trackIds[i];
+      const pt = byId.get(id);
+      if (!pt) {
+        throw new NotFoundException(`Playlist track not found: ${id}`);
+      }
+      pt.position = i + 1;
+      toSave.push(pt);
+    }
+
+    await playlistTrackRepository.save(toSave);
+
+    // Notify participants via gateway
+    this.eventGateway.notifyTracksReordered(playlistId, trackIds, userId);
   }
 }

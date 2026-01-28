@@ -388,7 +388,7 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
-  /// Reorder track in playlist
+  /// Reorder track in playlist (local only - call persistReorder to save)
   void reorderTrack(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length ||
         newIndex < 0 || newIndex > _currentPlaylistTracks.length) {
@@ -402,9 +402,18 @@ class EventProvider extends ChangeNotifier {
     _currentPlaylistTracks.insert(newIndex > oldIndex ? newIndex - 1 : newIndex, track);
     
     notifyListeners();
-    
-    // TODO: Call backend API to persist the new order
-    // await eventService.reorderPlaylistTracks(playlistId, newTrackOrder);
+  }
+
+  /// Persist playlist reorder to backend
+  Future<bool> persistReorder(String playlistId, List<String> playlistTrackIds) async {
+    try {
+      await eventService.reorderPlaylistTracks(playlistId, playlistTrackIds);
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return false;
+    }
   }
 
   /// Add participant to event/playlist

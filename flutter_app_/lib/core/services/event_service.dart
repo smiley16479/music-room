@@ -386,6 +386,14 @@ class EventService {
     );
   }
 
+  /// Reorder playlist tracks by sending an ordered list of playlist-track IDs
+  Future<void> reorderPlaylistTracks(String playlistId, List<String> playlistTrackIds) async {
+    await apiService.post(
+      '${AppConfig.eventsEndpoint}/$playlistId/tracks/reorder',
+      body: {'trackIds': playlistTrackIds},
+    );
+  }
+
   /// Invite users to an event (creates invitations for private events)
   /// This is the correct method for inviting friends to events
   Future<Map<String, dynamic>> inviteUsers(

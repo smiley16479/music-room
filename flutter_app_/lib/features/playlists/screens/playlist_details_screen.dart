@@ -158,6 +158,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   Widget _buildViewMode(EventProvider eventProvider, dynamic playlist) {
+    final String? headerCover = eventProvider.currentPlaylistTracks.isNotEmpty
+        ? eventProvider.currentPlaylistTracks.first.coverUrl
+        : null;
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -183,13 +187,41 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     color: Colors.white.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.music_note,
-                    size: 60,
-                    color: Colors.white,
-                  ),
+                  child: headerCover != null && headerCover.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            headerCover,
+                            fit: BoxFit.cover,
+                            width: 120,
+                            height: 120,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                              child: Icon(
+                                Icons.music_note,
+                                size: 60,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.music_note,
+                          size: 60,
+                          color: Colors.white,
+                        ),
                 ),
                 const SizedBox(height: 24),
+
+                // Playlist name
+                Text(
+                  playlist.name ?? 'Untitled Playlist',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 8),
 
                 // Invite Friends Button - only visible for private playlists if user is owner
                 const SizedBox(height: 24),
@@ -366,19 +398,38 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: eventProvider.currentPlaylistTracks.length,
                       onReorder: (oldIndex, newIndex) async {
-                        // Reorder in the provider
+                        // Reorder locally first
                         eventProvider.reorderTrack(oldIndex, newIndex);
 
-                        // TODO: Call backend API to persist the new order
-                        // For now, just update locally
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Track moved to position ${newIndex + 1}',
-                            ),
-                            duration: const Duration(seconds: 2),
-                          ),
+                        // Build the new order as a list of playlist-track IDs
+                        final newOrder = eventProvider.currentPlaylistTracks
+                            .map((t) => t.id)
+                            .toList();
+
+                        // Persist the order to backend
+                        final success = await eventProvider.persistReorder(
+                          playlist.id,
+                          newOrder,
                         );
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success
+                                    ? '✅ Tracks reordered'
+                                    : '❌ Failed to save track order',
+                              ),
+                              backgroundColor: success ? Colors.green : Colors.red,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+
+                          if (!success) {
+                            // On failure, reload playlist to restore server state
+                            await eventProvider.loadPlaylistDetails(widget.playlistId);
+                          }
+                        }
                       },
                       itemBuilder: (context, index) {
                         final track =
@@ -394,9 +445,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                             return Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
                                 final currentUser = authProvider.currentUser;
-                                final isOwner =
-                                    currentUser?.id == playlist.creatorId;
+                                final isOwner = currentUser?.id == playlist.creatorId;
                                 final canDelete = isOwner;
+                                final isMobile = MediaQuery.of(context).size.width < 600;
 
                                 final trackContent = Container(
                                   key: Key('track_container_${track.id}'),
@@ -409,8 +460,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                   ),
                                   child: Row(
                                     children: [
-                                      // Drag Handle (Owner only)
-                                      if (isOwner)
+                                      // Drag Handle (Owner only) - hidden on mobile
+                                      if (isOwner && !isMobile)
                                         Padding(
                                           padding:
                                               const EdgeInsets.only(right: 8),
@@ -419,9 +470,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                             color: Colors.grey.shade400,
                                             size: 24,
                                           ),
-                                        )
-                                      else
-                                        const SizedBox(width: 32),
+                                        ),
 
                                       // Track Cover Image
                                       Container(
@@ -632,12 +681,21 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                   ),
                                 );
 
-                                // Wrap entire container with ReorderableDragStartListener for owners
+                                // Wrap entire container with appropriate reorder listener for owners
                                 if (isOwner) {
-                                  return ReorderableDragStartListener(
-                                    index: index,
-                                    child: trackContent,
-                                  );
+                                  if (isMobile) {
+                                    // On mobile, require long-press to start reordering
+                                    return ReorderableDelayedDragStartListener(
+                                      index: index,
+                                      child: trackContent,
+                                    );
+                                  } else {
+                                    // Desktop/tablet: immediate drag handle
+                                    return ReorderableDragStartListener(
+                                      index: index,
+                                      child: trackContent,
+                                    );
+                                  }
                                 } else {
                                   return trackContent;
                                 }
