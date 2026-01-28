@@ -134,7 +134,7 @@ export class Event {
 
   // ============================================
   // PLAYLIST-SPECIFIC FIELDS (nullable)
-  // Used only when type = LISTENING_SESSION or events with playlists
+  // Used only when type = playlist or events with playlists
   // Merged from Playlist entity for Single Table Inheritance pattern
   // ============================================
   @Column({ nullable: true })
@@ -175,7 +175,7 @@ export class Event {
   participants: EventParticipant[];
 
   // Tracks are now directly related to Event (merged from Playlist)
-  // For LISTENING_SESSION type, these are the playlist tracks
+  // For playlist type, these are the playlist tracks
   // For other event types, these are the event tracks
   @OneToMany(() => PlaylistTrack, (track) => track.event, { cascade: true })
   tracks: PlaylistTrack[];

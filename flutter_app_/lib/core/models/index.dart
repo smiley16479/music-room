@@ -4,3 +4,4 @@ export 'playlist.dart';
 export 'playlist_track.dart';
 export 'invitation.dart';
 export 'event.dart';
+export 'device.dart';

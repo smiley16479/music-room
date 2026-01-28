@@ -19,7 +19,7 @@ import { Vote } from 'src/event/entities/vote.entity';
  * PlaylistTrack entity (tracks in an Event)
  * 
  * Since Playlist is merged into Event, this entity now links directly to Event.
- * For LISTENING_SESSION events, these are the playlist tracks.
+ * For playlist events, these are the playlist tracks.
  * For other event types, these can be the event's track queue.
  */
 @Entity('playlist_tracks')

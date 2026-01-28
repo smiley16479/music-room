@@ -19,7 +19,7 @@ Music Room - Event-Centric Music Platform API
 
 ## 🏗️ Architecture
 - **Event-Centric**: All features centralized around Events
-- **Single Table Inheritance**: Playlists are Events with type='LISTENING_SESSION'
+- **Single Table Inheritance**: Playlists are Events with type='playlist'
 - **Real-time Updates**: WebSocket support for live event updates
 - **Location-based**: Geo-location support for events
 

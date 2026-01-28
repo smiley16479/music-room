@@ -117,3 +117,8 @@ rm -f ~/sgoinfre/flutter/bin/cache/lockfile"
 # adb devices # abd ->(android debug bridge)
 # emulator -list-avds -> avoir la liste des emulateur
 # emulator -avd NOM_DE_TON_AVD -gpu swiftshader_indirect -no-snapshot -verbose -> lqncer l'emulateur
+
+## Recréer event.g.dart correctement
+# flutter pub run build_runner build 
+# ou:
+# flutter pub run build_runner watch --delete-conflicting-outputs

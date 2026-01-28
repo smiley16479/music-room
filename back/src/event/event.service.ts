@@ -303,7 +303,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'votes', 'votes.user', 'votes.track'],
+      relations: ['participants', 'votes', 'votes.user', 'votes.track'],
     });
 
     if (!event) {

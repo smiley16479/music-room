@@ -1034,7 +1034,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       const room = SOCKET_ROOMS.EVENT(eventId);
       const event = await this.eventService.findById(eventId, adminUserId);
       
-      // Event IS playlist when type=LISTENING_SESSION
+      // Event IS playlist when type=playlist
       if (event.trackCount !== undefined && event.trackCount !== null) {
         await this.eventService.removeTrack(event.id, trackId, adminUserId);
         
@@ -1100,7 +1100,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       if (isCreator /* || isAdmin */) {
         try {
-          // Event IS playlist when type=LISTENING_SESSION
+          // Event IS playlist when type=playlist
             if (event.trackCount !== undefined && event.trackCount !== null) {
               await this.eventService.removeTrack(event.id, trackId, client.userId);
               

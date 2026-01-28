@@ -35,6 +35,10 @@ void main() async {
   );
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
+  final deviceService = DeviceService(apiService: apiService);
+  final deviceRegistrationService = DeviceRegistrationService(
+    apiService: apiService,
+  );
   final webSocketService = WebSocketService();
   // PlaylistService is now an alias for EventService
 
@@ -57,10 +61,15 @@ void main() async {
           create: (_) => InvitationService(apiService: apiService),
         ),
         Provider<FriendService>(create: (_) => friendService),
+        Provider<DeviceService>(create: (_) => deviceService),
+        Provider<DeviceRegistrationService>(
+          create: (_) => deviceRegistrationService,
+        ),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(
             authService: authService,
             webSocketService: webSocketService,
+            deviceRegistrationService: deviceRegistrationService,
           ),
         ),
         ChangeNotifierProvider(
@@ -73,6 +82,9 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => FriendProvider(friendService: friendService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => DeviceProvider(deviceService: deviceService),
         ),
       ],
       child: const MyApp(),

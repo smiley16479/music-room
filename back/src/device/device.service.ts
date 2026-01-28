@@ -77,19 +77,45 @@ export class DeviceService {
       throw new NotFoundException('Owner not found');
     }
 
-    // Check if device name is unique for this user
-    const existingDevice = await this.deviceRepository.findOne({
-      where: { name: createDeviceDto.name, ownerId },
-    });
+    // Check if device with same identifier already exists for this user
+    if (createDeviceDto.identifier) {
+      const existingDevice = await this.deviceRepository.findOne({
+        where: { identifier: createDeviceDto.identifier, ownerId },
+      });
 
-    if (existingDevice) {
-      throw new ConflictException('Device name already exists for this user');
+      if (existingDevice) {
+        // Device already exists, update lastSeen instead of creating a new one
+        existingDevice.lastSeen = new Date();
+        existingDevice.status = DeviceStatus.ONLINE;
+        
+        // Update name if provided
+        if (createDeviceDto.name) {
+          existingDevice.name = createDeviceDto.name;
+        }
+
+        // Update type if provided
+        if (createDeviceDto.type) {
+          existingDevice.type = createDeviceDto.type;
+        }
+
+        // Update deviceInfo if provided
+        if (createDeviceDto.deviceInfo) {
+          existingDevice.deviceInfo = {
+            ...existingDevice.deviceInfo,
+            ...createDeviceDto.deviceInfo,
+          };
+        }
+
+        const updatedDevice = await this.deviceRepository.save(existingDevice);
+        return this.addDeviceStats(updatedDevice);
+      }
     }
 
+    // New device: create it
     const device = this.deviceRepository.create({
       ...createDeviceDto,
       ownerId,
-      status: DeviceStatus.OFFLINE,
+      status: DeviceStatus.ONLINE,
       lastSeen: new Date(),
     });
 
@@ -107,7 +133,7 @@ export class DeviceService {
     if (userId) {
       // Show user's devices + devices delegated to them
       queryBuilder = queryBuilder.where(
-        'device.ownerId = :userId OR device.delegatedToId = :userId',
+        'device.ownerId = :userId',
         { userId }
       );
     }

@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../../core/providers/index.dart';
 import '../../../core/models/index.dart';
+import '../../../core/services/device_service.dart';
+import '../../../core/services/api_service.dart';
 
 /// Friends management screen
 class FriendsScreen extends StatefulWidget {
@@ -12,7 +14,8 @@ class FriendsScreen extends StatefulWidget {
   State<FriendsScreen> createState() => _FriendsScreenState();
 }
 
-class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProviderStateMixin {
+class _FriendsScreenState extends State<FriendsScreen>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   bool _isInitialized = false;
@@ -147,7 +150,9 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Remove Friend'),
-        content: Text('Are you sure you want to remove ${friend.displayName ?? friend.email} from your friends?'),
+        content: Text(
+          'Are you sure you want to remove ${friend.displayName ?? friend.email} from your friends?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -161,7 +166,9 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? 'Friend removed' : 'Failed to remove friend'),
+                    content: Text(
+                      success ? 'Friend removed' : 'Failed to remove friend',
+                    ),
                   ),
                 );
               }
@@ -213,9 +220,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 },
               ),
             ),
-            Expanded(
-              child: _buildSearchResults(provider),
-            ),
+            Expanded(child: _buildSearchResults(provider)),
           ],
         );
       },
@@ -249,7 +254,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
       itemCount: provider.searchResults.length,
       itemBuilder: (context, index) {
         final user = provider.searchResults[index];
-        
+
         // Skip current user in results
         if (user.id == currentUserId) {
           return const SizedBox.shrink();
@@ -322,7 +327,10 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
           backgroundColor: Colors.green,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         ),
-        child: const Text('Accept', style: TextStyle(color: Colors.white, fontSize: 12)),
+        child: const Text(
+          'Accept',
+          style: TextStyle(color: Colors.white, fontSize: 12),
+        ),
       );
     }
 
@@ -337,12 +345,14 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     final invitation = provider.receivedInvitations.firstWhere(
       (i) => i.senderId == user.id && i.isPending,
     );
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Accept Friend Request'),
-        content: Text('${user.displayName ?? user.email ?? 'Unknown'} has sent you a friend request. Accept?'),
+        content: Text(
+          '${user.displayName ?? user.email ?? 'Unknown'} has sent you a friend request. Accept?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -355,7 +365,11 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? 'Friend request accepted!' : 'Failed to accept request'),
+                    content: Text(
+                      success
+                          ? 'Friend request accepted!'
+                          : 'Failed to accept request',
+                    ),
                   ),
                 );
                 if (success) {
@@ -381,7 +395,9 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Send a friend request to ${user.displayName ?? user.email ?? 'Unknown'}?'),
+            Text(
+              'Send a friend request to ${user.displayName ?? user.email ?? 'Unknown'}?',
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: messageController,
@@ -405,12 +421,18 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
               Navigator.pop(context);
               final success = await provider.sendFriendInvitation(
                 inviteeId: user.id,
-                message: messageController.text.isNotEmpty ? messageController.text : null,
+                message: messageController.text.isNotEmpty
+                    ? messageController.text
+                    : null,
               );
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? 'Friend request sent!' : 'Failed to send request: ${provider.error}'),
+                    content: Text(
+                      success
+                          ? 'Friend request sent!'
+                          : 'Failed to send request: ${provider.error}',
+                    ),
                   ),
                 );
               }
@@ -454,10 +476,13 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildReceivedInvitationTile(Invitation invitation, FriendProvider provider) {
+  Widget _buildReceivedInvitationTile(
+    Invitation invitation,
+    FriendProvider provider,
+  ) {
     final inviter = invitation.inviter;
     final isEventInvitation = invitation.type == 'event';
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -495,7 +520,8 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 ),
               ],
             ),
-            if (invitation.message != null && invitation.message!.isNotEmpty) ...[
+            if (invitation.message != null &&
+                invitation.message!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -514,17 +540,20 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                   TextButton.icon(
                     icon: const Icon(Icons.person),
                     label: const Text('View Profile'),
-                    onPressed: () => _showUserProfileDialog(invitation.senderId),
+                    onPressed: () =>
+                        _showUserProfileDialog(invitation.senderId),
                   ),
                 const SizedBox(width: 8),
                 OutlinedButton(
-                  onPressed: () => _handleDeclineInvitation(invitation, provider),
+                  onPressed: () =>
+                      _handleDeclineInvitation(invitation, provider),
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                   child: const Text('Decline'),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  onPressed: () => _handleAcceptInvitation(invitation, provider),
+                  onPressed: () =>
+                      _handleAcceptInvitation(invitation, provider),
                   child: const Text('Accept'),
                 ),
               ],
@@ -535,17 +564,24 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  Future<void> _handleAcceptInvitation(Invitation invitation, FriendProvider provider) async {
+  Future<void> _handleAcceptInvitation(
+    Invitation invitation,
+    FriendProvider provider,
+  ) async {
     final success = await provider.acceptInvitation(invitation.id);
     if (mounted) {
       final isEventInvitation = invitation.type == 'event';
       final message = isEventInvitation
           ? 'Event invitation accepted!'
           : 'Friend request accepted!';
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? message : 'Failed to accept: ${provider.error ?? "Unknown error"}'),
+          content: Text(
+            success
+                ? message
+                : 'Failed to accept: ${provider.error ?? "Unknown error"}',
+          ),
         ),
       );
       if (success) {
@@ -554,17 +590,24 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     }
   }
 
-  Future<void> _handleDeclineInvitation(Invitation invitation, FriendProvider provider) async {
+  Future<void> _handleDeclineInvitation(
+    Invitation invitation,
+    FriendProvider provider,
+  ) async {
     final success = await provider.declineInvitation(invitation.id);
     if (mounted) {
       final isEventInvitation = invitation.type == 'event';
       final message = isEventInvitation
           ? 'Event invitation declined'
           : 'Friend request declined';
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(success ? message : 'Failed to decline: ${provider.error ?? "Unknown error"}'),
+          content: Text(
+            success
+                ? message
+                : 'Failed to decline: ${provider.error ?? "Unknown error"}',
+          ),
         ),
       );
     }
@@ -602,9 +645,12 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildSentInvitationTile(Invitation invitation, FriendProvider provider) {
+  Widget _buildSentInvitationTile(
+    Invitation invitation,
+    FriendProvider provider,
+  ) {
     final invitee = invitation.invitee;
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -623,7 +669,10 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(8),
@@ -635,7 +684,8 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 ),
               ],
             ),
-            if (invitation.message != null && invitation.message!.isNotEmpty) ...[
+            if (invitation.message != null &&
+                invitation.message!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -656,8 +706,12 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                 ),
                 TextButton.icon(
                   icon: const Icon(Icons.cancel, color: Colors.red, size: 18),
-                  label: const Text('Cancel', style: TextStyle(color: Colors.red)),
-                  onPressed: () => _showCancelInvitationDialog(invitation, provider),
+                  label: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onPressed: () =>
+                      _showCancelInvitationDialog(invitation, provider),
                 ),
               ],
             ),
@@ -667,12 +721,17 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
-  void _showCancelInvitationDialog(Invitation invitation, FriendProvider provider) {
+  void _showCancelInvitationDialog(
+    Invitation invitation,
+    FriendProvider provider,
+  ) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cancel Request'),
-        content: const Text('Are you sure you want to cancel this friend request?'),
+        content: const Text(
+          'Are you sure you want to cancel this friend request?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -686,12 +745,19 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(success ? 'Request cancelled' : 'Failed to cancel request'),
+                    content: Text(
+                      success
+                          ? 'Request cancelled'
+                          : 'Failed to cancel request',
+                    ),
                   ),
                 );
               }
             },
-            child: const Text('Yes, Cancel', style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'Yes, Cancel',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -702,7 +768,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   void _showUserProfileDialog(String userId) {
     final friendProvider = context.read<FriendProvider>();
     final currentUser = context.read<AuthProvider>().user;
-    
+
     showDialog(
       context: context,
       builder: (dialogContext) {
@@ -722,7 +788,9 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
             if (user == null) {
               return AlertDialog(
                 title: const Text('Error'),
-                content: Text('Failed to load profile: ${friendProvider.error ?? "Unknown error"}'),
+                content: Text(
+                  'Failed to load profile: ${friendProvider.error ?? "Unknown error"}',
+                ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(dialogContext),
@@ -769,11 +837,14 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                               border: Border.all(color: Colors.white, width: 3),
                             ),
                             child: ClipOval(
-                              child: user.avatarUrl != null && user.avatarUrl!.startsWith('http')
+                              child:
+                                  user.avatarUrl != null &&
+                                      user.avatarUrl!.startsWith('http')
                                   ? Image.network(
                                       user.avatarUrl!,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => _buildAvatarIcon(),
+                                      errorBuilder: (_, __, ___) =>
+                                          _buildAvatarIcon(),
                                     )
                                   : _buildAvatarIcon(),
                             ),
@@ -790,14 +861,22 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                           if (!isCurrentUser) ...[
                             const SizedBox(height: 4),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
-                                color: isFriend ? Colors.green.withOpacity(0.3) : Colors.white.withOpacity(0.2),
+                                color: isFriend
+                                    ? Colors.green.withOpacity(0.3)
+                                    : Colors.white.withOpacity(0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 isFriend ? '✓ Friend' : 'Not a friend',
-                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ],
@@ -810,19 +889,26 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (user.email != null) _buildProfileField('Email', user.email!),
-                          if (user.bio != null) _buildProfileField('Bio', user.bio!),
-                          if (user.location != null) _buildProfileField('Location', user.location!),
+                          if (user.email != null)
+                            _buildProfileField('Email', user.email!),
+                          if (user.bio != null)
+                            _buildProfileField('Bio', user.bio!),
+                          if (user.location != null)
+                            _buildProfileField('Location', user.location!),
                           if (user.birthDate != null)
                             _buildProfileField(
                               'Birth Date',
                               user.birthDate!.toIso8601String().split('T')[0],
                             ),
-                          if (user.musicPreferences != null && user.musicPreferences!.isNotEmpty) ...[
+                          if (user.musicPreferences != null &&
+                              user.musicPreferences!.isNotEmpty) ...[
                             const SizedBox(height: 8),
                             const Text(
                               'Music Preferences',
-                              style: TextStyle(color: Colors.grey, fontSize: 12),
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
                             ),
                             const SizedBox(height: 4),
                             Wrap(
@@ -830,11 +916,33 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                               runSpacing: 4,
                               children: user.musicPreferences!.map((genre) {
                                 return Chip(
-                                  label: Text(genre, style: const TextStyle(fontSize: 11)),
+                                  label: Text(
+                                    genre,
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
                                   padding: EdgeInsets.zero,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                 );
                               }).toList(),
+                            ),
+                          ],
+                          // Device Control Delegation Section (for friends)
+                          if (isFriend && !isCurrentUser) ...[
+                            const SizedBox(height: 24),
+                            const Divider(),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Device Control Delegation',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _buildDeviceDelegationSection(
+                              dialogContext,
+                              userId,
                             ),
                           ],
                         ],
@@ -848,7 +956,9 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                   onPressed: () => Navigator.pop(dialogContext),
                   child: const Text('Close'),
                 ),
-                if (!isCurrentUser && !isFriend && !friendProvider.hasPendingInvitationTo(userId))
+                if (!isCurrentUser &&
+                    !isFriend &&
+                    !friendProvider.hasPendingInvitationTo(userId))
                   ElevatedButton.icon(
                     icon: const Icon(Icons.person_add, size: 18),
                     label: const Text('Add Friend'),
@@ -865,20 +975,357 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
     );
   }
 
+  /// Build device control delegation section
+  Widget _buildDeviceDelegationSection(BuildContext context, String userId) {
+    return FutureBuilder<List<Device>>(
+      future: _loadUserDevices(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 100,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final devices = snapshot.data ?? [];
+
+        if (devices.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No devices available',
+              style: TextStyle(color: Colors.grey[600], fontSize: 13),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: devices.map((device) {
+            return _buildDeviceDelegationTile(device, userId);
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  /// Build a single device delegation tile
+  Widget _buildDeviceDelegationTile(Device device, String delegateToUserId) {
+    final isDelegated = device.isDelegated;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  _getDeviceIcon(device.type),
+                  size: 20,
+                  color: device.isActive ? Colors.green : Colors.grey,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        device.name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${device.type.toString().split('.').last} • ${device.isActive ? 'Active' : 'Inactive'}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            if (isDelegated) ...[
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle,
+                      size: 14,
+                      color: Colors.green,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Control delegated • ${device.delegationTimeLeftFormatted}',
+                      style: const TextStyle(fontSize: 11, color: Colors.green),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (isDelegated)
+                  Expanded(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.schedule, size: 16),
+                      label: const Text(
+                        'Extend',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      onPressed: () =>
+                          _showExtendDelegationDialog(device, delegateToUserId),
+                    ),
+                  ),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: Icon(
+                      isDelegated ? Icons.block : Icons.share,
+                      size: 16,
+                    ),
+                    label: Text(
+                      isDelegated ? 'Revoke' : 'Delegate',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    onPressed: () {
+                      if (isDelegated) {
+                        _revokeDeviceControl(device.id);
+                      } else {
+                        _showDelegateDelegateDeviceDialog(
+                          device,
+                          delegateToUserId,
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isDelegated ? Colors.red : Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Load user devices
+  Future<List<Device>> _loadUserDevices(String userId) async {
+    try {
+      final apiService = context.read<ApiService>();
+      final deviceService = DeviceService(apiService: apiService);
+      return await deviceService.getUserDevices(userId);
+    } catch (e) {
+      debugPrint('Error loading user devices: $e');
+      return [];
+    }
+  }
+
+  /// Get icon for device type
+  IconData _getDeviceIcon(DeviceType type) {
+    switch (type) {
+      case DeviceType.phone:
+        return Icons.smartphone;
+      case DeviceType.tablet:
+        return Icons.tablet;
+      case DeviceType.desktop:
+        return Icons.desktop_mac;
+      case DeviceType.smartSpeaker:
+        return Icons.speaker;
+      case DeviceType.tv:
+        return Icons.tv;
+      default:
+        return Icons.devices;
+    }
+  }
+
+  /// Show delegate device dialog
+  void _showDelegateDelegateDeviceDialog(
+    Device device,
+    String delegateToUserId,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delegate ${device.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Allow your friend to control this device for:',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            _buildDurationOption(device, delegateToUserId, 1, '1 Hour'),
+            _buildDurationOption(device, delegateToUserId, 8, '8 Hours'),
+            _buildDurationOption(device, delegateToUserId, 24, '24 Hours'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build duration option button
+  Widget _buildDurationOption(
+    Device device,
+    String delegateToUserId,
+    int hours,
+    String label,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: ElevatedButton.icon(
+        icon: const Icon(Icons.schedule, size: 16),
+        label: Text(label),
+        onPressed: () {
+          Navigator.pop(context);
+          _delegateDevice(device.id, delegateToUserId, hours);
+        },
+      ),
+    );
+  }
+
+  /// Delegate device control
+  Future<void> _delegateDevice(
+    String deviceId,
+    String delegateToUserId,
+    int hours,
+  ) async {
+    try {
+      final apiService = context.read<ApiService>();
+      final deviceService = DeviceService(apiService: apiService);
+
+      final device = await deviceService.delegateControl(
+        deviceId: deviceId,
+        delegatedToId: delegateToUserId,
+        expiresIn: Duration(hours: hours),
+      );
+
+      if (device != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Control delegated successfully')),
+        );
+        // Refresh the dialog by popping and reopening
+        Navigator.pop(context);
+        _showUserProfileDialog(delegateToUserId);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delegate: $e')));
+      }
+    }
+  }
+
+  /// Show extend delegation dialog
+  void _showExtendDelegationDialog(Device device, String delegateToUserId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Extend ${device.name} Control'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Current time left: ${device.delegationTimeLeftFormatted}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            Text('Extend for:', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Extend 6 hours'),
+            onPressed: () {
+              Navigator.pop(context);
+              _extendDeviceControl(device.id, 6);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Extend device control
+  Future<void> _extendDeviceControl(String deviceId, int hours) async {
+    try {
+      final apiService = context.read<ApiService>();
+      final deviceService = DeviceService(apiService: apiService);
+
+      final device = await deviceService.extendDelegation(deviceId, hours);
+
+      if (device != null && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Delegation extended')));
+        // Refresh the dialog
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to extend: $e')));
+      }
+    }
+  }
+
+  /// Revoke device control
+  Future<void> _revokeDeviceControl(String deviceId) async {
+    try {
+      final apiService = context.read<ApiService>();
+      final deviceService = DeviceService(apiService: apiService);
+
+      final device = await deviceService.revokeControl(deviceId);
+
+      if (device != null && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Control revoked')));
+        // Refresh the dialog
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to revoke: $e')));
+      }
+    }
+  }
+
   Widget _buildProfileField(String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
-          ),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 14),
-          ),
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          Text(value, style: const TextStyle(fontSize: 14)),
         ],
       ),
     );

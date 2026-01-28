@@ -78,7 +78,7 @@ export class InvitationService {
     // Validate and check permissions based on type
     await this.validateInvitationPermissions(type, inviterId, eventId, playlistId);
 
-    // For playlist invitations, playlistId is now an eventId (Event IS Playlist when type=LISTENING_SESSION)
+    // For playlist invitations, playlistId is now an eventId (Event IS Playlist when type=playlist)
     let finalEventId = eventId;
     if (type === InvitationType.PLAYLIST && playlistId) {
       // playlistId is actually an eventId now
@@ -565,7 +565,7 @@ export class InvitationService {
           throw new BadRequestException('Playlist ID is required for playlist invitations');
         }
         
-        // playlistId is now an eventId (Event IS Playlist when type=LISTENING_SESSION)
+        // playlistId is now an eventId (Event IS Playlist when type=playlist)
         const playlistEvent = await this.eventRepository.findOne({ 
           where: { id: playlistId },
           relations: ['participants']

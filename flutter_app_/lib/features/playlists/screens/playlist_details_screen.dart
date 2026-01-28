@@ -62,8 +62,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
         _selectedVisibility = playlist.visibility;
-        _votingInvitedOnly =
-            playlist.eventLicenseType == EventLicenseType.invited;
+        _votingInvitedOnly = playlist.licenseType == EventLicenseType.invited;
       }
       _isEditMode = !_isEditMode;
     });

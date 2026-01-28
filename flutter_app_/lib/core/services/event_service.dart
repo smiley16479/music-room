@@ -307,7 +307,7 @@ class EventService {
   /// Get playlist tracks
   Future<List<PlaylistTrack>> getPlaylistTracks(String playlistId) async {
     final response = await apiService.get(
-      '${AppConfig.eventsEndpoint}/$playlistId/tracks',
+      '${AppConfig.eventsEndpoint}/$playlistId',
     );
 
     List<dynamic> dataList;

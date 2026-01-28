@@ -55,8 +55,20 @@ export class DeviceController {
     description: 'Returns a paginated list of all devices accessible to the current user',
   })
   @ApiQuery({ type: PaginationDto })
-  async findAll(@Query() paginationDto: PaginationDto, @CurrentUser() user: User) {
-    return this.deviceService.findAll(paginationDto, user.id);
+  @ApiQuery({
+    name: 'ownerId',
+    type: String,
+    required: false,
+    description: 'Filter devices by owner ID'
+  })
+  async findAll(
+    @Query() paginationDto: PaginationDto,
+    @Query('ownerId') ownerId?: string,
+    @CurrentUser() user: User | null = null,
+  ) {
+    // If ownerId is provided, use it; otherwise use current user's ID
+    const userId = ownerId || user?.id;
+    return this.deviceService.findAll(paginationDto, userId);
   }
 
   @Get('my-devices')

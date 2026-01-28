@@ -25,13 +25,13 @@ export class ExampleService {
 
   /**
    * Exemple 1: Créer une playlist personnelle
-   * Un Event de type LISTENING_SESSION est créé automatiquement
+   * Un Event de type playlist est créé automatiquement
    */
   async createPersonalPlaylist(userId: string, name: string) {
     // 1. Créer l'Event
     const event = this.eventRepository.create({
       name: `Session - ${name}`,
-      type: EventType.LISTENING_SESSION,
+      type: EventType.playlist,
       visibility: EventVisibility.PRIVATE,
       licenseType: EventLicenseType.OPEN,
       votingEnabled: false, // Pas de vote pour playlist perso

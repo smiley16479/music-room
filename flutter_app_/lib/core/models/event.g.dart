@@ -101,5 +101,6 @@ const _$EventVisibilityEnumMap = {
 
 const _$EventLicenseTypeEnumMap = {
   EventLicenseType.none: 'none',
+  EventLicenseType.invited: 'invited',
   EventLicenseType.locationBased: 'location_based',
 };

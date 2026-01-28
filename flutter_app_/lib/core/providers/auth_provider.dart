@@ -7,6 +7,7 @@ import '../services/index.dart';
 class AuthProvider extends ChangeNotifier {
   final AuthService authService;
   final WebSocketService? webSocketService;
+  final DeviceRegistrationService? deviceRegistrationService;
 
   User? _currentUser;
   String? _token;
@@ -14,7 +15,11 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
-  AuthProvider({required this.authService, this.webSocketService});
+  AuthProvider({
+    required this.authService,
+    this.webSocketService,
+    this.deviceRegistrationService,
+  });
 
   // Getters
   User? get currentUser => _currentUser;
@@ -96,6 +101,14 @@ class AuthProvider extends ChangeNotifier {
       if (_token != null && webSocketService != null) {
         await webSocketService!.connect(_token!);
         webSocketService!.joinEventsRoom();
+      }
+
+      // Register device after successful login
+      if (deviceRegistrationService != null) {
+        final success = await deviceRegistrationService!.registerDevice();
+        if (!success) {
+          debugPrint('Warning: Device registration failed, but login succeeded');
+        }
       }
 
       _isLoading = false;
