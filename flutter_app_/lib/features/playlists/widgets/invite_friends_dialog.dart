@@ -23,7 +23,7 @@ class InviteFriendsDialog extends StatefulWidget {
 
 class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
   List<User> _friends = [];
-  Set<String> _selectedFriendIds = {};
+  final Set<String> _selectedFriendIds = {};
   bool _isLoading = true;
   String? _error;
   String _searchQuery = '';
@@ -132,27 +132,27 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
         constraints: const BoxConstraints(maxHeight: 600, maxWidth: 500),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
+            // Header (purple, like CollaboratorDialog)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).dividerColor,
-                  ),
+                color: Colors.purple.shade700,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
                     widget.isPlaylist ? Icons.playlist_add : Icons.event,
-                    color: Theme.of(context).primaryColor,
+                    color: Colors.white,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -161,19 +161,22 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
                       children: [
                         Text(
                           'Invite Friends',
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         Text(
                           'to ${widget.eventName}',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.grey,
+                                color: Colors.white70,
                               ),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close),
+                    icon: const Icon(Icons.close, color: Colors.white),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -208,46 +211,29 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
               child: _buildFriendsList(),
             ),
 
-            // Actions
+            // Footer with full-width Invite button
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(
-                    color: Theme.of(context).dividerColor,
-                  ),
+                  top: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    '${_selectedFriendIds.length} selected',
-                    style: Theme.of(context).textTheme.bodyMedium,
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.person_add),
+                  label: Text(_selectedFriendIds.isEmpty
+                      ? 'Invite'
+                      : 'Invite (${_selectedFriendIds.length})'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.purple,
+                    foregroundColor: Colors.white,
                   ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancel'),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: _selectedFriendIds.isEmpty
-                            ? null
-                            : _sendInvitations,
-                        icon: const Icon(Icons.send),
-                        label: const Text('Invite'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                  onPressed:
+                      _selectedFriendIds.isEmpty ? null : _sendInvitations,
+                ),
               ),
             ),
           ],

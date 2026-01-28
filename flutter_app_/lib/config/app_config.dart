@@ -1,5 +1,5 @@
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 
 /// Application configuration constants
 /// 
@@ -128,7 +128,7 @@ class AppConfig {
   
   /// Print configuration for debugging
   static void printConfiguration() {
-    print('''
+    debugPrint('''
     ===== App Configuration =====
     App Name: $appName
     Version: $appVersion

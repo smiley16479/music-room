@@ -21,16 +21,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    print('🔵 HomeScreen.initState() - calling _loadAllEvents()');
+    debugPrint('🔵 HomeScreen.initState() - calling _loadAllEvents()');
     _loadAllEvents();
   }
 
   Future<void> _loadAllEvents() async {
-    print('🟡 _loadAllEvents() called');
+    debugPrint('🟡 _loadAllEvents() called');
     final eventProvider = context.read<EventProvider>();
-    print('🟡 EventProvider obtained');
+    debugPrint('🟡 EventProvider obtained');
     await eventProvider.loadMyEvents();
-    print(
+    debugPrint(
       '🟡 loadMyEvents() completed - Total: ${eventProvider.myEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
     );
   }

@@ -62,21 +62,21 @@ class EventProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    print('Loading my events for page $page, limit $limit');
+    debugPrint('Loading my events for page $page, limit $limit');
     try {
       // Récupère TOUS les events de l'utilisateur (events + playlists)
       _myEvents = await eventService.getMyEvents(page: page, limit: limit);
-      print('✅ Loaded my events count: ${_myEvents.length}');
-      print('📋 Event details:');
+      debugPrint('✅ Loaded my events count: ${_myEvents.length}');
+      debugPrint('📋 Event details:');
       for (var e in _myEvents) {
-        print('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
+        debugPrint('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
       }
-      print(
+      debugPrint(
         '🎵 Playlists: ${myPlaylists.length}, 🎉 Real Events: ${realEvents.length}',
       );
     } catch (e) {
       _error = e.toString();
-      print('❌ Error loading my events: $e');
+      debugPrint('❌ Error loading my events: $e');
     }
 
     _isLoading = false;
@@ -113,7 +113,7 @@ class EventProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    print('Creating event - Type: $type, Name: $name');
+    debugPrint('Creating event - Type: $type, Name: $name');
     try {
       final event = await eventService.createEvent(
         name: name,
@@ -124,12 +124,12 @@ class EventProvider extends ChangeNotifier {
         visibility: visibility,
         type: type,
       );
-      print(
+      debugPrint(
         'Event created successfully - ID: ${event.id}, Type: ${event.type}',
       );
       _myEvents.add(event);
-      print('Total events in provider: ${_myEvents.length}');
-      print(
+      debugPrint('Total events in provider: ${_myEvents.length}');
+      debugPrint(
         'Playlists: ${myPlaylists.length}, Real Events: ${realEvents.length}',
       );
       _isLoading = false;

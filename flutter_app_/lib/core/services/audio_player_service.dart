@@ -1,4 +1,5 @@
 import 'package:just_audio/just_audio.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 /// Audio Player Service - handles audio playback using just_audio
 class AudioPlayerService {
@@ -41,7 +42,7 @@ class AudioPlayerService {
       await _audioPlayer.setUrl(url);
       await _audioPlayer.play();
     } catch (e) {
-      print('❌ Error playing audio: $e');
+      debugPrint('❌ Error playing audio: $e');
       rethrow;
     }
   }

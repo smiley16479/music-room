@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'package:flutter_app_/core/models/event.dart';
+import 'package:flutter_app/core/models/event.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 void main() {
   final responseJson = '''
@@ -64,14 +65,14 @@ void main() {
     final jsonData = jsonDecode(responseJson) as Map<String, dynamic>;
     final eventData = jsonData['data'] as Map<String, dynamic>;
     final event = Event.fromJson(eventData);
-    print('Event parsed successfully!');
-    print('Event ID: ${event.id}');
-    print('Event Name: ${event.name}');
-    print('Event Visibility: ${event.visibility}');
-    print('Event Status: ${event.status}');
-    print('Event Votes: ${event.votes}');
-    print('Event Participants: ${event.participants?.length}');
+    debugPrint('Event parsed successfully!');
+    debugPrint('Event ID: ${event.id}');
+    debugPrint('Event Name: ${event.name}');
+    debugPrint('Event Visibility: ${event.visibility}');
+    debugPrint('Event Status: ${event.status}');
+    debugPrint('Event Votes: ${event.votes}');
+    debugPrint('Event Participants: ${event.participants?.length}');
   } catch (e) {
-    print('Error parsing event: $e');
+    debugPrint('Error parsing event: $e');
   }
 }
