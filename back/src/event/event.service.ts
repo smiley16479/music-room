@@ -163,6 +163,22 @@ export class EventService {
 
     console.log('Event saved with ID:', savedEvent.id, 'Type:', savedEvent.type);
     
+    // Add creator as an admin participant for playlists, or as a collaborator for events
+    try {
+      const role = savedEvent.type === EventType.PLAYLIST 
+        ? ParticipantRole.ADMIN 
+        : ParticipantRole.COLLABORATOR;
+      
+      await this.eventParticipantService.addParticipant(
+        savedEvent.id,
+        creatorId,
+        role
+      );
+      console.log(`Creator added as ${role} for event:`, savedEvent.id);
+    } catch (error) {
+      console.error('Error adding creator as participant:', error);
+    }
+    
     this.eventGateway.notifyEventCreated(savedEvent, creator);
 
     return this.findById(savedEvent.id, creatorId);
@@ -173,6 +189,7 @@ export class EventService {
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
 
     if (userId) {
       // Show public events + private events where user has access (creator, participant, admin)
@@ -230,6 +247,7 @@ export class EventService {
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
       .leftJoinAndSelect('event.creator', 'creator')
       .where(
         '(event.creatorId = :userId OR participants.userId = :userId)',
@@ -303,7 +321,11 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
+<<<<<<< HEAD
       relations: ['participants', 'votes', 'votes.user', 'votes.track'],
+=======
+      relations: ['creator', 'participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
+>>>>>>> 3c22bc1 (add collaborator invitation system v1)
     });
 
     if (!event) {
@@ -450,10 +472,10 @@ export class EventService {
   async removeParticipant(eventId: string, userId: string): Promise<void> {
     const event = await this.findById(eventId, userId);
 
-    /*// Can't remove creator
+    // Can't remove creator
     if (event.creatorId === userId) {
-      throw new BadRequestException('Event creator cannot leave the event');
-    }*/
+      throw new BadRequestException('Event creator cannot be removed from the event');
+    }
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -824,6 +846,7 @@ export class EventService {
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
       .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
       .andWhere('event.status = :status', { status: EventStatus.LIVE })
       .andWhere('event.latitude IS NOT NULL AND event.longitude IS NOT NULL')
@@ -1096,6 +1119,7 @@ export class EventService {
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
+      .leftJoinAndSelect('participant.user', 'participantUser')
       .where('event.creatorId = :userId', { userId })
       .orWhere('participant.userId = :userId', { userId })
       .getMany();
@@ -1246,9 +1270,13 @@ export class EventService {
       return;
     }
 
-    // Check if user is an admin
-    if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
-      return; // User is an admin
+    // Check if user is a participant (any role: admin, collaborator, or participant)
+    const isParticipant = event.participants?.some(
+      participant => participant.userId === userId
+    );
+    
+    if (isParticipant) {
+      return; // User is a participant (admin, collaborator, or participant)
     }
 
     // Check if user is invited
@@ -1262,15 +1290,6 @@ export class EventService {
 
     if (invitation) {
       return; // User has an accepted invitation
-    }
-
-    // Check if user is a participant on the event
-    const isParticipant = event.participants?.some(
-      participant => participant.userId === userId
-    );
-    
-    if (isParticipant) {
-      return; // User is an event participant
     }
 
     throw new ForbiddenException('You are not invited to this private event');
@@ -1407,6 +1426,11 @@ export class EventService {
   }
 
   computeStatus(event: Event): EventStatus {
+    // For playlists or events without dates, return the stored status or default to UPCOMING
+    if (!event.eventDate || !event.endDate) {
+      return event.status || EventStatus.UPCOMING;
+    }
+
     // Convertit la date courante en heure de Paris
     const timeZone = 'Europe/Paris';
     const now = toZonedTime(new Date(), timeZone);

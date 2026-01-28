@@ -16,6 +16,20 @@ export class EventParticipantService {
     userId: string,
     role: ParticipantRole = ParticipantRole.PARTICIPANT,
   ): Promise<EventParticipant> {
+    // Check if participant already exists
+    const existing = await this.participantRepository.findOne({
+      where: { eventId, userId },
+    });
+
+    if (existing) {
+      // Update role if different
+      if (existing.role !== role) {
+        existing.role = role;
+        return this.participantRepository.save(existing);
+      }
+      return existing;
+    }
+
     const participant = this.participantRepository.create({
       eventId,
       userId,

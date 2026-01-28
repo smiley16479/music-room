@@ -45,7 +45,7 @@ Event _$EventFromJson(Map<String, dynamic> json) => Event(
   creator: json['creator'] == null
       ? null
       : User.fromJson(json['creator'] as Map<String, dynamic>),
-  status: json['status'] as String,
+  status: json['status'] as String?,
   createdAt: DateTime.parse(json['createdAt'] as String),
   updatedAt: DateTime.parse(json['updatedAt'] as String),
   participants: (json['participants'] as List<dynamic>?)

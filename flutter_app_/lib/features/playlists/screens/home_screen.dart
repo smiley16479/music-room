@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _playlistSearchController = TextEditingController();
     debugPrint('🔵 HomeScreen.initState() - calling _loadAllEvents()');
     _loadAllEvents();
   }

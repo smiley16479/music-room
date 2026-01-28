@@ -8,12 +8,12 @@ part of 'event_participant.dart';
 
 EventParticipant _$EventParticipantFromJson(Map<String, dynamic> json) =>
     EventParticipant(
-      eventId: json['event_id'] as String,
-      userId: json['user_id'] as String,
+      eventId: json['eventId'] as String,
+      userId: json['userId'] as String,
       role: $enumDecode(_$ParticipantRoleEnumMap, json['role']),
-      joinedAt: json['joined_at'] == null
+      joinedAt: json['joinedAt'] == null
           ? null
-          : DateTime.parse(json['joined_at'] as String),
+          : DateTime.parse(json['joinedAt'] as String),
       user: json['user'] == null
           ? null
           : User.fromJson(json['user'] as Map<String, dynamic>),
@@ -21,10 +21,10 @@ EventParticipant _$EventParticipantFromJson(Map<String, dynamic> json) =>
 
 Map<String, dynamic> _$EventParticipantToJson(EventParticipant instance) =>
     <String, dynamic>{
-      'event_id': instance.eventId,
-      'user_id': instance.userId,
+      'eventId': instance.eventId,
+      'userId': instance.userId,
       'role': _$ParticipantRoleEnumMap[instance.role]!,
-      'joined_at': instance.joinedAt?.toIso8601String(),
+      'joinedAt': instance.joinedAt?.toIso8601String(),
       'user': instance.user,
     };
 
