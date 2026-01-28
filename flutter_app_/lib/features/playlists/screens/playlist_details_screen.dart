@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/providers/index.dart';
+import '../../../core/providers/audio_player_provider.dart';
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
@@ -565,6 +567,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           builder: (context, audioProvider, _) {
                             final isCurrentTrack =
                                 audioProvider.currentTrack?.id == track.id;
+                            final isPlaying =
+                                isCurrentTrack && audioProvider.isPlaying;
 
                             return Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
