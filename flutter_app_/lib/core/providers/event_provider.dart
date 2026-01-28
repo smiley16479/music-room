@@ -388,6 +388,25 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
+  /// Reorder track in playlist
+  void reorderTrack(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length ||
+        newIndex < 0 || newIndex > _currentPlaylistTracks.length) {
+      return;
+    }
+
+    // Remove the item from the old position
+    final track = _currentPlaylistTracks.removeAt(oldIndex);
+    
+    // Insert at the new position
+    _currentPlaylistTracks.insert(newIndex > oldIndex ? newIndex - 1 : newIndex, track);
+    
+    notifyListeners();
+    
+    // TODO: Call backend API to persist the new order
+    // await eventService.reorderPlaylistTracks(playlistId, newTrackOrder);
+  }
+
   /// Add participant to event/playlist
   Future<bool> addParticipant(String eventId, String userId) async {
     try {
@@ -453,7 +472,7 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await eventService.inviteUsers(
+      await eventService.inviteUsers(
         eventId,
         userIds,
         message: message,

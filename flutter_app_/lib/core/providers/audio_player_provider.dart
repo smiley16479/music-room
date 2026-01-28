@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../../config/app_config.dart';
 import '../models/playlist_track.dart';
 import '../services/audio_player_service.dart';
 
@@ -71,20 +72,26 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Find preview URL from track data
-      // The track should have a previewUrl stored in the coverUrl or we need to fetch it
-      // For now, we'll use the Deezer preview URL format
-      final previewUrl = _getPreviewUrl(track);
+      // First, try to get full audio stream from YouTube via backend
+      String? audioUrl = await _getFullAudioStreamUrl(track.trackId);
+      
+      // Fallback to stored preview URL if YouTube stream fails
+      if (audioUrl == null || audioUrl.isEmpty) {
+        audioUrl = _getPreviewUrl(track);
+        debugPrint('⚠️ Using Deezer preview (30s) for ${track.trackTitle}');
+      } else {
+        debugPrint('🎵 Playing full track from YouTube for ${track.trackTitle}');
+      }
 
-      if (previewUrl == null || previewUrl.isEmpty) {
-        _error = 'No preview available for this track';
+      if (audioUrl == null || audioUrl.isEmpty) {
+        _error = 'No audio available for this track';
         _isLoading = false;
         notifyListeners();
         return;
       }
 
       _currentTrack = track;
-      await _audioService.playFromUrl(previewUrl);
+      await _audioService.playFromUrl(audioUrl);
       _isPlaying = true;
       _isLoading = false;
       notifyListeners();
@@ -95,13 +102,30 @@ class AudioPlayerProvider extends ChangeNotifier {
     }
   }
 
+  /// Fetch full audio stream URL from backend proxy
+  /// The backend will proxy the audio through the server using yt-dlp
+  Future<String?> _getFullAudioStreamUrl(String trackId) async {
+    try {
+      // Use the audio proxy endpoint - it streams YouTube audio via yt-dlp
+      final audioProxyUrl = '${AppConfig.baseUrl}/music/track/$trackId/audio-proxy';
+      
+      debugPrint('🎵 Using YouTube audio proxy: $audioProxyUrl');
+      
+      // Return the proxy URL directly - just_audio will handle streaming from it
+      return audioProxyUrl;
+    } catch (e) {
+      debugPrint('❌ Error preparing audio proxy: $e');
+      return null;
+    }
+  }
   /// Play a playlist starting from a specific track
   Future<void> playPlaylist(List<PlaylistTrack> tracks, {int startIndex = 0}) async {
     if (tracks.isEmpty) return;
 
     _playlist = List.from(tracks);
     _currentIndex = startIndex.clamp(0, tracks.length - 1);
-
+    // Clear current track to ensure proper initialization when switching tracks
+    _currentTrack = null;
     await playTrack(_playlist[_currentIndex]);
   }
 

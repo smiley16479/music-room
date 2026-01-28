@@ -1437,8 +1437,24 @@ export class EventService {
       throw new NotFoundException('Event not found');
     }
 
-    // Sort by position
-    return event.tracks.sort((a, b) => a.position - b.position);
+    // Sort by position and map to the expected format
+    return event.tracks
+      .sort((a, b) => a.position - b.position)
+      .map(playlistTrack => ({
+        id: playlistTrack.id,
+        eventId: playlistTrack.eventId,
+        trackId: playlistTrack.trackId,
+        position: playlistTrack.position,
+        votes: 0, // TODO: Calculate actual votes
+        trackTitle: playlistTrack.track?.title,
+        trackArtist: playlistTrack.track?.artist,
+        trackAlbum: playlistTrack.track?.album,
+        coverUrl: playlistTrack.track?.albumCoverUrl,
+        previewUrl: playlistTrack.track?.previewUrl,
+        duration: playlistTrack.track?.duration,
+        createdAt: playlistTrack.createdAt,
+        updatedAt: playlistTrack.addedAt || playlistTrack.createdAt,
+      }));
   }
 
   /**
@@ -1531,6 +1547,21 @@ export class EventService {
     // Notify participants
     this.eventGateway.notifyTrackAdded(eventId, saved, userId);
 
-    return saved;
+    // Return formatted response matching Flutter model expectations
+    return {
+      id: saved.id,
+      eventId: saved.eventId,
+      trackId: saved.trackId,
+      position: saved.position,
+      votes: 0,
+      trackTitle: track.title,
+      trackArtist: track.artist,
+      trackAlbum: track.album,
+      coverUrl: track.albumCoverUrl,
+      previewUrl: track.previewUrl,
+      duration: track.duration,
+      createdAt: saved.createdAt,
+      updatedAt: saved.addedAt || saved.createdAt,
+    };
   }
 }
