@@ -59,11 +59,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   void _toggleEditMode(dynamic playlist) {
-    setState(() {
+        setState(() {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
-        _votingInvitedOnly = playlist.licenseType == 'invited';
+        _selectedVisibility = playlist.visibility;
+        _votingInvitedOnly =
+            playlist.licenseType == EventLicenseType.invited;
       }
       _isEditMode = !_isEditMode;
     });
