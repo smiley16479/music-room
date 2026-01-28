@@ -61,7 +61,7 @@ export class YouTubeService {
       return null;
     }
 
-    const query = `${title} ${artist}`.trim();
+    const query = `${title} ${artist} Official Audio lyrics`.trim();
     const cacheKey = `youtube:search:${query}`;
 
     try {
