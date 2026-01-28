@@ -264,14 +264,14 @@ class _CollaboratorDialogState extends State<CollaboratorDialog> {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            trailing: isOwner && !isCreator && !isCurrentUser
+            trailing: !isCreator && (isOwner || isCurrentUser)
                 ? IconButton(
                     icon: Icon(Icons.remove_circle_outline, color: Colors.red.shade400),
                     onPressed: () => _removeParticipant(
                       user?.id ?? '',
                       user?.displayName ?? 'this user',
                     ),
-                    tooltip: 'Remove collaborator',
+                    tooltip: isCurrentUser ? 'Leave playlist' : 'Remove collaborator',
                   )
                 : null,
           ),

@@ -16,15 +16,15 @@ enum ParticipantRole {
 
 @JsonSerializable()
 class EventParticipant {
-  @JsonKey(name: 'event_id')
+  @JsonKey(name: 'eventId')
   final String eventId;
-  
-  @JsonKey(name: 'user_id')
+
+  @JsonKey(name: 'userId')
   final String userId;
   
   final ParticipantRole role;
   
-  @JsonKey(name: 'joined_at')
+  @JsonKey(name: 'joinedAt')
   final DateTime? joinedAt;
   
   final User? user;

@@ -457,6 +457,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   Widget _buildReceivedInvitationTile(Invitation invitation, FriendProvider provider) {
     final inviter = invitation.inviter;
     final isEventInvitation = invitation.type == 'event';
+    final isPlaylistInvitation = invitation.type == 'playlist';
     
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -480,6 +481,15 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
                       if (isEventInvitation)
                         Text(
                           'Invited you to an event',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      else if (isPlaylistInvitation)
+                        Text(
+                          'Invited you to collaborate on a playlist',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey[600],
@@ -510,7 +520,7 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (!isEventInvitation)
+                if (invitation.type == 'friend')
                   TextButton.icon(
                     icon: const Icon(Icons.person),
                     label: const Text('View Profile'),
@@ -538,10 +548,11 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   Future<void> _handleAcceptInvitation(Invitation invitation, FriendProvider provider) async {
     final success = await provider.acceptInvitation(invitation.id);
     if (mounted) {
-      final isEventInvitation = invitation.type == 'event';
-      final message = isEventInvitation
+      final message = invitation.type == 'event'
           ? 'Event invitation accepted!'
-          : 'Friend request accepted!';
+          : invitation.type == 'playlist'
+              ? 'Playlist invitation accepted!'
+              : 'Friend request accepted!';
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -557,10 +568,11 @@ class _FriendsScreenState extends State<FriendsScreen> with SingleTickerProvider
   Future<void> _handleDeclineInvitation(Invitation invitation, FriendProvider provider) async {
     final success = await provider.declineInvitation(invitation.id);
     if (mounted) {
-      final isEventInvitation = invitation.type == 'event';
-      final message = isEventInvitation
+      final message = invitation.type == 'event'
           ? 'Event invitation declined'
-          : 'Friend request declined';
+          : invitation.type == 'playlist'
+              ? 'Playlist invitation declined'
+              : 'Friend request declined';
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

@@ -81,7 +81,7 @@ class Event extends Equatable {
   final String? creatorId;
   @JsonKey(name: 'creator')
   final User? creator;
-  final String status;
+  final String? status;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -118,7 +118,7 @@ class Event extends Equatable {
     this.currentTrackId,
     this.creatorId,
     this.creator,
-    required this.status,
+    this.status,
     required this.createdAt,
     required this.updatedAt,
     this.participants,

@@ -57,13 +57,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   void _toggleEditMode(dynamic playlist) {
-    setState(() {
+        setState(() {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
         _selectedVisibility = playlist.visibility;
         _votingInvitedOnly =
-            playlist.eventLicenseType == EventLicenseType.invited;
+            playlist.licenseType == EventLicenseType.invited;
       }
       _isEditMode = !_isEditMode;
     });
@@ -322,6 +322,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                       border: Border.all(color: Colors.grey.shade300),
                     ),
                     child: ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: eventProvider.currentPlaylistTracks.length,

@@ -16,6 +16,8 @@ import {
 } from 'src/invitation/entities/invitation.entity';
 import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
+import { EventParticipantService } from '../event/event-participant.service';
+import { ParticipantRole } from '../event/entities/event-participant.entity';
 
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { RespondInvitationDto } from './dto/respond-invitation.dto';
@@ -52,6 +54,7 @@ export class InvitationService {
     @InjectRepository(Event)
     private readonly eventRepository: Repository<Event>,
     private readonly emailService: EmailService,
+    private readonly eventParticipantService: EventParticipantService,
   ) {}
 
   // Core CRUD Operations
@@ -307,18 +310,16 @@ export class InvitationService {
 
     // Process the response based on status
     if (respondDto.status === InvitationStatus.ACCEPTED) {
-      try {
-        await this.processAcceptedInvitation(invitation);
-      } catch (e) {
-        console.error('Error processing accepted invitation:', e);
-        // Don't throw - the response should still succeed
-      }
+      // Process the accepted invitation (add to participants, etc.)
+      // This should throw if it fails, so we know there's an issue
+      await this.processAcceptedInvitation(invitation);
 
       // Send notification email to inviter (async, don't wait or fail)
       try {
         await this.sendResponseNotificationEmail(invitation, respondDto.status);
       } catch (e) {
         console.error('Error sending response notification email:', e);
+        // Email errors shouldn't prevent acceptance
       }
 
       // For friend invitations, delete the invitation after accepting
@@ -630,22 +631,42 @@ export class InvitationService {
     switch (invitation.type) {
       case InvitationType.EVENT:
         if (invitation.eventId) {
-          // Add user to event participants
+          // Add user to event participants with PARTICIPANT role
           try {
-            await this.eventRepository
-              .createQueryBuilder()
-              .relation(Event, 'participants')
-              .of(invitation.eventId)
-              .add(invitation.inviteeId);
+            console.log(`Processing event invitation: Adding user ${invitation.inviteeId} to event ${invitation.eventId}`);
+            await this.eventParticipantService.addParticipant(
+              invitation.eventId,
+              invitation.inviteeId,
+              ParticipantRole.PARTICIPANT
+            );
+            console.log(`✓ User ${invitation.inviteeId} successfully added as participant to event ${invitation.eventId}`);
           } catch (e) {
-            console.error('Error adding user to event participants:', e);
+            console.error('✗ Error adding user to event participants:', e);
+            throw e; // Re-throw to make the error visible
           }
+        } else {
+          console.error('✗ Event invitation missing eventId:', invitation);
         }
         break;
 
       case InvitationType.PLAYLIST:
-        // TODO: Implement playlist participant addition if needed
-        // For now, just handle the friend relationship if it's a playlist invite
+        // Add user as collaborator to the playlist (which is an Event with type=LISTENING_SESSION)
+        if (invitation.eventId) {
+          try {
+            console.log(`Processing playlist invitation: Adding user ${invitation.inviteeId} as collaborator to playlist ${invitation.eventId}`);
+            const participant = await this.eventParticipantService.addParticipant(
+              invitation.eventId,
+              invitation.inviteeId,
+              ParticipantRole.COLLABORATOR
+            );
+            console.log(`✓ User ${invitation.inviteeId} successfully added as collaborator to playlist ${invitation.eventId}`, participant);
+          } catch (e) {
+            console.error('✗ Error adding user to playlist as collaborator:', e);
+            throw e; // Re-throw to make the error visible
+          }
+        } else {
+          console.error('✗ Playlist invitation missing eventId:', invitation);
+        }
         break;
 
       case InvitationType.FRIEND:

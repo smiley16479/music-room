@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/models/index.dart';
 import '../../../core/providers/index.dart';
 import 'account_linking_screen.dart';
 import 'friends_screen.dart';
@@ -66,6 +67,41 @@ class SingleChoice extends StatelessWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  // Cache for pending invitation counts
+  Map<String, int>? _cachedInvitationCounts;
+  DateTime? _lastFetchTime;
+  
+  Future<Map<String, int>> _getPendingInvitationCounts() async {
+    // Return cached data if less than 30 seconds old
+    if (_cachedInvitationCounts != null && _lastFetchTime != null) {
+      if (DateTime.now().difference(_lastFetchTime!) < const Duration(seconds: 30)) {
+        return _cachedInvitationCounts!;
+      }
+    }
+    
+    try {
+      final authProvider = context.read<AuthProvider>();
+      final apiService = authProvider.authService.apiService;
+      final response = await apiService.get('/invitations/received?status=pending');
+      
+      final invitations = (response['data'] as List? ?? [])
+          .map((i) => Invitation.fromJson(i as Map<String, dynamic>))
+          .toList();
+      
+      final counts = {
+        'event': invitations.where((i) => i.type == 'event').length,
+        'playlist': invitations.where((i) => i.type == 'playlist').length,
+      };
+      
+      _cachedInvitationCounts = counts;
+      _lastFetchTime = DateTime.now();
+      
+      return counts;
+    } catch (e) {
+      return {'event': 0, 'playlist': 0};
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
@@ -235,46 +271,98 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 8),
                     Consumer<FriendProvider>(
                       builder: (context, friendProvider, _) {
-                        final receivedCount = friendProvider.pendingReceivedInvitations.length;
-                        final sentCount = friendProvider.pendingSentInvitations.length;
+                        final friendReceivedCount = friendProvider.pendingReceivedInvitations.length;
+                        final friendSentCount = friendProvider.pendingSentInvitations.length;
                         
-                        if (receivedCount == 0 && sentCount == 0) {
-                          return const SizedBox.shrink();
-                        }
-                        
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.blue.withOpacity(0.3),
-                              width: 1,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.notifications_active,
-                                color: Colors.blue,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  receivedCount > 0 && sentCount > 0
-                                      ? '$receivedCount pending request${receivedCount > 1 ? 's' : ''} received • $sentCount sent'
-                                      : receivedCount > 0
-                                          ? '$receivedCount pending request${receivedCount > 1 ? 's' : ''} received'
-                                          : '$sentCount pending request${sentCount > 1 ? 's' : ''} sent',
-                                  style: TextStyle(
-                                    color: Colors.blue.shade700,
-                                    fontSize: 13,
-                                  ),
+                        // Check for all invitation types by trying to use the API
+                        return FutureBuilder<Map<String, int>>(
+                          future: _getPendingInvitationCounts(),
+                          builder: (context, snapshot) {
+                            final eventInviteCount = snapshot.data?['event'] ?? 0;
+                            final playlistInviteCount = snapshot.data?['playlist'] ?? 0;
+                            final totalReceived = friendReceivedCount + eventInviteCount + playlistInviteCount;
+                            final totalSent = friendSentCount;
+                            
+                            if (totalReceived == 0 && totalSent == 0) {
+                              return const SizedBox.shrink();
+                            }
+                            
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  width: 1,
                                 ),
                               ),
-                            ],
-                          ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.notifications_active,
+                                        color: Colors.blue,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          totalReceived > 0 && totalSent > 0
+                                              ? '$totalReceived pending invitation${totalReceived > 1 ? 's' : ''} • $totalSent sent'
+                                              : totalReceived > 0
+                                                  ? '$totalReceived pending invitation${totalReceived > 1 ? 's' : ''}'
+                                                  : '$totalSent pending invitation${totalSent > 1 ? 's' : ''} sent',
+                                          style: TextStyle(
+                                            color: Colors.blue.shade700,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (totalReceived > 0) ...[
+                                    const SizedBox(height: 8),
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 28),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          if (friendReceivedCount > 0)
+                                            Text(
+                                              '• $friendReceivedCount friend request${friendReceivedCount > 1 ? 's' : ''}',
+                                              style: TextStyle(
+                                                color: Colors.blue.shade600,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          if (eventInviteCount > 0)
+                                            Text(
+                                              '• $eventInviteCount event invitation${eventInviteCount > 1 ? 's' : ''}',
+                                              style: TextStyle(
+                                                color: Colors.blue.shade600,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          if (playlistInviteCount > 0)
+                                            Text(
+                                              '• $playlistInviteCount playlist invitation${playlistInviteCount > 1 ? 's' : ''}',
+                                              style: TextStyle(
+                                                color: Colors.blue.shade600,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
                         );
                       },
                     ),

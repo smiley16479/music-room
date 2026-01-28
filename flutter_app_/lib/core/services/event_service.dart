@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../config/app_config.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/index.dart';
@@ -32,9 +34,21 @@ class EventService {
       );
     }
 
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List<Event> parsed = [];
+    for (final item in dataList) {
+      try {
+        parsed.add(Event.fromJson(item as Map<String, dynamic>));
+      } catch (e) {
+        debugPrint('❌ Failed to parse Event item: $e');
+        try {
+          debugPrint('Item JSON: ${jsonEncode(item)}');
+        } catch (_) {
+          debugPrint('Item (non-serializable) fallback: $item');
+        }
+      }
+    }
+
+    return parsed;
   }
 
   /// Get my events
@@ -64,9 +78,21 @@ class EventService {
       );
     }
 
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List<Event> parsed = [];
+    for (final item in dataList) {
+      try {
+        parsed.add(Event.fromJson(item as Map<String, dynamic>));
+      } catch (e) {
+        debugPrint('❌ Failed to parse MyEvent item: $e');
+        try {
+          debugPrint('Item JSON: ${jsonEncode(item)}');
+        } catch (_) {
+          debugPrint('Item (non-serializable) fallback: $item');
+        }
+      }
+    }
+
+    return parsed;
   }
 
   /// Get event by ID
