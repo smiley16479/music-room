@@ -442,8 +442,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           const SizedBox(height: 24),
 
           // Event Type & Settings
-          _buildSectionTitle('Event Type & Settings'),
-          DropdownButton<EventType>(
+          _buildSectionTitle('Event Type'),
+          /* DropdownButton<EventType>( ⚠️ Change Private/public Disabled for now
             isExpanded: true,
             value: _selectedType,
             hint: const Text('Select Event Type'),
@@ -457,8 +457,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               );
             }).toList(),
           ),
-          const SizedBox(height: 12),
-
+          const SizedBox(height: 12), */
           DropdownButton<EventVisibility>(
             isExpanded: true,
             value: _selectedVisibility,
@@ -474,6 +473,17 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             }).toList(),
           ),
           const SizedBox(height: 12),
+
+          _buildSectionTitle('Event Vote'),
+
+          CheckboxListTile(
+            title: const Text('Voting Enabled'),
+            value: _votingEnabled,
+            onChanged: (bool? value) {
+              setState(() => _votingEnabled = value ?? true);
+            },
+          ),
+          const SizedBox(height: 24),
 
           DropdownButton<EventLicenseType>(
             isExpanded: true,
@@ -503,15 +513,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               ),
             ),
           const SizedBox(height: 12),
-
-          CheckboxListTile(
-            title: const Text('Voting Enabled'),
-            value: _votingEnabled,
-            onChanged: (bool? value) {
-              setState(() => _votingEnabled = value ?? true);
-            },
-          ),
-          const SizedBox(height: 24),
 
           // Dates & Times
           _buildSectionTitle('Dates & Times'),

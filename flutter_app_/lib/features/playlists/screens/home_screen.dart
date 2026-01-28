@@ -6,6 +6,7 @@ import '../../authentication/screens/profile_screen.dart';
 import '../widgets/create_event_dialog.dart';
 import 'events_screen.dart';
 import 'playlist_details_screen.dart';
+import '../../../core/models/event.dart';
 
 /// Home screen - main tab-based interface
 class HomeScreen extends StatefulWidget {
@@ -18,11 +19,24 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late int _selectedIndex = 0;
 
+  // Filter states for playlists
+  EventVisibility? _playlistVisibilityFilter;
+  bool?
+  _playlistVotingFilter; // null = all, true = voting restricted, false = voting open
+  late TextEditingController _playlistSearchController;
+
   @override
   void initState() {
     super.initState();
+    _playlistSearchController = TextEditingController();
     print('🔵 HomeScreen.initState() - calling _loadAllEvents()');
     _loadAllEvents();
+  }
+
+  @override
+  void dispose() {
+    _playlistSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAllEvents() async {
@@ -96,48 +110,169 @@ class _HomeScreenState extends State<HomeScreen> {
               return const Center(child: CircularProgressIndicator());
             }
 
-            // Filter only LISTENING_SESSION type events (playlists)
-            final playlists = eventProvider.myPlaylists;
+            // Filter only PLAYLISTS type events
+            var playlists = eventProvider.myPlaylists;
 
-            if (playlists.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.music_note, size: 64),
-                    const SizedBox(height: 16),
-                    const Text('No playlists yet'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: _showCreatePlaylistDialog,
-                      child: const Text('Create Playlist'),
-                    ),
-                  ],
-                ),
-              );
+            // Apply search filter
+            final searchTerm = _playlistSearchController.text.toLowerCase();
+            if (searchTerm.isNotEmpty) {
+              playlists = playlists
+                  .where((p) => p.name.toLowerCase().contains(searchTerm))
+                  .toList();
             }
 
-            return ListView.builder(
-              itemCount: playlists.length,
-              itemBuilder: (context, index) {
-                final playlist = playlists[index];
-                return ListTile(
-                  title: Text(playlist.name),
-                  subtitle: Text(
-                    '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            PlaylistDetailsScreen(playlistId: playlist.id),
+            // Apply visibility filter
+            if (_playlistVisibilityFilter != null) {
+              playlists = playlists
+                  .where((p) => p.visibility == _playlistVisibilityFilter)
+                  .toList();
+            }
+
+            // Apply voting filter
+            if (_playlistVotingFilter != null) {
+              playlists = playlists.where((p) {
+                final isVotingRestricted =
+                    p.licenseType == EventLicenseType.invited;
+                return _playlistVotingFilter! == isVotingRestricted;
+              }).toList();
+            }
+
+            return Column(
+              children: [
+                // Search and Filter section
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Search field
+                      TextField(
+                        controller: _playlistSearchController,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'Search playlists...',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _playlistSearchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    _playlistSearchController.clear();
+                                    setState(() {});
+                                  },
+                                )
+                              : null,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
                       ),
-                    );
-                  },
-                );
-              },
+                      const SizedBox(height: 16),
+                      Text(
+                        'Filters',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      // Visibility filter
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          FilterChip(
+                            label: const Text('All'),
+                            selected: _playlistVisibilityFilter == null,
+                            onSelected: (_) {
+                              setState(() => _playlistVisibilityFilter = null);
+                            },
+                          ),
+                          ...EventVisibility.values.map((visibility) {
+                            return FilterChip(
+                              label: Text(visibility.name),
+                              selected: _playlistVisibilityFilter == visibility,
+                              onSelected: (_) {
+                                setState(
+                                  () => _playlistVisibilityFilter = visibility,
+                                );
+                              },
+                            );
+                          }),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Voting filter
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          FilterChip(
+                            label: const Text('Any voting'),
+                            selected: _playlistVotingFilter == null,
+                            onSelected: (_) {
+                              setState(() => _playlistVotingFilter = null);
+                            },
+                          ),
+                          FilterChip(
+                            label: const Text('Invited only'),
+                            selected: _playlistVotingFilter == true,
+                            onSelected: (_) {
+                              setState(() => _playlistVotingFilter = true);
+                            },
+                          ),
+                          FilterChip(
+                            label: const Text('Open voting'),
+                            selected: _playlistVotingFilter == false,
+                            onSelected: (_) {
+                              setState(() => _playlistVotingFilter = false);
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // List of playlists
+                if (playlists.isEmpty)
+                  Expanded(
+                    child: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.music_note, size: 64),
+                          const SizedBox(height: 16),
+                          const Text('No playlists found'),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _showCreatePlaylistDialog,
+                            child: const Text('Create Playlist'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: playlists.length,
+                      itemBuilder: (context, index) {
+                        final playlist = playlists[index];
+                        return ListTile(
+                          title: Text(playlist.name),
+                          subtitle: Text(
+                            '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => PlaylistDetailsScreen(
+                                  playlistId: playlist.id,
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
             );
           },
         ),

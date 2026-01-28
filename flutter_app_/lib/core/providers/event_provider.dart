@@ -4,29 +4,39 @@ import '../models/index.dart';
 import '../services/index.dart';
 
 /// Event Provider - manages both events AND playlists state
-/// (Playlist is Event with type=LISTENING_SESSION)
+/// (Playlist is Event with type=playlist)
 class EventProvider extends ChangeNotifier {
   final EventService eventService;
 
   List<Event> _events = [];
-  List<Event> _myEvents = [];
   Event? _currentEvent;
   List<PlaylistTrack> _currentPlaylistTracks = [];
   bool _isLoading = false;
   String? _error;
+  bool _createdByMeOnly = false;
 
   EventProvider({required this.eventService});
 
   // Getters
-  List<Event> get events => _events;
-  List<Event> get myEvents => _myEvents;
+  /// All events (user's + public), unfiltered
+  List<Event> get allEvents => _events;
 
-  /// Get only playlists (Events with type=LISTENING_SESSION)
-  List<Event> get playlists => _events.where((e) => e.isPlaylist).toList();
-  List<Event> get myPlaylists => _myEvents.where((e) => e.isPlaylist).toList();
+  /// Events filtered by _createdByMeOnly flag
+  List<Event> get events => _createdByMeOnly
+      ? _events.where((e) => e.isCreatedByMe).toList()
+      : _events;
 
-  /// Get only real events (not playlists) from MY events
-  List<Event> get realEvents => _myEvents.where((e) => !e.isPlaylist).toList();
+  /// Get only playlists (for backward compatibility)
+  List<Event> get playlists => events.where((e) => e.isPlaylist).toList();
+
+  /// Get only my playlists (alias for playlists) ⚠️ semble juste redonner playlists
+  List<Event> get myPlaylists => playlists;
+
+  /// Get only real events (not playlists) filtered by _createdByMeOnly
+  List<Event> get realEvents => events.where((e) => !e.isPlaylist).toList();
+
+  /// Legacy getter for backward compatibility
+  List<Event> get myEvents => events;
 
   Event? get currentEvent => _currentEvent;
 
@@ -38,65 +48,57 @@ class EventProvider extends ChangeNotifier {
 
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get createdByMeOnly => _createdByMeOnly;
 
-  /// Load all events (including playlists)
+  /// Load all events: combines user's events (scope='my') + public events (scope='all')
+  /// By default shows both, but can be filtered via setCreatedByMeOnly()
   Future<void> loadEvents({int page = 1, int limit = 20}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _events = await eventService.getEvents(page: page, limit: limit);
-    } catch (e) {
-      _error = e.toString();
-    }
+      // Load public events (scope='all') - accessible to everyone
+      final publicEvents = await eventService.getEvents(
+        page: page,
+        limit: limit,
+      );
 
-    _isLoading = false;
-    notifyListeners();
-  }
-
-  /// Load my events (all types)
-  /// The UI will filter using myPlaylists or realEvents getters
-  Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    print('Loading my events for page $page, limit $limit');
-    try {
-      // Récupère TOUS les events de l'utilisateur (events + playlists)
-      _myEvents = await eventService.getMyEvents(page: page, limit: limit);
-      print('✅ Loaded my events count: ${_myEvents.length}');
-      print('📋 Event details:');
-      for (var e in _myEvents) {
-        print('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
+      // Load my personal events (scope='my') - only if authenticated
+      List<Event> myEvents = [];
+      try {
+        myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      } catch (e) {
+        // User might not be authenticated, which is fine for public view
+        print('⚠️ Could not load personal events: $e');
       }
+
+      // Combine lists: add all public events, then add user's events that aren't already in public list
+      _events = publicEvents;
+      for (final event in myEvents) {
+        if (!_events.any((e) => e.id == event.id)) {
+          _events.add(event);
+        }
+      }
+
       print(
-        '🎵 Playlists: ${myPlaylists.length}, 🎉 Real Events: ${realEvents.length}',
+        '✅ Loaded events - Public: ${publicEvents.length}, My: ${myEvents.length}, Total: ${_events.length}',
+      );
+      print(
+        '🎵 Playlists: ${playlists.length}, 🎉 Real Events: ${realEvents.length}',
       );
     } catch (e) {
       _error = e.toString();
-      print('❌ Error loading my events: $e');
+      print('❌ Error loading events: $e');
     }
 
     _isLoading = false;
     notifyListeners();
   }
 
-  /// Load event details
-  Future<void> loadEventDetails(String eventId) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      _currentEvent = await eventService.getEvent(eventId);
-    } catch (e) {
-      _error = e.toString();
-    }
-
-    _isLoading = false;
-    notifyListeners();
+  /// Load my events (alias for loadEvents for backward compatibility)
+  Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
+    return loadEvents(page: page, limit: limit);
   }
 
   /// Create event
@@ -127,10 +129,10 @@ class EventProvider extends ChangeNotifier {
       print(
         'Event created successfully - ID: ${event.id}, Type: ${event.type}',
       );
-      _myEvents.add(event);
-      print('Total events in provider: ${_myEvents.length}');
+      _events.add(event);
+      print('Total events in provider: ${_events.length}');
       print(
-        'Playlists: ${myPlaylists.length}, Real Events: ${realEvents.length}',
+        '🎵 Playlists: ${playlists.length}, 🎉 Real Events: ${realEvents.length}',
       );
       _isLoading = false;
       notifyListeners();
@@ -194,9 +196,9 @@ class EventProvider extends ChangeNotifier {
         selectedPlaylistId: selectedPlaylistId,
       );
 
-      final index = _myEvents.indexWhere((e) => e.id == id);
+      final index = _events.indexWhere((e) => e.id == id);
       if (index != -1) {
-        _myEvents[index] = updated;
+        _events[index] = updated;
       }
 
       _isLoading = false;
@@ -218,7 +220,7 @@ class EventProvider extends ChangeNotifier {
 
     try {
       await eventService.deleteEvent(id);
-      _myEvents.removeWhere((e) => e.id == id);
+      _events.removeWhere((e) => e.id == id);
       _isLoading = false;
       notifyListeners();
       return true;
@@ -230,32 +232,10 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
-  // ========== PLAYLIST METHODS ==========
-
-  /// Load all playlists
+  /// Remove duplicate loadPlaylists - use loadEvents() instead
+  /// This method is deprecated and will be removed in next refactor
   Future<void> loadPlaylists({int page = 1, int limit = 20}) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      final playlists = await eventService.getPlaylists(
-        page: page,
-        limit: limit,
-      );
-      // Merge with events
-      for (final playlist in playlists) {
-        final index = _events.indexWhere((e) => e.id == playlist.id);
-        if (index == -1) {
-          _events.add(playlist);
-        }
-      }
-    } catch (e) {
-      _error = e.toString();
-    }
-
-    _isLoading = false;
-    notifyListeners();
+    return loadEvents(page: page, limit: limit);
   }
 
   /// Get recommended playlists
@@ -278,15 +258,18 @@ class EventProvider extends ChangeNotifier {
     }
   }
 
-  /// Load playlist details
-  Future<void> loadPlaylistDetails(String playlistId) async {
+  /// Load event details (works for both events and playlists)
+  Future<void> loadEventDetails(String eventId) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      _currentEvent = await eventService.getPlaylist(playlistId);
-      _currentPlaylistTracks = await eventService.getPlaylistTracks(playlistId);
+      _currentEvent = await eventService.getEvent(eventId);
+      // If it's a playlist, also load tracks
+      if (_currentEvent?.isPlaylist ?? false) {
+        _currentPlaylistTracks = await eventService.getPlaylistTracks(eventId);
+      }
     } catch (e) {
       _error = e.toString();
     }
@@ -295,76 +278,45 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Create playlist
+  /// Load playlist details (deprecated - use loadEventDetails instead)
+  Future<void> loadPlaylistDetails(String playlistId) async {
+    return loadEventDetails(playlistId);
+  }
+
+  /// Create playlist (works same as createEvent with type='playlist')
   Future<bool> createPlaylist({
     required String name,
     String? description,
     bool isPublic = false,
   }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      final playlist = await eventService.createPlaylist(
-        name: name,
-        description: description,
-        isPublic: isPublic,
-      );
-      _myEvents.add(playlist);
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
+    return createEvent(
+      name: name,
+      description: description,
+      visibility: isPublic ? 'public' : 'private',
+      type: 'playlist',
+    );
   }
 
-  /// Update playlist
+  /// Update playlist (delegates to updateEvent)
   Future<bool> updatePlaylist(
     String id, {
     String? name,
     String? description,
     bool? isPublic,
+    String? eventLicenseType,
   }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      final updated = await eventService.updatePlaylist(
-        id,
-        name: name,
-        description: description,
-        isPublic: isPublic,
-      );
-
-      final index = _myEvents.indexWhere((p) => p.id == id);
-      if (index >= 0) {
-        _myEvents[index] = updated;
-      }
-
-      if (_currentEvent?.id == id) {
-        _currentEvent = updated;
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
+    return updateEvent(
+      id,
+      name: name,
+      description: description,
+      visibility: isPublic != null ? (isPublic ? 'public' : 'private') : null,
+      licenseType: eventLicenseType,
+    );
   }
 
-  /// Delete playlist
+  /// Delete playlist (same as deleteEvent)
   Future<bool> deletePlaylist(String id) async {
-    return deleteEvent(id); // Same operation
+    return deleteEvent(id);
   }
 
   /// Add track to playlist
@@ -431,11 +383,6 @@ class EventProvider extends ChangeNotifier {
         _events[index] = updatedEvent;
       }
 
-      final myIndex = _myEvents.indexWhere((e) => e.id == eventId);
-      if (myIndex != -1) {
-        _myEvents[myIndex] = updatedEvent;
-      }
-
       notifyListeners();
       return true;
     } catch (e) {
@@ -462,11 +409,6 @@ class EventProvider extends ChangeNotifier {
       final index = _events.indexWhere((e) => e.id == eventId);
       if (index != -1) {
         _events[index] = updatedEvent;
-      }
-
-      final myIndex = _myEvents.indexWhere((e) => e.id == eventId);
-      if (myIndex != -1) {
-        _myEvents[myIndex] = updatedEvent;
       }
 
       notifyListeners();
@@ -504,6 +446,14 @@ class EventProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Toggle "Created by me" filter
+  /// When true: only shows events/playlists created by the user
+  /// When false: shows all events/playlists (user's + public)
+  void setCreatedByMeOnly(bool value) {
+    _createdByMeOnly = value;
+    notifyListeners();
   }
 
   /// Clear error

@@ -179,8 +179,7 @@ export class EventService {
       queryBuilder
         .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
         .orWhere('event.creatorId = :userId', { userId })
-        .orWhere('participants.id = :userId', { userId })
-        .orWhere('admins.id = :userId', { userId });
+        .orWhere('participants.userId = :userId', { userId });
     } else {
       // For unauthenticated users, only show public events
       queryBuilder.where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC });

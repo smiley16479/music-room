@@ -24,24 +24,25 @@ enum EventVisibility {
 enum EventLicenseType {
   @JsonValue('none')
   none,
+  @JsonValue('invited')
+  invited,
   @JsonValue('location_based')
   locationBased,
 }
 
 /// Event model (unifié avec Playlist)
-/// Un Event de type LISTENING_SESSION EST une playlist
 @JsonSerializable()
 class Event extends Equatable {
   final String id;
   final String name;
   final String? description;
 
-  // Event type (LISTENING_SESSION = playlist)
+  // Event type
   final EventType type;
   final EventVisibility visibility;
   final EventLicenseType? licenseType;
 
-  // Playlist-specific fields (nullable, only for LISTENING_SESSION)
+  // Playlist-specific fields
   final int? trackCount;
   final int? totalDuration;
   final int? collaboratorCount;
@@ -129,6 +130,10 @@ class Event extends Equatable {
 
   /// Helper: Nombre de pistes (alias pour UI)
   int get numberOfTracks => trackCount ?? 0;
+
+  /// Helper: Is this event created by the current user? ⚠️ assure toi que ça marche
+  /// Returns true if creatorId is not null (assumption: we're checking against current user in provider)
+  bool get isCreatedByMe => creatorId != null;
 
   factory Event.fromJson(Map<String, dynamic> json) => _$EventFromJson(json);
   Map<String, dynamic> toJson() => _$EventToJson(this);

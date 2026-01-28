@@ -218,61 +218,62 @@ class EventService {
     await apiService.delete('${AppConfig.eventsEndpoint}/$id');
   }
 
-  // ========== PLAYLIST METHODS (Event de type LISTENING_SESSION) ==========
+  // ========== PLAYLIST METHODS (Wrappers around Event methods) ==========
+  // Since Event IS a Playlist with type='playlist', these methods simply
+  // delegate to the Event methods with the appropriate type parameter
 
-  /// Get all playlists (Events de type LISTENING_SESSION)
+  /// Get all playlists - delegates to getEvents with type filter
   Future<List<Event>> getPlaylists({int page = 1, int limit = 20}) async {
-    final params = {'page': page.toString(), 'limit': limit.toString()};
-
-    final queryString = params.entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('&');
-
-    final endpoint = '${AppConfig.eventsEndpoint}?$queryString&type=playlist';
-    final response = await apiService.get(endpoint);
-
-    List<dynamic> dataList;
-    if (response is Map<String, dynamic> && response.containsKey('data')) {
-      dataList = response['data'] as List;
-    } else if (response is List) {
-      dataList = response;
-    } else {
-      throw Exception('Invalid response format');
-    }
-
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final allEvents = await getEvents(page: page, limit: limit);
+    return allEvents.where((e) => e.isPlaylist).toList();
   }
 
-  /// Get my playlists
+  /// Get my playlists - delegates to getMyEvents with type filter
   Future<List<Event>> getMyPlaylists({int page = 1, int limit = 20}) async {
-    final params = {
-      'page': page.toString(),
-      'limit': limit.toString(),
-      'scope': 'my', // Use unified endpoint with scope parameter
-      'type': 'playlist', // Filter for playlists only (lowercase)
-    };
+    final myEvents = await getMyEvents(page: page, limit: limit);
+    return myEvents.where((e) => e.isPlaylist).toList();
+  }
 
-    final queryString = params.entries
-        .map((e) => '${e.key}=${e.value}')
-        .join('&');
+  /// Get playlist by ID - delegates to getEvent
+  Future<Event> getPlaylist(String playlistId) async {
+    return getEvent(playlistId);
+  }
 
-    final endpoint = '${AppConfig.eventsEndpoint}?$queryString';
-    final response = await apiService.get(endpoint);
+  /// Create playlist - delegates to createEvent with type='playlist'
+  Future<Event> createPlaylist({
+    required String name,
+    String? description,
+    bool isPublic = false,
+  }) async {
+    return createEvent(
+      name: name,
+      description: description,
+      visibility: isPublic ? 'public' : 'private',
+      type: 'playlist',
+    );
+  }
 
-    List<dynamic> dataList;
-    if (response is Map<String, dynamic> && response.containsKey('data')) {
-      dataList = response['data'] as List;
-    } else if (response is List) {
-      dataList = response;
-    } else {
-      throw Exception('Invalid response format');
-    }
+  /// Update playlist - delegates to updateEvent
+  Future<Event> updatePlaylist(
+    String id, {
+    String? name,
+    String? description,
+    bool? isPublic,
+    String? eventLicenseType,
+  }) async {
+    return updateEvent(
+      id,
+      name: name,
+      description: description,
+      visibility: isPublic != null ? (isPublic ? 'public' : 'private') : null,
+      licenseType: eventLicenseType,
+      type: 'playlist',
+    );
+  }
 
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+  /// Delete playlist - delegates to deleteEvent
+  Future<void> deletePlaylist(String id) async {
+    return deleteEvent(id);
   }
 
   /// Get recommended playlists
@@ -301,85 +302,6 @@ class EventService {
           .toList();
     }
     return [];
-  }
-
-  /// Get playlist by ID
-  Future<Event> getPlaylist(String playlistId) async {
-    final response = await apiService.get(
-      '${AppConfig.eventsEndpoint}/$playlistId',
-    );
-
-    Map<String, dynamic> eventData;
-    if (response is Map<String, dynamic> && response.containsKey('data')) {
-      eventData = response['data'] as Map<String, dynamic>;
-    } else if (response is Map<String, dynamic>) {
-      eventData = response;
-    } else {
-      throw Exception('Invalid response format');
-    }
-
-    return Event.fromJson(eventData);
-  }
-
-  /// Create playlist
-  Future<Event> createPlaylist({
-    required String name,
-    String? description,
-    bool isPublic = false,
-  }) async {
-    final response = await apiService.post(
-      AppConfig.eventsEndpoint,
-      body: {
-        'name': name,
-        'description': description,
-        'isPublic': isPublic,
-        'type': 'playlist', // Create as playlist (lowercase)
-      },
-    );
-
-    Map<String, dynamic> eventData;
-    if (response is Map<String, dynamic> && response.containsKey('data')) {
-      eventData = response['data'] as Map<String, dynamic>;
-    } else if (response is Map<String, dynamic>) {
-      eventData = response;
-    } else {
-      throw Exception('Invalid response format');
-    }
-
-    return Event.fromJson(eventData);
-  }
-
-  /// Update playlist
-  Future<Event> updatePlaylist(
-    String id, {
-    String? name,
-    String? description,
-    bool? isPublic,
-  }) async {
-    final response = await apiService.patch(
-      '${AppConfig.eventsEndpoint}/$id',
-      body: {
-        if (name != null) 'name': name,
-        if (description != null) 'description': description,
-        if (isPublic != null) 'isPublic': isPublic,
-      },
-    );
-
-    Map<String, dynamic> eventData;
-    if (response is Map<String, dynamic> && response.containsKey('data')) {
-      eventData = response['data'] as Map<String, dynamic>;
-    } else if (response is Map<String, dynamic>) {
-      eventData = response;
-    } else {
-      throw Exception('Invalid response format');
-    }
-
-    return Event.fromJson(eventData);
-  }
-
-  /// Delete playlist
-  Future<void> deletePlaylist(String id) async {
-    await apiService.delete('${AppConfig.eventsEndpoint}/$id');
   }
 
   /// Get playlist tracks

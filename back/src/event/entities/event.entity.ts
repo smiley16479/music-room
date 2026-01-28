@@ -24,6 +24,7 @@ export enum EventVisibility {
 
 export enum EventLicenseType {
   NONE = 'none',
+  INVITED = 'invited', // Ajoute l'Access based on invitation à public/private
   LOCATION_BASED = 'location_based', // Ajoute l'Access based on location à public/private
 }
 

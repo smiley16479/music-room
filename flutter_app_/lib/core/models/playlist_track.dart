@@ -4,7 +4,7 @@ import 'package:json_annotation/json_annotation.dart';
 part 'playlist_track.g.dart';
 
 /// PlaylistTrack model - represents a track in an event/playlist
-/// Note: playlistId now points to Event (Event IS Playlist when type=LISTENING_SESSION)
+/// Note: playlistId now points to Event (Event IS Playlist when type=playlist)
 @JsonSerializable()
 class PlaylistTrack extends Equatable {
   final String id;
@@ -42,17 +42,17 @@ class PlaylistTrack extends Equatable {
 
   @override
   List<Object?> get props => [
-        id,
-        playlistId,
-        trackId,
-        position,
-        votes,
-        trackTitle,
-        trackArtist,
-        trackAlbum,
-        coverUrl,
-        duration,
-        createdAt,
-        updatedAt,
-      ];
+    id,
+    playlistId,
+    trackId,
+    position,
+    votes,
+    trackTitle,
+    trackArtist,
+    trackAlbum,
+    coverUrl,
+    duration,
+    createdAt,
+    updatedAt,
+  ];
 }
