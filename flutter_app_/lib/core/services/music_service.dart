@@ -1,4 +1,5 @@
 import '../models/track_search_result.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'api_service.dart';
 
 /// Music Service - Search tracks from Deezer
@@ -32,7 +33,7 @@ class MusicService {
           .map((track) => TrackSearchResult.fromDeezerJson(track as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error searching Deezer: $e');
+      debugPrint('Error searching Deezer: $e');
       return [];
     }
   }

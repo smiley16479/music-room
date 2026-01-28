@@ -1,4 +1,5 @@
 import '../../config/app_config.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/index.dart';
 import 'api_service.dart';
 
@@ -72,8 +73,8 @@ class EventService {
   Future<Event> getEvent(String id) async {
     final response = await apiService.get('${AppConfig.eventsEndpoint}/$id');
 
-    print('Get event response: $response');
-    print('Response type: ${response.runtimeType}');
+    debugPrint('Get event response: $response');
+    debugPrint('Response type: ${response.runtimeType}');
 
     // Handle both wrapped response (with 'data' field) and direct data response
     Map<String, dynamic> eventData;
@@ -90,8 +91,8 @@ class EventService {
     try {
       return Event.fromJson(eventData);
     } catch (e) {
-      print('Error parsing Event.fromJson for getEvent: $e');
-      print('Event data: $eventData');
+      debugPrint('Error parsing Event.fromJson for getEvent: $e');
+      debugPrint('Event data: $eventData');
       rethrow;
     }
   }
@@ -122,8 +123,8 @@ class EventService {
       },
     );
 
-    print('Event creation response: $response');
-    print('Response type: ${response.runtimeType}');
+    debugPrint('Event creation response: $response');
+    debugPrint('Response type: ${response.runtimeType}');
 
     // Handle both wrapped response (with 'data' field) and direct data response
     Map<String, dynamic> eventData;
@@ -140,8 +141,8 @@ class EventService {
     try {
       return Event.fromJson(eventData);
     } catch (e) {
-      print('Error parsing Event.fromJson: $e');
-      print('Event data: $eventData');
+      debugPrint('Error parsing Event.fromJson: $e');
+      debugPrint('Event data: $eventData');
       rethrow;
     }
   }
@@ -190,8 +191,9 @@ class EventService {
     if (startDate != null) body['startDate'] = startDate.toIso8601String();
     if (endDate != null) body['endDate'] = endDate.toIso8601String();
     if (playlistName != null) body['playlistName'] = playlistName;
-    if (selectedPlaylistId != null)
+    if (selectedPlaylistId != null) {
       body['selectedPlaylistId'] = selectedPlaylistId;
+    }
 
     final response = await apiService.patch(
       '${AppConfig.eventsEndpoint}/$id',

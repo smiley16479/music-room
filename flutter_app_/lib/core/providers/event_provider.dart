@@ -58,47 +58,47 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Load public events (scope='all') - accessible to everyone
-      final publicEvents = await eventService.getEvents(
+      // Load all events (both user's and public)
+      _events = await eventService.getEvents(
         page: page,
         limit: limit,
       );
-
-      // Load my personal events (scope='my') - only if authenticated
-      List<Event> myEvents = [];
-      try {
-        myEvents = await eventService.getMyEvents(page: page, limit: limit);
-      } catch (e) {
-        // User might not be authenticated, which is fine for public view
-        print('⚠️ Could not load personal events: $e');
-      }
-
-      // Combine lists: add all public events, then add user's events that aren't already in public list
-      _events = publicEvents;
-      for (final event in myEvents) {
-        if (!_events.any((e) => e.id == event.id)) {
-          _events.add(event);
-        }
-      }
-
-      print(
-        '✅ Loaded events - Public: ${publicEvents.length}, My: ${myEvents.length}, Total: ${_events.length}',
-      );
-      print(
-        '🎵 Playlists: ${playlists.length}, 🎉 Real Events: ${realEvents.length}',
-      );
     } catch (e) {
       _error = e.toString();
-      print('❌ Error loading events: $e');
+      debugPrint('❌ Error loading events: $e');
     }
 
     _isLoading = false;
     notifyListeners();
   }
 
+
+
   /// Load my events (alias for loadEvents for backward compatibility)
   Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
-    return loadEvents(page: page, limit: limit);
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    debugPrint('Loading my events for page $page, limit $limit');
+    try {
+      // Récupère TOUS les events de l'utilisateur (events + playlists)
+      _events = await eventService.getMyEvents(page: page, limit: limit);
+      debugPrint('✅ Loaded my events count: ${_events.length}');
+      debugPrint('📋 Event details:');
+      for (var e in _events) {
+        debugPrint('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
+      }
+      debugPrint(
+        '🎵 Playlists: ${myPlaylists.length}, 🎉 Real Events: ${realEvents.length}',
+      );
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('❌ Error loading my events: $e');
+    }
+
+    _isLoading = false;
+    notifyListeners();
   }
 
   /// Create event
@@ -115,7 +115,7 @@ class EventProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    print('Creating event - Type: $type, Name: $name');
+    debugPrint('Creating event - Type: $type, Name: $name');
     try {
       final event = await eventService.createEvent(
         name: name,
@@ -126,13 +126,13 @@ class EventProvider extends ChangeNotifier {
         visibility: visibility,
         type: type,
       );
-      print(
+      debugPrint(
         'Event created successfully - ID: ${event.id}, Type: ${event.type}',
       );
       _events.add(event);
-      print('Total events in provider: ${_events.length}');
-      print(
-        '🎵 Playlists: ${playlists.length}, 🎉 Real Events: ${realEvents.length}',
+      debugPrint('Total events in provider: ${_events.length}');
+      debugPrint(
+        'Playlists: ${myPlaylists.length}, Real Events: ${realEvents.length}',
       );
       _isLoading = false;
       notifyListeners();

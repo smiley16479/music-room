@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:app_links/app_links.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +16,7 @@ import 'features/playlists/screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  print('🟢 App starting...');
+  debugPrint('🟢 App starting...');
 
   // Initialize app config
   AppConfig.printConfiguration();
@@ -36,9 +36,11 @@ void main() async {
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
   final audioPlayerService = AudioPlayerService();
+  final webSocketService = WebSocketService();
+  final deviceRegistrationService = DeviceRegistrationService(apiService: apiService);
   // PlaylistService is now an alias for EventService
 
-  print('🟢 Services initialized');
+  debugPrint('🟢 Services initialized');
 
   runApp(
     MultiProvider(
@@ -58,9 +60,7 @@ void main() async {
         ),
         Provider<FriendService>(create: (_) => friendService),
         Provider<AudioPlayerService>(create: (_) => audioPlayerService),
-        ChangeNotifierProvider(
-          create: (_) => AuthProvider(authService: authService),
-        ),
+        Provider<DeviceRegistrationService>(create: (_) => deviceRegistrationService),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(
             authService: authService,

@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/providers/index.dart';
-import '../../../core/providers/audio_player_provider.dart';
 import '../../../core/models/event.dart';
+import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
-import '../widgets/invite_friends_dialog.dart';
+import '../widgets/collaborator_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
 
 /// Playlist Details screen
@@ -177,9 +176,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                 colors: [Colors.purple.shade700, Colors.purple.shade400],
               ),
             ),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Cover Image
                 Container(
                   width: 120,
                   height: 120,
@@ -211,42 +211,65 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           color: Colors.white,
                         ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(width: 16),
 
-                // Playlist name
-                Text(
-                  playlist.name ?? 'Untitled Playlist',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
+                // Playlist Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Playlist name
+                      Text(
+                        playlist.name ?? 'Untitled Playlist',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                ),
-                const SizedBox(height: 8),
+                      const SizedBox(height: 8),
 
-                // Invite Friends Button - only visible for private playlists if user is owner
-                const SizedBox(height: 24),
+                      // Description
+                      if (playlist.description != null && playlist.description!.isNotEmpty)
+                        Text(
+                          playlist.description!,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Colors.white70,
+                              ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Collaborator Button
                 Consumer<AuthProvider>(
                   builder: (context, authProvider, _) {
                     final currentUser = authProvider.currentUser;
                     final isOwner = currentUser?.id == playlist.creatorId;
-                    final isPrivate =
-                        playlist.visibility == EventVisibility.private;
 
-                    if (isOwner && isPrivate) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.person_add),
-                            label: const Text('Invite Friends'),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              backgroundColor: Colors.purple,
-                              foregroundColor: Colors.white,
+                    if (isOwner) {
+                      return Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: () => _showCollaboratorDialog(context, playlist),
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(24),
                             ),
-                            onPressed: () =>
-                                _showInviteFriendsDialog(context, playlist),
+                            child: Icon(
+                              Icons.people,
+                              color: Colors.purple.shade700,
+                              size: 24,
+                            ),
                           ),
                         ),
                       );
@@ -439,8 +462,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           builder: (context, audioProvider, _) {
                             final isCurrentTrack =
                                 audioProvider.currentTrack?.id == track.id;
-                            final isPlaying =
-                                isCurrentTrack && audioProvider.isPlaying;
 
                             return Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
@@ -449,239 +470,216 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                 final canDelete = isOwner;
                                 final isMobile = MediaQuery.of(context).size.width < 600;
 
-                                final trackContent = Container(
-                                  key: Key('track_container_${track.id}'),
-                                  color: isCurrentTrack
-                                      ? Colors.purple.shade50
-                                      : Colors.transparent,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      // Drag Handle (Owner only) - hidden on mobile
-                                      if (isOwner && !isMobile)
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(right: 8),
-                                          child: Icon(
-                                            Icons.drag_handle,
-                                            color: Colors.grey.shade400,
-                                            size: 24,
+                                final trackContent = GestureDetector(
+                                  onTap: () {
+                                    // Play this track and set the playlist
+                                    audioProvider.playPlaylist(
+                                      eventProvider.currentPlaylistTracks,
+                                      startIndex: index,
+                                    );
+                                  },
+                                  child: Container(
+                                    key: Key('track_container_${track.id}'),
+                                    color: isCurrentTrack
+                                        ? Colors.purple.shade50
+                                        : Colors.transparent,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        // Drag Handle (Owner only) - hidden on mobile
+                                        if (isOwner && !isMobile)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(right: 8),
+                                            child: Icon(
+                                              Icons.drag_handle,
+                                              color: Colors.grey.shade400,
+                                              size: 24,
+                                            ),
                                           ),
-                                        ),
 
-                                      // Track Cover Image
-                                      Container(
-                                        width: 48,
-                                        height: 48,
-                                        decoration: BoxDecoration(
-                                          borderRadius:
-                                              BorderRadius.circular(4),
-                                          color: Colors.grey.shade300,
-                                          boxShadow: [
-                                            if (isCurrentTrack)
-                                              BoxShadow(
-                                                color: Colors.purple.shade200,
-                                                blurRadius: 4,
-                                                spreadRadius: 2,
-                                              ),
-                                          ],
-                                        ),
-                                        child:
-                                            track.coverUrl != null &&
-                                                track.coverUrl!.isNotEmpty
-                                            ? ClipRRect(
-                                                borderRadius:
-                                                    BorderRadius.circular(4),
-                                                child: Image.network(
-                                                  track.coverUrl!,
-                                                  fit: BoxFit.cover,
-                                                  errorBuilder: (
-                                                    context,
-                                                    error,
-                                                    stackTrace,
-                                                  ) {
-                                                    return Center(
-                                                      child: Icon(
-                                                        Icons.music_note,
-                                                        color: Colors.grey
-                                                            .shade400,
-                                                        size: 24,
-                                                      ),
-                                                    );
-                                                  },
+                                        // Track Cover Image
+                                        Container(
+                                          width: 48,
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            color: Colors.grey.shade300,
+                                            boxShadow: [
+                                              if (isCurrentTrack)
+                                                BoxShadow(
+                                                  color: Colors.purple.shade200,
+                                                  blurRadius: 4,
+                                                  spreadRadius: 2,
                                                 ),
-                                              )
-                                            : Center(
-                                                child: Icon(
-                                                  Icons.music_note,
-                                                  color: Colors.grey.shade400,
-                                                  size: 24,
-                                                ),
-                                              ),
-                                      ),
-
-                                      // Track Title & Artist
-                                      Expanded(
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                          ),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Text(
-                                                track.trackTitle ??
-                                                    'Unknown Track',
-                                                style: TextStyle(
-                                                  fontWeight: isCurrentTrack
-                                                      ? FontWeight.bold
-                                                      : FontWeight.w500,
-                                                  fontSize: 14,
-                                                  color: isCurrentTrack
-                                                      ? Theme.of(context)
-                                                          .colorScheme
-                                                          .primary
-                                                      : null,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                track.trackArtist ??
-                                                    'Unknown Artist',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey.shade600,
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
                                             ],
                                           ),
-                                        ),
-                                      ),
-
-                                      // Play Button
-                                      IconButton(
-                                        icon: Icon(
-                                          isPlaying
-                                              ? Icons.pause_circle_filled
-                                              : Icons.play_circle_outline,
-                                          size: 28,
-                                          color: isCurrentTrack
-                                              ? Theme.of(context)
-                                                  .colorScheme
-                                                  .primary
-                                              : Colors.grey.shade600,
-                                        ),
-                                        onPressed: () {
-                                          if (isPlaying) {
-                                            audioProvider.pause();
-                                          } else if (isCurrentTrack) {
-                                            audioProvider.resume();
-                                          } else {
-                                            // Play this track and set the playlist
-                                            audioProvider.playPlaylist(
-                                              eventProvider
-                                                  .currentPlaylistTracks,
-                                              startIndex: index,
-                                            );
-                                          }
-                                        },
-                                        splashRadius: 24,
-                                      ),
-
-                                      // Delete Button (Owner/Admin only)
-                                      if (canDelete)
-                                        IconButton(
-                                          icon: Icon(
-                                            Icons.delete_outline,
-                                            size: 22,
-                                            color: Colors.red.shade400,
-                                          ),
-                                          onPressed: () async {
-                                            // Show confirmation dialog
-                                            final confirm =
-                                                await showDialog<bool>(
-                                              context: context,
-                                              builder: (context) =>
-                                                  AlertDialog(
-                                                title: const Text(
-                                                  'Remove Track',
-                                                ),
-                                                content: Text(
-                                                  'Are you sure you want to remove "${track.trackTitle}" from the playlist?',
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                          context,
-                                                          false,
+                                          child:
+                                              track.coverUrl != null &&
+                                                  track.coverUrl!.isNotEmpty
+                                              ? ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                  child: Image.network(
+                                                    track.coverUrl!,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) {
+                                                      return Center(
+                                                        child: Icon(
+                                                          Icons.music_note,
+                                                          color: Colors.grey
+                                                              .shade400,
+                                                          size: 24,
                                                         ),
-                                                    child: const Text(
-                                                      'Cancel',
-                                                    ),
-                                                  ),
-                                                  TextButton(
-                                                    onPressed: () =>
-                                                        Navigator.pop(
-                                                          context,
-                                                          true,
-                                                        ),
-                                                    style: TextButton.styleFrom(
-                                                      foregroundColor:
-                                                          Colors.red,
-                                                    ),
-                                                    child: const Text(
-                                                      'Remove',
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-
-                                            if (confirm == true && mounted) {
-                                              final success =
-                                                  await eventProvider
-                                                      .removeTrackFromPlaylist(
-                                                        widget.playlistId,
-                                                        track.trackId,
                                                       );
-
-                                              if (mounted) {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                      success
-                                                          ? '✅ Track removed'
-                                                          : '❌ Failed to remove track',
-                                                    ),
-                                                    backgroundColor: success
-                                                        ? Colors.green
-                                                        : Colors.red,
+                                                    },
                                                   ),
-                                                );
-                                              }
-                                            }
-                                          },
-                                          splashRadius: 24,
-                                        )
-                                      else
-                                        const SizedBox(width: 48),
-                                    ],
-                                  ),
-                                );
+                                                )
+                                              : Center(
+                                                  child: Icon(
+                                                    Icons.music_note,
+                                                    color: Colors.grey.shade400,
+                                                    size: 24,
+                                                  ),
+                                                ),
+                                        ),
 
-                                // Wrap entire container with appropriate reorder listener for owners
+                                        // Track Title & Artist
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  track.trackTitle ??
+                                                      'Unknown Track',
+                                                  style: TextStyle(
+                                                    fontWeight: isCurrentTrack
+                                                        ? FontWeight.bold
+                                                        : FontWeight.w500,
+                                                    fontSize: 14,
+                                                    color: isCurrentTrack
+                                                        ? Theme.of(context)
+                                                            .colorScheme
+                                                            .primary
+                                                        : null,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  track.trackArtist ??
+                                                      'Unknown Artist',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+
+                                        // Delete Button (Owner/Admin only)
+                                        if (canDelete)
+                                          IconButton(
+                                            icon: Icon(
+                                              Icons.delete_outline,
+                                              size: 22,
+                                              color: Colors.red.shade400,
+                                            ),
+                                            onPressed: () async {
+                                              // Show confirmation dialog
+                                              final confirm =
+                                                  await showDialog<bool>(
+                                                context: context,
+                                                builder: (context) =>
+                                                    AlertDialog(
+                                                  title: const Text(
+                                                    'Remove Track',
+                                                  ),
+                                                  content: Text(
+                                                    'Are you sure you want to remove "${track.trackTitle}" from the playlist?',
+                                                  ),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            false,
+                                                          ),
+                                                      child: const Text(
+                                                        'Cancel',
+                                                      ),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            true,
+                                                          ),
+                                                      style: TextButton.styleFrom(
+                                                        foregroundColor:
+                                                            Colors.red,
+                                                      ),
+                                                      child: const Text(
+                                                        'Remove',
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+
+                                              if (confirm == true && mounted) {
+                                                final success =
+                                                    await eventProvider
+                                                        .removeTrackFromPlaylist(
+                                                          widget.playlistId,
+                                                          track.trackId,
+                                                        );
+
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        success
+                                                            ? '✅ Track removed'
+                                                            : '❌ Failed to remove track',
+                                                      ),
+                                                      backgroundColor: success
+                                                          ? Colors.green
+                                                          : Colors.red,
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            },
+                                            splashRadius: 24,
+                                          )
+                                        else
+                                          const SizedBox(width: 48),
+                                      ],
+                                    ),
+                                  ),
+                                );                                // Wrap entire container with appropriate reorder listener for owners
                                 if (isOwner) {
                                   if (isMobile) {
                                     // On mobile, require long-press to start reordering
@@ -939,13 +937,12 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
     );
   }
 
-  void _showInviteFriendsDialog(BuildContext context, dynamic playlist) {
+  void _showCollaboratorDialog(BuildContext context, dynamic playlist) {
     showDialog(
       context: context,
-      builder: (context) => InviteFriendsDialog(
-        eventId: playlist.id,
-        eventName: playlist.name,
-        isPlaylist: true,
+      builder: (context) => CollaboratorDialog(
+        playlistId: playlist.id,
+        playlistName: playlist.name,
       ),
     );
   }

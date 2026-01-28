@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:json_annotation/json_annotation.dart';
 import 'user.dart';
+import 'event_participant.dart';
 
 part 'event.g.dart';
 
@@ -85,7 +86,7 @@ class Event extends Equatable {
   final DateTime updatedAt;
 
   // Relations
-  final List<User>? participants;
+  final List<EventParticipant>? participants;
   @JsonKey(name: 'participantsCount', fromJson: _participantsCountFromJson)
   final int? participantsCount;
   @JsonKey(name: 'votes', fromJson: _votesFromJson)

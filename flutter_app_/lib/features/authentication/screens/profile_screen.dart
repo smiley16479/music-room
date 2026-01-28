@@ -44,15 +44,15 @@ class SingleChoice extends StatelessWidget {
         segments: const <ButtonSegment<Privacy>>[
           ButtonSegment<Privacy>(
             value: Privacy.public,
-            label: Text('Public', style: const TextStyle(fontSize: 12)),
+            label: Text('Public', style: TextStyle(fontSize: 12)),
           ),
           ButtonSegment<Privacy>(
             value: Privacy.friends,
-            label: Text('Friends', style: const TextStyle(fontSize: 12)),
+            label: Text('Friends', style: TextStyle(fontSize: 12)),
           ),
           ButtonSegment<Privacy>(
             value: Privacy.private,
-            label: Text('Private', style: const TextStyle(fontSize: 12)),
+            label: Text('Private', style: TextStyle(fontSize: 12)),
           ),
         ],
         selected: <Privacy>{value},

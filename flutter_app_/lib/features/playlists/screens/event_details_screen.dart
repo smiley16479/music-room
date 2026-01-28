@@ -914,16 +914,18 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                     itemCount: event.participants!.length,
                     itemBuilder: (context, index) {
                       final participant = event.participants![index];
-                      final name = participant.displayName ?? 'Unknown User';
-                      final initial = name.isNotEmpty
-                          ? name[0].toUpperCase()
-                          : '?';
+                      final user = participant.user;
+                      final name = user?.displayName ?? 'Unknown User';
+                      final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
                       return ListTile(
-                        leading: CircleAvatar(child: Text(initial)),
+                        leading: CircleAvatar(
+                          backgroundImage: user?.avatarUrl != null
+                              ? NetworkImage(user!.avatarUrl!)
+                              : null,
+                          child: user?.avatarUrl == null ? Text(initial) : null,
+                        ),
                         title: Text(name),
-                        subtitle: Text(
-                          participant.email ?? 'No email',
-                        ), // ⚠️ Attention
+                        subtitle: Text(user?.email ?? 'No email'),
                       );
                     },
                   )
