@@ -8,6 +8,8 @@ import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
 import '../widgets/invite_friends_dialog.dart';
+import '../widgets/music_search_dialog.dart';
+import '../widgets/collaborator_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
 
 /// Playlist Details screen
@@ -205,7 +207,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           color: Colors.white,
                         ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(width: 16),
 
                 // Tracks Section
                 Padding(
@@ -587,8 +589,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           builder: (context, audioProvider, _) {
                             final isCurrentTrack =
                                 audioProvider.currentTrack?.id == track.id;
-                            final isPlaying =
-                                isCurrentTrack && audioProvider.isPlaying;
 
                             return Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
