@@ -321,11 +321,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-<<<<<<< HEAD
-      relations: ['participants', 'votes', 'votes.user', 'votes.track'],
-=======
       relations: ['creator', 'participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
->>>>>>> 3c22bc1 (add collaborator invitation system v1)
     });
 
     if (!event) {

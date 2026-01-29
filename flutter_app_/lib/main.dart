@@ -47,7 +47,6 @@ void main() async {
       providers: [
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
-        Provider<WebSocketService>(create: (_) => webSocketService),
         Provider<PlaylistService>(
           create: (_) => eventService,
         ), // PlaylistService is typedef for EventService
@@ -61,13 +60,6 @@ void main() async {
         Provider<FriendService>(create: (_) => friendService),
         Provider<AudioPlayerService>(create: (_) => audioPlayerService),
         Provider<DeviceRegistrationService>(create: (_) => deviceRegistrationService),
-        ChangeNotifierProvider(
-          create: (_) => AuthProvider(
-            authService: authService,
-            webSocketService: webSocketService,
-            deviceRegistrationService: deviceRegistrationService,
-          ),
-        ),
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(
             eventService: eventService,

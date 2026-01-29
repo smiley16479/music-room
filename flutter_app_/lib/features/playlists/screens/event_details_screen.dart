@@ -232,10 +232,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       widget.eventId,
       name: _nameController.text,
       description: _descriptionController.text,
-      type: _enumToJsonValue(_selectedType),
-      visibility: _enumToJsonValue(_selectedVisibility),
-      licenseType: _enumToJsonValue(_selectedLicenseType),
-      votingEnabled: _votingEnabled,
       locationName: _locationNameController.text.isNotEmpty
           ? _locationNameController.text
           : null,
@@ -243,13 +239,11 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           ? _playlistNameController.text
           : null,
       votingStartTime: _formatTimeToString(_selectedVotingStartTime),
-      votingEndTime: _formatTimeToString(_selectedVotingEndTime),
       eventDate: _selectedEventDate,
       startDate: _selectedStartDate,
       endDate: _selectedEndDate,
       selectedPlaylistId: _selectedPlaylistId,
       locationRadius: radius,
-      latitude: _latitude,
       longitude: _longitude,
     );
 

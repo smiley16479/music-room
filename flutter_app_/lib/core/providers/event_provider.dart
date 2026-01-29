@@ -8,7 +8,7 @@ import '../services/index.dart';
 class EventProvider extends ChangeNotifier {
   final EventService eventService;
 
-  List<Event> _events = [];
+  final List<Event> _events = [];
   Event? _currentEvent;
   List<PlaylistTrack> _currentPlaylistTracks = [];
   bool _isLoading = false;
@@ -58,11 +58,23 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Load all events (both user's and public)
-      _events = await eventService.getEvents(
+      // Load user's events first
+      final myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      
+      // Load public events (scope='all') - accessible to everyone
+      final publicEvents = await eventService.getEvents(
         page: page,
         limit: limit,
       );
+      
+      // Merge both lists, avoiding duplicates
+      _events.clear();
+      _events.addAll(myEvents);
+      for (var event in publicEvents) {
+        if (!_events.any((e) => e.id == event.id)) {
+          _events.add(event);
+        }
+      }
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error loading events: $e');
@@ -74,7 +86,8 @@ class EventProvider extends ChangeNotifier {
 
 
 
-  /// Load my events (alias for loadEvents for backward compatibility)
+  /// Load my events (all types)
+  /// The UI will filter using myPlaylists or realEvents getters
   Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
     _isLoading = true;
     _error = null;
@@ -83,7 +96,9 @@ class EventProvider extends ChangeNotifier {
     debugPrint('Loading my events for page $page, limit $limit');
     try {
       // Récupère TOUS les events de l'utilisateur (events + playlists)
-      _events = await eventService.getMyEvents(page: page, limit: limit);
+      final myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      _events.clear();
+      _events.addAll(myEvents);
       debugPrint('✅ Loaded my events count: ${_events.length}');
       debugPrint('📋 Event details:');
       for (var e in _events) {
@@ -178,17 +193,10 @@ class EventProvider extends ChangeNotifier {
         name: name ?? title,
         title: title,
         description: description,
-        type: type,
-        visibility: visibility,
-        licenseType: licenseType,
-        votingEnabled: votingEnabled,
-        coverImageUrl: coverImageUrl,
-        latitude: latitude,
         longitude: longitude,
         locationRadius: locationRadius,
         locationName: locationName,
         votingStartTime: votingStartTime,
-        votingEndTime: votingEndTime,
         eventDate: eventDate,
         startDate: startDate,
         endDate: endDate,
@@ -330,8 +338,6 @@ class EventProvider extends ChangeNotifier {
       id,
       name: name,
       description: description,
-      visibility: isPublic != null ? (isPublic ? 'public' : 'private') : null,
-      licenseType: eventLicenseType,
     );
   }
 

@@ -24,7 +24,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
-  late EventVisibility? _selectedVisibility;
 
   // Playlist settings
   late bool _votingInvitedOnly;
@@ -39,8 +38,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   void _initControllers() {
     _nameController = TextEditingController();
     _descriptionController = TextEditingController();
-
-    _selectedVisibility = null;
     _votingInvitedOnly = false;
   }
 
@@ -57,17 +54,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   void _toggleEditMode(dynamic playlist) {
-        setState(() {
+    setState(() {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
-        _selectedVisibility = playlist.visibility;
-<<<<<<< HEAD
-        _votingInvitedOnly = playlist.licenseType == EventLicenseType.invited;
-=======
-        _votingInvitedOnly =
-            playlist.licenseType == EventLicenseType.invited;
->>>>>>> 3c22bc1 (add collaborator invitation system v1)
+        _votingInvitedOnly = playlist.licenseType == 'invited';
       }
       _isEditMode = !_isEditMode;
     });
@@ -78,9 +69,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       widget.playlistId,
       name: _nameController.text,
       description: _descriptionController.text,
-      eventLicenseType: _votingInvitedOnly
-          ? EventLicenseType.invited.name
-          : EventLicenseType.none.name,
+      eventLicenseType: _votingInvitedOnly ? 'invited' : 'none',
     );
 
     if (mounted) {
@@ -764,22 +753,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 24),
-
-          DropdownButton<EventVisibility>(
-            isExpanded: true,
-            value: _selectedVisibility,
-            hint: const Text('Select Visibility'),
-            onChanged: (EventVisibility? newValue) {
-              setState(() => _selectedVisibility = newValue);
-            },
-            items: EventVisibility.values.map((EventVisibility visibility) {
-              return DropdownMenuItem<EventVisibility>(
-                value: visibility,
-                child: Text(_getEnumLabel(visibility)),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
 
           // Voting Settings
           CheckboxListTile(
