@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:uuid/uuid.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import '../models/device.dart';
 import 'api_service.dart';
@@ -15,6 +15,7 @@ class DeviceRegistrationService {
   static const String _deviceFingerprintKey = 'device_fingerprint';
 
   final ApiService apiService;
+  static String? _cachedDeviceId;
 
   DeviceRegistrationService({required this.apiService});
 
@@ -45,7 +46,8 @@ class DeviceRegistrationService {
                 final linuxInfo = await deviceInfo.linuxInfo;
                 fingerprintData = '${linuxInfo.id}_${linuxInfo.versionId}_${linuxInfo.machineId}';
               } catch (_) {
-                fingerprintData = 'unknown_device';
+                // For web/unknown platforms, create a deterministic fingerprint
+                fingerprintData = _generateWebFingerprint();
               }
             }
           }
@@ -58,43 +60,82 @@ class DeviceRegistrationService {
       return fingerprint;
     } catch (e) {
       debugPrint('Error generating device fingerprint: $e');
-      return 'unknown';
+      return _generateWebFingerprint();
     }
   }
 
-  /// Get or generate device UUID with fallback to fingerprint
+  /// Generate a deterministic fingerprint for web/desktop browsers
+  /// Same browser will always get the same fingerprint even in private mode
+  String _generateWebFingerprint() {
+    try {
+      // For web/desktop, create fingerprint from platform and static data
+      // This ensures the same browser always gets the same fingerprint
+      String browserInfo = '';
+      
+      if (Platform.isWindows) {
+        browserInfo = 'windows_desktop';
+      } else if (Platform.isMacOS) {
+        browserInfo = 'macos_desktop';
+      } else if (Platform.isLinux) {
+        browserInfo = 'linux_desktop';
+      } else {
+        browserInfo = 'web_browser';
+      }
+      
+      // Create deterministic hash from platform
+      final fingerprint = sha256.convert(utf8.encode(browserInfo)).toString();
+      debugPrint('Generated web fingerprint: $fingerprint (from: $browserInfo)');
+      return fingerprint;
+    } catch (e) {
+      debugPrint('Error generating web fingerprint: $e');
+      return 'web_fallback_fingerprint';
+    }
+  }
+
+  /// Get or generate device UUID with multi-level fallback
+  /// 1. Try cached value (in memory)
+  /// 2. Try SharedPreferences
+  /// 3. Try fingerprint (stable for native platforms)
+  /// 4. For web: use deterministic fingerprint (same every time)
   Future<String> getDeviceId() async {
+    // Return cached value if available
+    if (_cachedDeviceId != null) {
+      debugPrint('Using cached device ID: $_cachedDeviceId');
+      return _cachedDeviceId!;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     
     // Try to get stored UUID first
     String? deviceId = prefs.getString(_deviceIdKey);
     if (deviceId != null) {
       debugPrint('Using stored device UUID: $deviceId');
+      _cachedDeviceId = deviceId;
       return deviceId;
     }
 
-    // Fallback: use fingerprint (reliable across sessions)
+    // Try to use fingerprint (reliable across sessions for native platforms)
     String? fingerprint = prefs.getString(_deviceFingerprintKey);
     if (fingerprint == null) {
       fingerprint = await generateDeviceFingerprint();
-      try {
-        await prefs.setString(_deviceFingerprintKey, fingerprint);
-      } catch (e) {
-        debugPrint('Warning: Could not store fingerprint (might be in private mode): $e');
+      // Only store if fingerprint is stable (not "web_fallback")
+      if (!fingerprint.contains('fallback')) {
+        try {
+          await prefs.setString(_deviceFingerprintKey, fingerprint);
+          debugPrint('Stored device fingerprint: $fingerprint');
+        } catch (e) {
+          debugPrint('Warning: Could not store fingerprint: $e');
+        }
       }
+    } else {
+      debugPrint('Using stored fingerprint: $fingerprint');
+      _cachedDeviceId = fingerprint;
+      return fingerprint;
     }
 
-    // If SharedPreferences is available, also store a UUID
-    if (deviceId == null) {
-      deviceId = const Uuid().v4();
-      try {
-        await prefs.setString(_deviceIdKey, deviceId);
-      } catch (e) {
-        debugPrint('Warning: Could not store UUID (might be in private mode): $e');
-      }
-    }
-
+    // Use fingerprint as device ID
     debugPrint('Using device fingerprint as ID: $fingerprint');
+    _cachedDeviceId = fingerprint;
     return fingerprint;
   }
 
@@ -234,8 +275,8 @@ class DeviceRegistrationService {
 
   /// Clear device registration (on logout)
   Future<void> clearDeviceRegistration() async {
-    final prefs = await SharedPreferences.getInstance();
-    // Keep device UUID but clear other data if needed
-    // Don't delete the UUID so same device is recognized on re-login
+    // Keep device fingerprint/UUID cached in memory only
+    // So same device is recognized on re-login within the same session
+    _cachedDeviceId = null;
   }
 }

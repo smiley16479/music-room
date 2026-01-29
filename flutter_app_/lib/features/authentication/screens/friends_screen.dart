@@ -483,7 +483,7 @@ class _FriendsScreenState extends State<FriendsScreen>
     final inviter = invitation.inviter;
     final isEventInvitation = invitation.type == 'event';
     final isPlaylistInvitation = invitation.type == 'playlist';
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -583,9 +583,9 @@ class _FriendsScreenState extends State<FriendsScreen>
       final message = invitation.type == 'event'
           ? 'Event invitation accepted!'
           : invitation.type == 'playlist'
-              ? 'Playlist invitation accepted!'
-              : 'Friend request accepted!';
-      
+          ? 'Playlist invitation accepted!'
+          : 'Friend request accepted!';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -610,9 +610,9 @@ class _FriendsScreenState extends State<FriendsScreen>
       final message = invitation.type == 'event'
           ? 'Event invitation declined'
           : invitation.type == 'playlist'
-              ? 'Playlist invitation declined'
-              : 'Friend request declined';
-      
+          ? 'Playlist invitation declined'
+          : 'Friend request declined';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -945,7 +945,7 @@ class _FriendsScreenState extends State<FriendsScreen>
                             const Divider(),
                             const SizedBox(height: 16),
                             const Text(
-                              'Device Control Delegation',
+                              'Delegate Your Devices',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
@@ -988,9 +988,11 @@ class _FriendsScreenState extends State<FriendsScreen>
   }
 
   /// Build device control delegation section
-  Widget _buildDeviceDelegationSection(BuildContext context, String userId) {
+  Widget _buildDeviceDelegationSection(BuildContext context, String delegateToUserId) {
+    final currentUser = context.read<AuthProvider>().user;
+    
     return FutureBuilder<List<Device>>(
-      future: _loadUserDevices(userId),
+      future: _loadUserDevices(currentUser?.id ?? ''),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const SizedBox(
@@ -1005,7 +1007,7 @@ class _FriendsScreenState extends State<FriendsScreen>
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
             child: Text(
-              'No devices available',
+              'No devices available to delegate',
               style: TextStyle(color: Colors.grey[600], fontSize: 13),
             ),
           );
@@ -1014,7 +1016,7 @@ class _FriendsScreenState extends State<FriendsScreen>
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: devices.map((device) {
-            return _buildDeviceDelegationTile(device, userId);
+            return _buildDeviceDelegationTile(device, delegateToUserId);
           }).toList(),
         );
       },
