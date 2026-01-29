@@ -117,20 +117,7 @@ class EventProvider extends ChangeNotifier {
   }
 
   /// Load event details
-  Future<void> loadEventDetails(String eventId) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      _currentEvent = await eventService.getEvent(eventId);
-    } catch (e) {
-      _error = e.toString();
-    }
-
-    _isLoading = false;
-    notifyListeners();
-  }
+  // (Removed duplicate simple loader) Use the more complete `loadEventDetails` below
 
   /// Create event
   Future<bool> createEvent({

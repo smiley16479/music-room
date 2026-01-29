@@ -32,6 +32,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
 
   // Playlist settings
   late bool _votingInvitedOnly;
+  late EventVisibility? _selectedVisibility;
 
   @override
   void initState() {
@@ -776,29 +777,27 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                 ),
                                               );
 
-                                              if (confirm == true && mounted) {
-                                                final success =
-                                                    await eventProvider
-                                                        .removeTrackFromPlaylist(
-                                                          widget.playlistId,
-                                                          track.trackId,
-                                                        );
+                                              if (confirm == true) {
+                                                final success = await eventProvider
+                                                    .removeTrackFromPlaylist(
+                                                  widget.playlistId,
+                                                  track.trackId,
+                                                );
 
-                                                if (mounted) {
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        success
-                                                            ? '✅ Track removed'
-                                                            : '❌ Failed to remove track',
-                                                      ),
-                                                      backgroundColor: success
-                                                          ? Colors.green
-                                                          : Colors.red,
+                                                if (!mounted) return;
+
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      success
+                                                          ? '✅ Track removed'
+                                                          : '❌ Failed to remove track',
                                                     ),
-                                                  );
-                                                }
+                                                    backgroundColor:
+                                                        success ? Colors.green : Colors.red,
+                                                  ),
+                                                );
                                               }
                                             },
                                             splashRadius: 24,
