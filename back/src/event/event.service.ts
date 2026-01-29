@@ -163,6 +163,22 @@ export class EventService {
 
     console.log('Event saved with ID:', savedEvent.id, 'Type:', savedEvent.type);
     
+    // Add creator as an admin participant for playlists, or as a collaborator for events
+    try {
+      const role = savedEvent.type === EventType.PLAYLIST 
+        ? ParticipantRole.ADMIN 
+        : ParticipantRole.COLLABORATOR;
+      
+      await this.eventParticipantService.addParticipant(
+        savedEvent.id,
+        creatorId,
+        role
+      );
+      console.log(`Creator added as ${role} for event:`, savedEvent.id);
+    } catch (error) {
+      console.error('Error adding creator as participant:', error);
+    }
+    
     this.eventGateway.notifyEventCreated(savedEvent, creator);
 
     return this.findById(savedEvent.id, creatorId);
@@ -173,6 +189,7 @@ export class EventService {
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
 
     if (userId) {
       // Show public events + private events where user has access (creator, participant, admin)
@@ -230,6 +247,7 @@ export class EventService {
 
     const queryBuilder = this.eventRepository.createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
       .leftJoinAndSelect('event.creator', 'creator')
       .where(
         '(event.creatorId = :userId OR participants.userId = :userId)',
@@ -303,7 +321,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['participants', 'votes', 'votes.user', 'votes.track'],
+      relations: ['creator', 'participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
     });
 
     if (!event) {
@@ -450,10 +468,10 @@ export class EventService {
   async removeParticipant(eventId: string, userId: string): Promise<void> {
     const event = await this.findById(eventId, userId);
 
-    /*// Can't remove creator
+    // Can't remove creator
     if (event.creatorId === userId) {
-      throw new BadRequestException('Event creator cannot leave the event');
-    }*/
+      throw new BadRequestException('Event creator cannot be removed from the event');
+    }
 
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -824,6 +842,7 @@ export class EventService {
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.creator', 'creator')
       .leftJoinAndSelect('event.participants', 'participants')
+      .leftJoinAndSelect('participants.user', 'participantUser')
       .where('event.visibility = :visibility', { visibility: EventVisibility.PUBLIC })
       .andWhere('event.status = :status', { status: EventStatus.LIVE })
       .andWhere('event.latitude IS NOT NULL AND event.longitude IS NOT NULL')
@@ -1096,6 +1115,7 @@ export class EventService {
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.participants', 'participant')
+      .leftJoinAndSelect('participant.user', 'participantUser')
       .where('event.creatorId = :userId', { userId })
       .orWhere('participant.userId = :userId', { userId })
       .getMany();
@@ -1246,9 +1266,13 @@ export class EventService {
       return;
     }
 
-    // Check if user is an admin
-    if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
-      return; // User is an admin
+    // Check if user is a participant (any role: admin, collaborator, or participant)
+    const isParticipant = event.participants?.some(
+      participant => participant.userId === userId
+    );
+    
+    if (isParticipant) {
+      return; // User is a participant (admin, collaborator, or participant)
     }
 
     // Check if user is invited
@@ -1262,15 +1286,6 @@ export class EventService {
 
     if (invitation) {
       return; // User has an accepted invitation
-    }
-
-    // Check if user is a participant on the event
-    const isParticipant = event.participants?.some(
-      participant => participant.userId === userId
-    );
-    
-    if (isParticipant) {
-      return; // User is an event participant
     }
 
     throw new ForbiddenException('You are not invited to this private event');
@@ -1407,6 +1422,11 @@ export class EventService {
   }
 
   computeStatus(event: Event): EventStatus {
+    // For playlists or events without dates, return the stored status or default to UPCOMING
+    if (!event.eventDate || !event.endDate) {
+      return event.status || EventStatus.UPCOMING;
+    }
+
     // Convertit la date courante en heure de Paris
     const timeZone = 'Europe/Paris';
     const now = toZonedTime(new Date(), timeZone);
@@ -1437,8 +1457,24 @@ export class EventService {
       throw new NotFoundException('Event not found');
     }
 
-    // Sort by position
-    return event.tracks.sort((a, b) => a.position - b.position);
+    // Sort by position and map to the expected format
+    return event.tracks
+      .sort((a, b) => a.position - b.position)
+      .map(playlistTrack => ({
+        id: playlistTrack.id,
+        eventId: playlistTrack.eventId,
+        trackId: playlistTrack.trackId,
+        position: playlistTrack.position,
+        votes: 0, // TODO: Calculate actual votes
+        trackTitle: playlistTrack.track?.title,
+        trackArtist: playlistTrack.track?.artist,
+        trackAlbum: playlistTrack.track?.album,
+        coverUrl: playlistTrack.track?.albumCoverUrl,
+        previewUrl: playlistTrack.track?.previewUrl,
+        duration: playlistTrack.track?.duration,
+        createdAt: playlistTrack.createdAt,
+        updatedAt: playlistTrack.addedAt || playlistTrack.createdAt,
+      }));
   }
 
   /**
@@ -1465,11 +1501,28 @@ export class EventService {
       throw new NotFoundException('Track not found in this event');
     }
 
+    // Store position before removal
+    const removedPosition = playlistTrack.position;
+
     // Remove votes for this track
     await this.removeVotesOfTrack(eventId, trackId);
 
     // Delete the track
     await playlistTrackRepository.remove(playlistTrack);
+
+    // Recompute positions for tracks after the removed one
+    const tracksToUpdate = await playlistTrackRepository.find({
+      where: { eventId },
+      order: { position: 'ASC' },
+    });
+
+    // Update positions to fill the gap
+    for (const track of tracksToUpdate) {
+      if (track.position > removedPosition) {
+        track.position = track.position - 1;
+      }
+    }
+    await playlistTrackRepository.save(tracksToUpdate);
 
     // Update track count
     event.trackCount = Math.max(0, (event.trackCount || 0) - 1);
@@ -1531,6 +1584,67 @@ export class EventService {
     // Notify participants
     this.eventGateway.notifyTrackAdded(eventId, saved, userId);
 
-    return saved;
+    // Return formatted response matching Flutter model expectations
+    return {
+      id: saved.id,
+      eventId: saved.eventId,
+      trackId: saved.trackId,
+      position: saved.position,
+      votes: 0,
+      trackTitle: track.title,
+      trackArtist: track.artist,
+      trackAlbum: track.album,
+      coverUrl: track.albumCoverUrl,
+      previewUrl: track.previewUrl,
+      duration: track.duration,
+      createdAt: saved.createdAt,
+      updatedAt: saved.addedAt || saved.createdAt,
+    };
+  }
+
+  /**
+   * Reorder playlist tracks using an ordered list of playlist-track IDs
+   */
+  async reorderPlaylistTracks(playlistId: string, userId: string, trackIds: string[]): Promise<void> {
+    const event = await this.findById(playlistId, userId);
+
+    // Permission: only creator or admins
+    const isCreator = event.creatorId === userId;
+    const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+
+    if (!isCreator && !isAdmin) {
+      throw new ForbiddenException('Only the creator or admins can reorder tracks');
+    }
+
+    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
+    const existingTracks = await playlistTrackRepository.find({ where: { eventId: playlistId } });
+
+    if (!existingTracks || existingTracks.length === 0) {
+      throw new NotFoundException('No tracks found for this playlist');
+    }
+
+    // Ensure provided list covers exactly the existing tracks
+    if (trackIds.length !== existingTracks.length) {
+      throw new BadRequestException('trackIds length does not match current playlist track count');
+    }
+
+    // Map by id for quick lookup
+    const byId = new Map(existingTracks.map((t: any) => [t.id, t]));
+
+    const toSave: any[] = [];
+    for (let i = 0; i < trackIds.length; i++) {
+      const id = trackIds[i];
+      const pt = byId.get(id);
+      if (!pt) {
+        throw new NotFoundException(`Playlist track not found: ${id}`);
+      }
+      pt.position = i + 1;
+      toSave.push(pt);
+    }
+
+    await playlistTrackRepository.save(toSave);
+
+    // Notify participants via gateway
+    this.eventGateway.notifyTracksReordered(playlistId, trackIds, userId);
   }
 }

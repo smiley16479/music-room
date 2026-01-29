@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import '../../config/app_config.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import '../models/index.dart';
 import 'api_service.dart';
 
@@ -31,9 +34,21 @@ class EventService {
       );
     }
 
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List<Event> parsed = [];
+    for (final item in dataList) {
+      try {
+        parsed.add(Event.fromJson(item as Map<String, dynamic>));
+      } catch (e) {
+        debugPrint('❌ Failed to parse Event item: $e');
+        try {
+          debugPrint('Item JSON: ${jsonEncode(item)}');
+        } catch (_) {
+          debugPrint('Item (non-serializable) fallback: $item');
+        }
+      }
+    }
+
+    return parsed;
   }
 
   /// Get my events
@@ -63,17 +78,29 @@ class EventService {
       );
     }
 
-    return dataList
-        .map((e) => Event.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List<Event> parsed = [];
+    for (final item in dataList) {
+      try {
+        parsed.add(Event.fromJson(item as Map<String, dynamic>));
+      } catch (e) {
+        debugPrint('❌ Failed to parse MyEvent item: $e');
+        try {
+          debugPrint('Item JSON: ${jsonEncode(item)}');
+        } catch (_) {
+          debugPrint('Item (non-serializable) fallback: $item');
+        }
+      }
+    }
+
+    return parsed;
   }
 
   /// Get event by ID
   Future<Event> getEvent(String id) async {
     final response = await apiService.get('${AppConfig.eventsEndpoint}/$id');
 
-    print('Get event response: $response');
-    print('Response type: ${response.runtimeType}');
+    debugPrint('Get event response: $response');
+    debugPrint('Response type: ${response.runtimeType}');
 
     // Handle both wrapped response (with 'data' field) and direct data response
     Map<String, dynamic> eventData;
@@ -90,8 +117,8 @@ class EventService {
     try {
       return Event.fromJson(eventData);
     } catch (e) {
-      print('Error parsing Event.fromJson for getEvent: $e');
-      print('Event data: $eventData');
+      debugPrint('Error parsing Event.fromJson for getEvent: $e');
+      debugPrint('Event data: $eventData');
       rethrow;
     }
   }
@@ -122,8 +149,8 @@ class EventService {
       },
     );
 
-    print('Event creation response: $response');
-    print('Response type: ${response.runtimeType}');
+    debugPrint('Event creation response: $response');
+    debugPrint('Response type: ${response.runtimeType}');
 
     // Handle both wrapped response (with 'data' field) and direct data response
     Map<String, dynamic> eventData;
@@ -140,8 +167,8 @@ class EventService {
     try {
       return Event.fromJson(eventData);
     } catch (e) {
-      print('Error parsing Event.fromJson: $e');
-      print('Event data: $eventData');
+      debugPrint('Error parsing Event.fromJson: $e');
+      debugPrint('Event data: $eventData');
       rethrow;
     }
   }
@@ -190,8 +217,9 @@ class EventService {
     if (startDate != null) body['startDate'] = startDate.toIso8601String();
     if (endDate != null) body['endDate'] = endDate.toIso8601String();
     if (playlistName != null) body['playlistName'] = playlistName;
-    if (selectedPlaylistId != null)
+    if (selectedPlaylistId != null) {
       body['selectedPlaylistId'] = selectedPlaylistId;
+    }
 
     final response = await apiService.patch(
       '${AppConfig.eventsEndpoint}/$id',
@@ -360,6 +388,22 @@ class EventService {
     return PlaylistTrack.fromJson(trackData);
   }
 
+  /// Get track by id
+  Future<PlaylistTrack> getTrackById(String trackId) async {
+    final response = await apiService.get('/music/track/$trackId');
+    
+    Map<String, dynamic> trackData;
+    if (response is Map<String, dynamic> && response.containsKey('data')) {
+      trackData = response['data'] as Map<String, dynamic>;
+    } else if (response is Map<String, dynamic>) {
+      trackData = response;
+    } else {
+      throw Exception('Invalid response format');
+    }
+    
+    return PlaylistTrack.fromJson(trackData);
+  }
+
   /// Remove track from playlist
   Future<void> removeTrackFromPlaylist(
     String playlistId,
@@ -367,6 +411,14 @@ class EventService {
   ) async {
     await apiService.delete(
       '${AppConfig.eventsEndpoint}/$playlistId/tracks/$trackId',
+    );
+  }
+
+  /// Reorder playlist tracks by sending an ordered list of playlist-track IDs
+  Future<void> reorderPlaylistTracks(String playlistId, List<String> playlistTrackIds) async {
+    await apiService.post(
+      '${AppConfig.eventsEndpoint}/$playlistId/tracks/reorder',
+      body: {'trackIds': playlistTrackIds},
     );
   }
 

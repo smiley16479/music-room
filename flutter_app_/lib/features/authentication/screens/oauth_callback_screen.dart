@@ -73,8 +73,7 @@ class _OAuthCallbackScreenState extends State<OAuthCallbackScreen> {
         if (kIsWeb) {
           // Clear URL and reload - this is web-specific
           // The _InitialScreen will rebuild with isAuthenticated = true
-          Navigator.of(context).pushReplacementNamed('/') ??
-              Navigator.of(context).pop();
+          Navigator.of(context).pushReplacementNamed('/');
         }
       } catch (e) {
         _showError('Failed to process login: $e');

@@ -482,7 +482,8 @@ class _FriendsScreenState extends State<FriendsScreen>
   ) {
     final inviter = invitation.inviter;
     final isEventInvitation = invitation.type == 'event';
-
+    final isPlaylistInvitation = invitation.type == 'playlist';
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -505,6 +506,15 @@ class _FriendsScreenState extends State<FriendsScreen>
                       if (isEventInvitation)
                         Text(
                           'Invited you to an event',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        )
+                      else if (isPlaylistInvitation)
+                        Text(
+                          'Invited you to collaborate on a playlist',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey[600],
@@ -536,7 +546,7 @@ class _FriendsScreenState extends State<FriendsScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (!isEventInvitation)
+                if (invitation.type == 'friend')
                   TextButton.icon(
                     icon: const Icon(Icons.person),
                     label: const Text('View Profile'),
@@ -570,11 +580,12 @@ class _FriendsScreenState extends State<FriendsScreen>
   ) async {
     final success = await provider.acceptInvitation(invitation.id);
     if (mounted) {
-      final isEventInvitation = invitation.type == 'event';
-      final message = isEventInvitation
+      final message = invitation.type == 'event'
           ? 'Event invitation accepted!'
-          : 'Friend request accepted!';
-
+          : invitation.type == 'playlist'
+              ? 'Playlist invitation accepted!'
+              : 'Friend request accepted!';
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -596,11 +607,12 @@ class _FriendsScreenState extends State<FriendsScreen>
   ) async {
     final success = await provider.declineInvitation(invitation.id);
     if (mounted) {
-      final isEventInvitation = invitation.type == 'event';
-      final message = isEventInvitation
+      final message = invitation.type == 'event'
           ? 'Event invitation declined'
-          : 'Friend request declined';
-
+          : invitation.type == 'playlist'
+              ? 'Playlist invitation declined'
+              : 'Friend request declined';
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

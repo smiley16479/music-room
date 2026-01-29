@@ -9,12 +9,14 @@ import { Event } from 'src/event/entities/event.entity';
 
 import { UserModule } from '../user/user.module';
 import { EmailModule } from '../email/email.module';
+import { EventModule } from '../event/event.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Invitation, User, Event]),
     UserModule,
     EmailModule,
+    EventModule,
   ],
   controllers: [InvitationController],
   providers: [InvitationService],

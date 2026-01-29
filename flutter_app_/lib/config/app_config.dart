@@ -1,5 +1,5 @@
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 
 /// Application configuration constants
 ///
@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 class AppConfig {
   // Machine IP for physical device testing
   // Run `ifconfig` (Mac/Linux) or `ipconfig` (Windows) to find your IP
+  // ignore: unused_field
   static const String _machineIp = '10.16.13.5';
 
   // API Configuration
@@ -133,7 +134,7 @@ class AppConfig {
 
   /// Print configuration for debugging
   static void printConfiguration() {
-    print('''
+    debugPrint('''
     ===== App Configuration =====
     App Name: $appName
     Version: $appVersion

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/providers/index.dart';
-import '../../../core/models/track_search_result.dart';
 import '../../../core/models/event.dart';
+import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
-import '../widgets/invite_friends_dialog.dart';
+import '../widgets/collaborator_dialog.dart';
+import '../widgets/mini_player_scaffold.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -24,7 +24,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
-  late EventVisibility? _selectedVisibility;
 
   // Playlist settings
   late bool _votingInvitedOnly;
@@ -39,8 +38,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   void _initControllers() {
     _nameController = TextEditingController();
     _descriptionController = TextEditingController();
-
-    _selectedVisibility = null;
     _votingInvitedOnly = false;
   }
 
@@ -61,8 +58,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
-        _selectedVisibility = playlist.visibility;
-        _votingInvitedOnly = playlist.licenseType == EventLicenseType.invited;
+        _votingInvitedOnly = playlist.licenseType == 'invited';
       }
       _isEditMode = !_isEditMode;
     });
@@ -73,9 +69,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       widget.playlistId,
       name: _nameController.text,
       description: _descriptionController.text,
-      eventLicenseType: _votingInvitedOnly
-          ? EventLicenseType.invited.name
-          : EventLicenseType.none.name,
+      eventLicenseType: _votingInvitedOnly ? 'invited' : 'none',
     );
 
     if (mounted) {
@@ -107,46 +101,42 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_isEditMode,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _isEditMode) {
-          // Close edit mode instead of popping
-          setState(() {
-            _isEditMode = false;
-          });
-        }
-      },
+    return MiniPlayerScaffold(
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Playlists'),
+          title: const Text('Playlist Details'),
           elevation: 0,
           actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-              onPressed: () async {
-                final authProvider = context.read<AuthProvider>();
-                await authProvider.logout();
+            Consumer<PlaylistProvider>(
+              builder: (context, playlistProvider, _) {
+                final playlist = playlistProvider.currentPlaylist;
+                if (playlist != null) {
+                  return IconButton(
+                    icon: Icon(_isEditMode ? Icons.close : Icons.edit),
+                    onPressed: () => _toggleEditMode(playlist),
+                    tooltip: _isEditMode ? 'Cancel' : 'Edit Playlist',
+                  );
+                }
+                return const SizedBox.shrink();
               },
             ),
           ],
         ),
-        body: Consumer<EventProvider>(
-          builder: (context, eventProvider, _) {
-            if (eventProvider.isLoading) {
+        body: Consumer<PlaylistProvider>(
+          builder: (context, playlistProvider, _) {
+            if (playlistProvider.isLoading) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final playlist = eventProvider.currentPlaylist;
+            final playlist = playlistProvider.currentPlaylist;
 
             if (playlist == null) {
               return const Center(child: Text('Playlist not found'));
             }
 
             return _isEditMode
-                ? _buildEditForm(eventProvider, playlist)
-                : _buildViewMode(eventProvider, playlist);
+                ? _buildEditForm(playlistProvider, playlist)
+                : _buildViewMode(playlistProvider, playlist);
           },
         ),
         floatingActionButton: _isEditMode
@@ -161,6 +151,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   Widget _buildViewMode(EventProvider eventProvider, dynamic playlist) {
+    final String? headerCover = eventProvider.currentPlaylistTracks.isNotEmpty
+        ? eventProvider.currentPlaylistTracks.first.coverUrl
+        : null;
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -176,9 +170,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                 colors: [Colors.purple.shade700, Colors.purple.shade400],
               ),
             ),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Cover Image
                 Container(
                   width: 120,
                   height: 120,
@@ -186,45 +181,89 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     color: Colors.white.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.music_note,
-                    size: 60,
-                    color: Colors.white,
-                  ),
+                  child: headerCover != null && headerCover.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            headerCover,
+                            fit: BoxFit.cover,
+                            width: 120,
+                            height: 120,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                              child: Icon(
+                                Icons.music_note,
+                                size: 60,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.music_note,
+                          size: 60,
+                          color: Colors.white,
+                        ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  playlist.name,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                const SizedBox(width: 16),
 
-                // Invite Friends Button - only visible for private playlists if user is owner
-                const SizedBox(height: 24),
+                // Playlist Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Playlist name
+                      Text(
+                        playlist.name ?? 'Untitled Playlist',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Description
+                      if (playlist.description != null && playlist.description!.isNotEmpty)
+                        Text(
+                          playlist.description!,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Colors.white70,
+                              ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+
+                // Collaborator Button
                 Consumer<AuthProvider>(
                   builder: (context, authProvider, _) {
                     final currentUser = authProvider.currentUser;
                     final isOwner = currentUser?.id == playlist.creatorId;
-                    final isPrivate =
-                        playlist.visibility == EventVisibility.private;
 
-                    if (isOwner && isPrivate) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.person_add),
-                            label: const Text('Invite Friends'),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              backgroundColor: Colors.purple,
-                              foregroundColor: Colors.white,
+                    if (isOwner) {
+                      return Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: () => _showCollaboratorDialog(context, playlist),
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(24),
                             ),
-                            onPressed: () =>
-                                _showInviteFriendsDialog(context, playlist),
+                            child: Icon(
+                              Icons.people,
+                              color: Colors.purple.shade700,
+                              size: 24,
+                            ),
                           ),
                         ),
                       );
@@ -331,11 +370,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
           // Tracks Section
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -368,25 +405,299 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     ),
                   )
                 else
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: eventProvider.currentPlaylistTracks.length,
-                    itemBuilder: (context, index) {
-                      final track = eventProvider.currentPlaylistTracks[index];
-                      return ListTile(
-                        leading: Text(
-                          (index + 1).toString(),
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        title: Text(track.trackTitle ?? 'Unknown Track'),
-                        subtitle: Text(track.trackArtist ?? 'Unknown Artist'),
-                        trailing: const Icon(Icons.play_arrow),
-                        onTap: () {
-                          // TODO: Play track
-                        },
-                      );
-                    },
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ReorderableListView.builder(
+                      buildDefaultDragHandles: false,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: eventProvider.currentPlaylistTracks.length,
+                      onReorder: (oldIndex, newIndex) async {
+                        // Reorder locally first
+                        eventProvider.reorderTrack(oldIndex, newIndex);
+
+                        // Build the new order as a list of playlist-track IDs
+                        final newOrder = eventProvider.currentPlaylistTracks
+                            .map((t) => t.id)
+                            .toList();
+
+                        // Persist the order to backend
+                        final success = await eventProvider.persistReorder(
+                          playlist.id,
+                          newOrder,
+                        );
+
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                success
+                                    ? '✅ Tracks reordered'
+                                    : '❌ Failed to save track order',
+                              ),
+                              backgroundColor: success ? Colors.green : Colors.red,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+
+                          if (!success) {
+                            // On failure, reload playlist to restore server state
+                            await eventProvider.loadPlaylistDetails(widget.playlistId);
+                          }
+                        }
+                      },
+                      itemBuilder: (context, index) {
+                        final track =
+                            eventProvider.currentPlaylistTracks[index];
+                        return Consumer<AudioPlayerProvider>(
+                          key: Key('track_${track.id}'),
+                          builder: (context, audioProvider, _) {
+                            final isCurrentTrack =
+                                audioProvider.currentTrack?.id == track.id;
+
+                            return Consumer<AuthProvider>(
+                              builder: (context, authProvider, _) {
+                                final currentUser = authProvider.currentUser;
+                                final isOwner = currentUser?.id == playlist.creatorId;
+                                final canDelete = isOwner;
+                                final isMobile = MediaQuery.of(context).size.width < 600;
+
+                                final trackContent = GestureDetector(
+                                  onTap: () {
+                                    // Play this track and set the playlist
+                                    audioProvider.playPlaylist(
+                                      eventProvider.currentPlaylistTracks,
+                                      startIndex: index,
+                                    );
+                                  },
+                                  child: Container(
+                                    key: Key('track_container_${track.id}'),
+                                    color: isCurrentTrack
+                                        ? Colors.purple.shade50
+                                        : Colors.transparent,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        // Drag Handle (Owner only) - hidden on mobile
+                                        if (isOwner && !isMobile)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(right: 8),
+                                            child: Icon(
+                                              Icons.drag_handle,
+                                              color: Colors.grey.shade400,
+                                              size: 24,
+                                            ),
+                                          ),
+
+                                        // Track Cover Image
+                                        Container(
+                                          width: 48,
+                                          height: 48,
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            color: Colors.grey.shade300,
+                                            boxShadow: [
+                                              if (isCurrentTrack)
+                                                BoxShadow(
+                                                  color: Colors.purple.shade200,
+                                                  blurRadius: 4,
+                                                  spreadRadius: 2,
+                                                ),
+                                            ],
+                                          ),
+                                          child:
+                                              track.coverUrl != null &&
+                                                  track.coverUrl!.isNotEmpty
+                                              ? ClipRRect(
+                                                  borderRadius:
+                                                      BorderRadius.circular(4),
+                                                  child: Image.network(
+                                                    track.coverUrl!,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) {
+                                                      return Center(
+                                                        child: Icon(
+                                                          Icons.music_note,
+                                                          color: Colors.grey
+                                                              .shade400,
+                                                          size: 24,
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                                )
+                                              : Center(
+                                                  child: Icon(
+                                                    Icons.music_note,
+                                                    color: Colors.grey.shade400,
+                                                    size: 24,
+                                                  ),
+                                                ),
+                                        ),
+
+                                        // Track Title & Artist
+                                        Expanded(
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  track.trackTitle ??
+                                                      'Unknown Track',
+                                                  style: TextStyle(
+                                                    fontWeight: isCurrentTrack
+                                                        ? FontWeight.bold
+                                                        : FontWeight.w500,
+                                                    fontSize: 14,
+                                                    color: isCurrentTrack
+                                                        ? Theme.of(context)
+                                                            .colorScheme
+                                                            .primary
+                                                        : null,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  track.trackArtist ??
+                                                      'Unknown Artist',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+
+                                        // Delete Button (Owner/Admin only)
+                                        if (canDelete)
+                                          IconButton(
+                                            icon: Icon(
+                                              Icons.delete_outline,
+                                              size: 22,
+                                              color: Colors.red.shade400,
+                                            ),
+                                            onPressed: () async {
+                                              // Show confirmation dialog
+                                              final confirm =
+                                                  await showDialog<bool>(
+                                                context: context,
+                                                builder: (context) =>
+                                                    AlertDialog(
+                                                  title: const Text(
+                                                    'Remove Track',
+                                                  ),
+                                                  content: Text(
+                                                    'Are you sure you want to remove "${track.trackTitle}" from the playlist?',
+                                                  ),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            false,
+                                                          ),
+                                                      child: const Text(
+                                                        'Cancel',
+                                                      ),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () =>
+                                                          Navigator.pop(
+                                                            context,
+                                                            true,
+                                                          ),
+                                                      style: TextButton.styleFrom(
+                                                        foregroundColor:
+                                                            Colors.red,
+                                                      ),
+                                                      child: const Text(
+                                                        'Remove',
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+
+                                              if (confirm == true && mounted) {
+                                                final success =
+                                                    await eventProvider
+                                                        .removeTrackFromPlaylist(
+                                                          widget.playlistId,
+                                                          track.trackId,
+                                                        );
+
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        success
+                                                            ? '✅ Track removed'
+                                                            : '❌ Failed to remove track',
+                                                      ),
+                                                      backgroundColor: success
+                                                          ? Colors.green
+                                                          : Colors.red,
+                                                    ),
+                                                  );
+                                                }
+                                              }
+                                            },
+                                            splashRadius: 24,
+                                          )
+                                        else
+                                          const SizedBox(width: 48),
+                                      ],
+                                    ),
+                                  ),
+                                );                                // Wrap entire container with appropriate reorder listener for owners
+                                if (isOwner) {
+                                  if (isMobile) {
+                                    // On mobile, require long-press to start reordering
+                                    return ReorderableDelayedDragStartListener(
+                                      index: index,
+                                      child: trackContent,
+                                    );
+                                  } else {
+                                    // Desktop/tablet: immediate drag handle
+                                    return ReorderableDragStartListener(
+                                      index: index,
+                                      child: trackContent,
+                                    );
+                                  }
+                                } else {
+                                  return trackContent;
+                                }
+                              },
+                            );
+                          },
+                        );
+                      },
+                    ),
                   ),
               ],
             ),
@@ -442,22 +753,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 24),
-
-          DropdownButton<EventVisibility>(
-            isExpanded: true,
-            value: _selectedVisibility,
-            hint: const Text('Select Visibility'),
-            onChanged: (EventVisibility? newValue) {
-              setState(() => _selectedVisibility = newValue);
-            },
-            items: EventVisibility.values.map((EventVisibility visibility) {
-              return DropdownMenuItem<EventVisibility>(
-                value: visibility,
-                child: Text(_getEnumLabel(visibility)),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
 
           // Voting Settings
           CheckboxListTile(
@@ -598,52 +893,35 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   }
 
   void _showAddTrackDialog() async {
-    final result = await showDialog<TrackSearchResult>(
-      context: context,
-      builder: (context) => const MusicSearchDialog(),
-    );
-
-    if (result != null && mounted) {
-      final eventProvider = context.read<EventProvider>();
-
-      final success = await eventProvider.addTrackToPlaylist(
-        widget.playlistId,
-        deezerId: result.id,
-        title: result.title,
-        artist: result.artist,
-        album: result.album ?? '',
-        albumCoverUrl: result.albumCoverUrl,
-        previewUrl: result.previewUrl,
-        duration: result.duration,
-      );
-
-      if (mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ ${result.title} added to playlist'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Error: ${eventProvider.error}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  void _showInviteFriendsDialog(BuildContext context, dynamic playlist) {
     showDialog(
       context: context,
-      builder: (context) => InviteFriendsDialog(
-        eventId: playlist.id,
-        eventName: playlist.name,
-        isPlaylist: true,
+      builder: (context) => MusicSearchDialog(
+        onTrackAdded: (track) async {
+          final eventProvider = context.read<EventProvider>();
+
+          final success = await eventProvider.addTrackToPlaylist(
+            widget.playlistId,
+            deezerId: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album ?? '',
+            albumCoverUrl: track.albumCoverUrl,
+            previewUrl: track.previewUrl,
+            duration: track.duration,
+          );
+
+          return success;
+        },
+      ),
+    );
+  }
+
+  void _showCollaboratorDialog(BuildContext context, dynamic playlist) {
+    showDialog(
+      context: context,
+      builder: (context) => CollaboratorDialog(
+        playlistId: playlist.id,
+        playlistName: playlist.name,
       ),
     );
   }

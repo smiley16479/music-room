@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { Event } from 'src/event/entities/event.entity';
 import { Track } from 'src/music/entities/track.entity';
+import { User } from 'src/user/entities/user.entity';
 import { BadRequestException } from '@nestjs/common';
 import { Vote } from 'src/event/entities/vote.entity';
 
@@ -51,6 +52,10 @@ export class PlaylistTrack {
 
   @Column({ name: 'track_id', nullable: false })
   trackId: string;
+
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'added_by_id' })
+  addedBy: User;
 
   @Column({ name: 'added_by_id', nullable: false })
   addedById: string;

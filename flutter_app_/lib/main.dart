@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:app_links/app_links.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
@@ -16,7 +16,7 @@ import 'features/playlists/screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  print('🟢 App starting...');
+  debugPrint('🟢 App starting...');
 
   // Initialize app config
   AppConfig.printConfiguration();
@@ -35,21 +35,18 @@ void main() async {
   );
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
-  final deviceService = DeviceService(apiService: apiService);
-  final deviceRegistrationService = DeviceRegistrationService(
-    apiService: apiService,
-  );
+  final audioPlayerService = AudioPlayerService();
   final webSocketService = WebSocketService();
+  final deviceRegistrationService = DeviceRegistrationService(apiService: apiService);
   // PlaylistService is now an alias for EventService
 
-  print('🟢 Services initialized');
+  debugPrint('🟢 Services initialized');
 
   runApp(
     MultiProvider(
       providers: [
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
-        Provider<WebSocketService>(create: (_) => webSocketService),
         Provider<PlaylistService>(
           create: (_) => eventService,
         ), // PlaylistService is typedef for EventService
@@ -61,17 +58,8 @@ void main() async {
           create: (_) => InvitationService(apiService: apiService),
         ),
         Provider<FriendService>(create: (_) => friendService),
-        Provider<DeviceService>(create: (_) => deviceService),
-        Provider<DeviceRegistrationService>(
-          create: (_) => deviceRegistrationService,
-        ),
-        ChangeNotifierProvider(
-          create: (_) => AuthProvider(
-            authService: authService,
-            webSocketService: webSocketService,
-            deviceRegistrationService: deviceRegistrationService,
-          ),
-        ),
+        Provider<AudioPlayerService>(create: (_) => audioPlayerService),
+        Provider<DeviceRegistrationService>(create: (_) => deviceRegistrationService),
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(
             eventService: eventService,
@@ -84,7 +72,7 @@ void main() async {
           create: (_) => FriendProvider(friendService: friendService),
         ),
         ChangeNotifierProvider(
-          create: (_) => DeviceProvider(deviceService: deviceService),
+          create: (_) => AudioPlayerProvider(audioService: audioPlayerService),
         ),
       ],
       child: const MyApp(),

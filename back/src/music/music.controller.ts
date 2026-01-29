@@ -8,10 +8,13 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 
 import { MusicService } from './music.service';
 import { DeezerService } from './deezer.service';
+import { YouTubeService } from './youtube.service';
 import { SearchTrackDto } from './dto/search-track.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -28,6 +31,7 @@ export class MusicController {
   constructor(
     private readonly musicService: MusicService,
     private readonly deezerService: DeezerService,
+    private readonly youtubeService: YouTubeService,
   ) {}
 
   @Get('search')
@@ -234,6 +238,184 @@ export class MusicController {
     return {
       success: true,
       data: track,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('track/:id/audio-stream')
+  @Public()
+  @ApiOperation({
+    summary: 'Get audio stream URL for a track',
+    description: 'Returns a direct audio stream URL from YouTube for full track playback. The URL expires after ~5 hours.',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the track',
+    required: true
+  })
+  async getTrackAudioStream(@Param('id') id: string) {
+    const track = await this.musicService.getTrackById(id);
+    
+    if (!track) {
+      return {
+        success: false,
+        error: 'Track not found',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // If track has a YouTube URL stored, use it to get audio stream
+    if (track.previewUrl?.includes('youtube.com') || track.previewUrl?.includes('youtu.be')) {
+      const audioStream = await this.youtubeService.getAudioStreamUrl(track.previewUrl);
+      if (audioStream) {
+        return {
+          success: true,
+          data: {
+            audioUrl: audioStream.audioUrl,
+            expiresAt: audioStream.expiresAt,
+            format: audioStream.format,
+            quality: audioStream.quality,
+            trackId: id,
+          },
+          timestamp: new Date().toISOString(),
+        };
+      }
+    }
+
+    // Fallback: search YouTube for the track and get audio stream
+    const audioStream = await this.youtubeService.searchAndGetAudioStream(
+      track.title,
+      track.artist,
+    );
+
+    if (audioStream) {
+      return {
+        success: true,
+        data: {
+          audioUrl: audioStream.audioUrl,
+          expiresAt: audioStream.expiresAt,
+          format: audioStream.format,
+          quality: audioStream.quality,
+          trackId: id,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // If YouTube fails, fallback to Deezer preview (30s)
+    if (track.deezerUrl) {
+      return {
+        success: true,
+        data: {
+          audioUrl: track.deezerUrl,
+          expiresAt: null, // Deezer URLs don't expire
+          format: 'mp3',
+          quality: 'preview-30s',
+          trackId: id,
+          isPreview: true,
+        },
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: false,
+      error: 'No audio stream available for this track',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('track/:id/audio-proxy')
+  @Public()
+  @ApiOperation({
+    summary: 'Proxy audio stream for a track',
+    description: 'Streams audio directly from YouTube through the backend to bypass CORS restrictions',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the track',
+    required: true
+  })
+  async proxyTrackAudio(@Param('id') id: string, @Res() res: Response) {
+    try {
+      const track = await this.musicService.getTrackById(id);
+      
+      if (!track) {
+        return res.status(404).json({
+          success: false,
+          error: 'Track not found',
+        });
+      }
+
+      // If track has a YouTube URL stored, use it to proxy audio
+      if (track.previewUrl?.includes('youtube.com') || track.previewUrl?.includes('youtu.be')) {
+        return this.youtubeService.proxyAudioStream(track.previewUrl, res);
+      }
+
+      // Fallback: search YouTube for the track and proxy audio
+      const youtubeUrl = await this.youtubeService.searchTrack(
+        track.title,
+        track.artist,
+      );
+
+      if (youtubeUrl) {
+        return this.youtubeService.proxyAudioStream(youtubeUrl, res);
+      }
+
+      // Fallback: proxy Deezer preview (30s)
+      if (track.deezerUrl) {
+        return this.youtubeService.proxyDeezerAudio(track.deezerUrl, res);
+      }
+
+      return res.status(404).json({
+        success: false,
+        error: 'No audio stream available for this track',
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to proxy audio stream',
+      });
+    }
+  }
+
+  @Get('youtube/audio-stream')
+  @Public()
+  @ApiOperation({
+    summary: 'Get audio stream from YouTube URL',
+    description: 'Extract audio stream URL from a YouTube video URL or video ID',
+  })
+  @ApiQuery({
+    name: 'url',
+    type: String,
+    description: 'YouTube video URL or video ID',
+    required: true,
+    example: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  })
+  async getYouTubeAudioStream(@Query('url') url: string) {
+    if (!url) {
+      return {
+        success: false,
+        error: 'YouTube URL or video ID is required',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const audioStream = await this.youtubeService.getAudioStreamUrl(url);
+
+    if (audioStream) {
+      return {
+        success: true,
+        data: audioStream,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    return {
+      success: false,
+      error: 'Failed to extract audio stream from YouTube',
       timestamp: new Date().toISOString(),
     };
   }

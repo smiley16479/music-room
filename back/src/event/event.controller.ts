@@ -456,6 +456,29 @@ export class EventController {
   }
 
   // Playlist Tracks
+  @Get(':id/tracks')
+  @Public()
+  @ApiOperation({
+    summary: 'Get playlist tracks',
+    description: 'Returns all tracks in the event/playlist',
+  })
+  @ApiParam({
+    name: 'id',
+    type: String,
+    description: 'The ID of the event/playlist',
+    required: true
+  })
+  async getPlaylistTracks(
+    @Param('id') playlistId: string,
+  ) {
+    const tracks = await this.eventService.getPlaylistTracks(playlistId);
+    return {
+      success: true,
+      data: tracks,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   @Post(':id/tracks')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -479,6 +502,49 @@ export class EventController {
       success: true,
       message: 'Track added to playlist successfully',
       data: playlistTrack,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Delete(':id/tracks/:trackId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Remove track from playlist',
+    description: 'Removes a track from the event/playlist. Only creator or admins can remove tracks.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'The ID of the event/playlist', required: true })
+  @ApiParam({ name: 'trackId', type: String, description: 'The track ID to remove', required: true })
+  async removeTrackFromPlaylist(
+    @Param('id') playlistId: string,
+    @Param('trackId') trackId: string,
+    @CurrentUser() user: User,
+  ) {
+    await this.eventService.removeTrack(playlistId, trackId, user.id);
+    return {
+      success: true,
+      message: 'Track removed from playlist',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post(':id/tracks/reorder')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reorder tracks in a playlist',
+    description: 'Reorder tracks in the playlist. Only creator or admins can reorder tracks.',
+  })
+  @ApiParam({ name: 'id', type: String, description: 'The ID of the playlist', required: true })
+  @ApiBody({ schema: { type: 'object', properties: { trackIds: { type: 'array', items: { type: 'string' } } }, required: ['trackIds'] } })
+  async reorderPlaylistTracks(
+    @Param('id') playlistId: string,
+    @Body('trackIds') trackIds: string[],
+    @CurrentUser() user: User,
+  ) {
+    await this.eventService.reorderPlaylistTracks(playlistId, user.id, trackIds);
+    return {
+      success: true,
+      message: 'Playlist tracks reordered successfully',
+      trackIds: trackIds,
       timestamp: new Date().toISOString(),
     };
   }

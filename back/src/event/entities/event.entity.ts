@@ -82,14 +82,14 @@ export class Event {
 
   // Location data for location-based voting
   @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true, transformer: {
-    to: (value: number) => value,
-    from: (value: string) => parseFloat(value),
+    to: (value: number) => (value == null || isNaN(value)) ? null : value,
+    from: (value: string) => value == null ? null : parseFloat(value),
   }})
   latitude: number;
 
   @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true, transformer: {
-    to: (value: number) => value,
-    from: (value: string) => parseFloat(value),
+    to: (value: number) => (value == null || isNaN(value)) ? null : value,
+    from: (value: string) => value == null ? null : parseFloat(value),
   }})
   longitude: number;
 

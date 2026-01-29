@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/providers/index.dart';
 import '../../authentication/screens/profile_screen.dart';
 import '../widgets/create_event_dialog.dart';
+import '../widgets/mini_player_widget.dart';
 import 'events_screen.dart';
 import 'playlist_details_screen.dart';
 import '../../../core/models/event.dart';
@@ -29,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _playlistSearchController = TextEditingController();
-    print('🔵 HomeScreen.initState() - calling _loadAllEvents()');
+    debugPrint('🔵 HomeScreen.initState() - calling _loadAllEvents()');
     _loadAllEvents();
   }
 
@@ -40,11 +41,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadAllEvents() async {
-    print('🟡 _loadAllEvents() called');
+    debugPrint('🟡 _loadAllEvents() called');
     final eventProvider = context.read<EventProvider>();
-    print('🟡 EventProvider obtained');
+    debugPrint('🟡 EventProvider obtained');
     await eventProvider.loadMyEvents();
-    print(
+    debugPrint(
       '🟡 loadMyEvents() completed - Total: ${eventProvider.myEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
     );
   }
@@ -68,7 +69,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: _buildContent(),
+      body: Column(
+        children: [
+          Expanded(child: _buildContent()),
+          // Mini player - shows only when a track is playing
+          const MiniPlayerWidget(),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: (index) {
