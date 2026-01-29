@@ -36,10 +36,11 @@ void main() async {
   final eventService = EventService(apiService: apiService);
   final friendService = FriendService(apiService: apiService);
   final audioPlayerService = AudioPlayerService();
-  final webSocketService = WebSocketService();
+  final deviceService = DeviceService(apiService: apiService);
   final deviceRegistrationService = DeviceRegistrationService(
     apiService: apiService,
   );
+  final webSocketService = WebSocketService();
   // PlaylistService is now an alias for EventService
 
   debugPrint('🟢 Services initialized');
@@ -49,6 +50,7 @@ void main() async {
       providers: [
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
+        Provider<WebSocketService>(create: (_) => webSocketService),
         Provider<PlaylistService>(
           create: (_) => eventService,
         ), // PlaylistService is typedef for EventService
@@ -56,20 +58,21 @@ void main() async {
         Provider<TrackService>(
           create: (_) => TrackService(apiService: apiService),
         ),
+        Provider<InvitationService>(
+          create: (_) => InvitationService(apiService: apiService),
+        ),
+        Provider<FriendService>(create: (_) => friendService),
+        Provider<DeviceService>(create: (_) => deviceService),
+        Provider<AudioPlayerService>(create: (_) => audioPlayerService),
+        Provider<DeviceRegistrationService>(
+          create: (_) => deviceRegistrationService,
+        ),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(
             authService: authService,
             webSocketService: webSocketService,
             deviceRegistrationService: deviceRegistrationService,
           ),
-        ),
-        Provider<InvitationService>(
-          create: (_) => InvitationService(apiService: apiService),
-        ),
-        Provider<FriendService>(create: (_) => friendService),
-        Provider<AudioPlayerService>(create: (_) => audioPlayerService),
-        Provider<DeviceRegistrationService>(
-          create: (_) => deviceRegistrationService,
         ),
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(
@@ -81,6 +84,9 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => FriendProvider(friendService: friendService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => DeviceProvider(deviceService: deviceService),
         ),
         ChangeNotifierProvider(
           create: (_) => AudioPlayerProvider(audioService: audioPlayerService),

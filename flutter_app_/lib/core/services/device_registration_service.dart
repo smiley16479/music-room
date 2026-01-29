@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:uuid/uuid.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 import '../models/device.dart';
 import 'api_service.dart';
@@ -10,24 +12,90 @@ import 'api_service.dart';
 class DeviceRegistrationService {
   static const String _deviceIdKey = 'device_uuid';
   static const String _deviceNameKey = 'device_name';
+  static const String _deviceFingerprintKey = 'device_fingerprint';
 
   final ApiService apiService;
 
   DeviceRegistrationService({required this.apiService});
 
-  /// Get or generate device UUID
+  /// Generate a device fingerprint based on system characteristics
+  /// More reliable than UUID for persistent identification
+  Future<String> generateDeviceFingerprint() async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      String fingerprintData = '';
+
+      try {
+        final iosInfo = await deviceInfo.iosInfo;
+        fingerprintData = '${iosInfo.model}_${iosInfo.identifierForVendor}_${iosInfo.systemVersion}';
+      } catch (_) {
+        try {
+          final androidInfo = await deviceInfo.androidInfo;
+          fingerprintData = '${androidInfo.model}_${androidInfo.id}_${androidInfo.version.release}';
+        } catch (_) {
+          try {
+            final windowsInfo = await deviceInfo.windowsInfo;
+            fingerprintData = '${windowsInfo.computerName}_${windowsInfo.productId}_${windowsInfo.buildNumber}';
+          } catch (_) {
+            try {
+              final macOsInfo = await deviceInfo.macOsInfo;
+              fingerprintData = '${macOsInfo.model}_${macOsInfo.systemGUID}_${macOsInfo.osRelease}';
+            } catch (_) {
+              try {
+                final linuxInfo = await deviceInfo.linuxInfo;
+                fingerprintData = '${linuxInfo.id}_${linuxInfo.versionId}_${linuxInfo.machineId}';
+              } catch (_) {
+                fingerprintData = 'unknown_device';
+              }
+            }
+          }
+        }
+      }
+
+      // Create a hash from the fingerprint data
+      final fingerprint = sha256.convert(utf8.encode(fingerprintData)).toString();
+      debugPrint('Generated device fingerprint: $fingerprint');
+      return fingerprint;
+    } catch (e) {
+      debugPrint('Error generating device fingerprint: $e');
+      return 'unknown';
+    }
+  }
+
+  /// Get or generate device UUID with fallback to fingerprint
   Future<String> getDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
+    
+    // Try to get stored UUID first
     String? deviceId = prefs.getString(_deviceIdKey);
-
-    if (deviceId == null) {
-      // Generate new UUID for this device
-      deviceId = const Uuid().v4();
-      await prefs.setString(_deviceIdKey, deviceId);
-      debugPrint('Generated new device UUID: $deviceId');
+    if (deviceId != null) {
+      debugPrint('Using stored device UUID: $deviceId');
+      return deviceId;
     }
 
-    return deviceId;
+    // Fallback: use fingerprint (reliable across sessions)
+    String? fingerprint = prefs.getString(_deviceFingerprintKey);
+    if (fingerprint == null) {
+      fingerprint = await generateDeviceFingerprint();
+      try {
+        await prefs.setString(_deviceFingerprintKey, fingerprint);
+      } catch (e) {
+        debugPrint('Warning: Could not store fingerprint (might be in private mode): $e');
+      }
+    }
+
+    // If SharedPreferences is available, also store a UUID
+    if (deviceId == null) {
+      deviceId = const Uuid().v4();
+      try {
+        await prefs.setString(_deviceIdKey, deviceId);
+      } catch (e) {
+        debugPrint('Warning: Could not store UUID (might be in private mode): $e');
+      }
+    }
+
+    debugPrint('Using device fingerprint as ID: $fingerprint');
+    return fingerprint;
   }
 
   /// Get stored device name
