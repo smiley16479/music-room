@@ -242,19 +242,49 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                   ),
                 const SizedBox(height: 16),
-                // Edit Button
-                ElevatedButton.icon(
-                  onPressed: () => _toggleEditMode(playlist),
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Edit Playlist'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.purple.shade700,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
-                  ),
+                // Edit Button - only for owner
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, _) {
+                    final currentUser = authProvider.currentUser;
+                    final isOwner = currentUser?.id == playlist.creatorId;
+
+                    if (isOwner) {
+                      return ElevatedButton.icon(
+                        onPressed: () => _toggleEditMode(playlist),
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Edit Playlist'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.purple.shade700,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                const SizedBox(height: 8),
+                // Admin indicator
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, _) {
+                    final currentUser = authProvider.currentUser;
+                    final isOwner = currentUser?.id == playlist.creatorId;
+
+                    if (isOwner) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Chip(
+                          label: const Text('You are the admin'),
+                          backgroundColor: Colors.amber,
+                          labelStyle: const TextStyle(color: Colors.black),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -540,6 +570,28 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          // Delete Button - only for owner
+          Consumer<AuthProvider>(
+            builder: (context, authProvider, _) {
+              final currentUser = authProvider.currentUser;
+              final isOwner = currentUser?.id == playlist.creatorId;
+
+              if (isOwner) {
+                return ElevatedButton.icon(
+                  icon: const Icon(Icons.delete),
+                  label: const Text('Delete Playlist  '),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onPressed: () => _deletePlaylist(eventProvider, playlist),
+                );
+              }
+              return const SizedBox();
+            },
+          ),
         ],
       ),
     );
@@ -594,5 +646,54 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
         isPlaylist: true,
       ),
     );
+  }
+
+  Future<void> _deletePlaylist(
+    EventProvider eventProvider,
+    dynamic playlist,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Playlist'),
+        content: Text(
+          'Are you sure you want to delete "${playlist.name}"? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final success = await eventProvider.deletePlaylist(playlist.id);
+
+      if (mounted) {
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Playlist deleted successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.of(context).pop();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error: ${eventProvider.error}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 }
