@@ -200,6 +200,36 @@ class _EventsScreenState extends State<EventsScreen> {
                         vertical: 8,
                       ),
                       child: ListTile(
+                        leading: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child:
+                              event.coverImageUrl != null &&
+                                  event.coverImageUrl!.isNotEmpty
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    event.coverImageUrl!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const Icon(
+                                              Icons.event,
+                                              color: Colors.blue,
+                                              size: 30,
+                                            ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.event,
+                                  color: Colors.blue,
+                                  size: 30,
+                                ),
+                        ),
                         title: Text(event.name),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,

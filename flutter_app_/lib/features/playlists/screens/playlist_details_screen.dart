@@ -107,16 +107,22 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
           title: const Text('Playlist Details'),
           elevation: 0,
           actions: [
-            Consumer<PlaylistProvider>(
-              builder: (context, playlistProvider, _) {
+            Consumer2<PlaylistProvider, AuthProvider>(
+              builder: (context, playlistProvider, authProvider, _) {
                 final playlist = playlistProvider.currentPlaylist;
-                if (playlist != null) {
+                final currentUser = authProvider.currentUser;
+                final isOwner = playlist != null && currentUser?.id == playlist.creatorId;
+                // treat owner as admin for playlist editing permissions
+                final isAdmin = isOwner;
+
+                if (playlist != null && (isOwner || isAdmin)) {
                   return IconButton(
                     icon: Icon(_isEditMode ? Icons.close : Icons.edit),
                     onPressed: () => _toggleEditMode(playlist),
                     tooltip: _isEditMode ? 'Cancel' : 'Edit Playlist',
                   );
                 }
+
                 return const SizedBox.shrink();
               },
             ),
@@ -191,12 +197,12 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                             height: 120,
                             errorBuilder: (context, error, stackTrace) =>
                                 const Center(
-                              child: Icon(
-                                Icons.music_note,
-                                size: 60,
-                                color: Colors.white,
-                              ),
-                            ),
+                                  child: Icon(
+                                    Icons.music_note,
+                                    size: 60,
+                                    color: Colors.white,
+                                  ),
+                                ),
                           ),
                         )
                       : const Icon(
@@ -213,25 +219,78 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Playlist name
-                      Text(
-                        playlist.name ?? 'Untitled Playlist',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                      // Playlist name with admin badge
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              playlist.name ?? 'Untitled Playlist',
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                          ),
+                          Consumer<AuthProvider>(
+                            builder: (context, authProvider, _) {
+                              final currentUser = authProvider.currentUser;
+                              final isOwner =
+                                  currentUser?.id == playlist.creatorId;
+                              if (isOwner) {
+                                return Container(
+                                  margin: const EdgeInsets.only(left: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.4,
+                                      ),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.admin_panel_settings,
+                                        color: Colors.white,
+                                        size: 14,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Admin',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            },
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
 
                       // Description
-                      if (playlist.description != null && playlist.description!.isNotEmpty)
+                      if (playlist.description != null &&
+                          playlist.description!.isNotEmpty)
                         Text(
                           playlist.description!,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Colors.white70,
-                              ),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: Colors.white70),
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -252,7 +311,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                         borderRadius: BorderRadius.circular(24),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(24),
-                          onTap: () => _showCollaboratorDialog(context, playlist),
+                          onTap: () =>
+                              _showCollaboratorDialog(context, playlist),
                           child: Container(
                             width: 48,
                             height: 48,
@@ -272,101 +332,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-                const SizedBox(height: 8),
-                if (playlist.description != null)
-                  Text(
-                    playlist.description!,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
-                  ),
-                const SizedBox(height: 16),
-                // Edit Button - only for owner
-                Consumer<AuthProvider>(
-                  builder: (context, authProvider, _) {
-                    final currentUser = authProvider.currentUser;
-                    final isOwner = currentUser?.id == playlist.creatorId;
-
-                    if (isOwner) {
-                      return ElevatedButton.icon(
-                        onPressed: () => _toggleEditMode(playlist),
-                        icon: const Icon(Icons.edit),
-                        label: const Text('Edit Playlist'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.purple.shade700,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
-                        ),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
-                const SizedBox(height: 8),
-                // Admin indicator
-                Consumer<AuthProvider>(
-                  builder: (context, authProvider, _) {
-                    final currentUser = authProvider.currentUser;
-                    final isOwner = currentUser?.id == playlist.creatorId;
-
-                    if (isOwner) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Chip(
-                          label: const Text('You are the admin'),
-                          backgroundColor: Colors.amber,
-                          labelStyle: const TextStyle(color: Colors.black),
-                        ),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Column(
-                      children: [
-                        Text(
-                          playlist.trackCount.toString(),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Tracks',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        Text(
-                          playlist.collaboratorCount.toString(),
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                              ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Collaborators',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
               ],
             ),
           ),
@@ -438,14 +403,18 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                     ? '✅ Tracks reordered'
                                     : '❌ Failed to save track order',
                               ),
-                              backgroundColor: success ? Colors.green : Colors.red,
+                              backgroundColor: success
+                                  ? Colors.green
+                                  : Colors.red,
                               duration: const Duration(seconds: 2),
                             ),
                           );
 
                           if (!success) {
                             // On failure, reload playlist to restore server state
-                            await eventProvider.loadPlaylistDetails(widget.playlistId);
+                            await eventProvider.loadPlaylistDetails(
+                              widget.playlistId,
+                            );
                           }
                         }
                       },
@@ -461,9 +430,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                             return Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
                                 final currentUser = authProvider.currentUser;
-                                final isOwner = currentUser?.id == playlist.creatorId;
+                                final isOwner =
+                                    currentUser?.id == playlist.creatorId;
                                 final canDelete = isOwner;
-                                final isMobile = MediaQuery.of(context).size.width < 600;
+                                final isMobile =
+                                    MediaQuery.of(context).size.width < 600;
 
                                 final trackContent = GestureDetector(
                                   onTap: () {
@@ -487,8 +458,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                         // Drag Handle (Owner only) - hidden on mobile
                                         if (isOwner && !isMobile)
                                           Padding(
-                                            padding:
-                                                const EdgeInsets.only(right: 8),
+                                            padding: const EdgeInsets.only(
+                                              right: 8,
+                                            ),
                                             child: Icon(
                                               Icons.drag_handle,
                                               color: Colors.grey.shade400,
@@ -501,8 +473,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                           width: 48,
                                           height: 48,
                                           decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(4),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                             color: Colors.grey.shade300,
                                             boxShadow: [
                                               if (isCurrentTrack)
@@ -522,20 +495,22 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                   child: Image.network(
                                                     track.coverUrl!,
                                                     fit: BoxFit.cover,
-                                                    errorBuilder: (
-                                                      context,
-                                                      error,
-                                                      stackTrace,
-                                                    ) {
-                                                      return Center(
-                                                        child: Icon(
-                                                          Icons.music_note,
-                                                          color: Colors.grey
-                                                              .shade400,
-                                                          size: 24,
-                                                        ),
-                                                      );
-                                                    },
+                                                    errorBuilder:
+                                                        (
+                                                          context,
+                                                          error,
+                                                          stackTrace,
+                                                        ) {
+                                                          return Center(
+                                                            child: Icon(
+                                                              Icons.music_note,
+                                                              color: Colors
+                                                                  .grey
+                                                                  .shade400,
+                                                              size: 24,
+                                                            ),
+                                                          );
+                                                        },
                                                   ),
                                                 )
                                               : Center(
@@ -568,13 +543,14 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                         : FontWeight.w500,
                                                     fontSize: 14,
                                                     color: isCurrentTrack
-                                                        ? Theme.of(context)
-                                                            .colorScheme
-                                                            .primary
+                                                        ? Theme.of(
+                                                            context,
+                                                          ).colorScheme.primary
                                                         : null,
                                                   ),
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                                 const SizedBox(height: 4),
                                                 Text(
@@ -585,7 +561,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                     color: Colors.grey.shade600,
                                                   ),
                                                   maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
                                               ],
                                             ),
@@ -602,11 +579,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                             ),
                                             onPressed: () async {
                                               // Show confirmation dialog
-                                              final confirm =
-                                                  await showDialog<bool>(
+                                              final confirm = await showDialog<bool>(
                                                 context: context,
-                                                builder: (context) =>
-                                                    AlertDialog(
+                                                builder: (context) => AlertDialog(
                                                   title: const Text(
                                                     'Remove Track',
                                                   ),
@@ -630,10 +605,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                             context,
                                                             true,
                                                           ),
-                                                      style: TextButton.styleFrom(
-                                                        foregroundColor:
-                                                            Colors.red,
-                                                      ),
+                                                      style:
+                                                          TextButton.styleFrom(
+                                                            foregroundColor:
+                                                                Colors.red,
+                                                          ),
                                                       child: const Text(
                                                         'Remove',
                                                       ),
@@ -651,8 +627,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                                         );
 
                                                 if (mounted) {
-                                                  ScaffoldMessenger.of(context)
-                                                      .showSnackBar(
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
                                                     SnackBar(
                                                       content: Text(
                                                         success
@@ -674,7 +651,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                       ],
                                     ),
                                   ),
-                                );                                // Wrap entire container with appropriate reorder listener for owners
+                                ); // Wrap entire container with appropriate reorder listener for owners
                                 if (isOwner) {
                                   if (isMobile) {
                                     // On mobile, require long-press to start reordering

@@ -244,6 +244,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
       endDate: _selectedEndDate,
       selectedPlaylistId: _selectedPlaylistId,
       locationRadius: radius,
+      latitude: _latitude,
       longitude: _longitude,
     );
 
@@ -333,11 +334,11 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                   ),
               ],
             ),
-          body: _isEditMode
-              ? _buildEditForm(eventProvider, event)
-              : _buildViewMode(context, event, isAdmin, eventProvider),
-        );
-      },
+            body: _isEditMode
+                ? _buildEditForm(eventProvider, event)
+                : _buildViewMode(context, event, isAdmin, eventProvider),
+          );
+        },
       ),
     );
   }
@@ -458,28 +459,62 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
           ),
           const SizedBox(height: 12),
 
-          _buildSectionTitle('Event Vote'),
+          _buildSectionTitle('Voting Settings'),
+          const SizedBox(height: 8),
 
-          CheckboxListTile(
-            title: const Text('Voting Enabled'),
-            value: _votingEnabled,
-            onChanged: (bool? value) {
-              setState(() => _votingEnabled = value ?? true);
-            },
+          Text(
+            'Access Control',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+
+          Text(
+            'Access Control',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
 
           DropdownButton<EventLicenseType>(
             isExpanded: true,
             value: _selectedLicenseType,
-            hint: const Text('Select License Type'),
+            hint: const Text('Select access control'),
             onChanged: (EventLicenseType? newValue) {
               setState(() => _selectedLicenseType = newValue);
             },
             items: EventLicenseType.values.map((EventLicenseType license) {
+              String label;
+              String description;
+              switch (license) {
+                case EventLicenseType.none:
+                  label = 'Open Access';
+                  description = 'Anyone can participate and vote';
+                  break;
+                case EventLicenseType.invited:
+                  label = 'Invited Only';
+                  description = 'Only invited guests can vote';
+                  break;
+                case EventLicenseType.locationBased:
+                  label = 'Location-Based';
+                  description = 'Access based on location';
+                  break;
+              }
               return DropdownMenuItem<EventLicenseType>(
                 value: license,
-                child: Text(_getEnumLabel(license)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      description,
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
               );
             }).toList(),
           ),
@@ -594,8 +629,20 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
               );
             },
           ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.delete),
+              label: const Text('Delete Event'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () => _showDeleteConfirmation(eventProvider),
+            ),
+          ),
           const SizedBox(height: 24),
-
           // Action Buttons
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -750,254 +797,532 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     bool isAdmin,
     EventProvider eventProvider,
   ) {
+    // Get cover image from event or first track
+    final String? eventCover = event.coverImageUrl ??
+        (eventProvider.currentPlaylistTracks.isNotEmpty
+            ? eventProvider.currentPlaylistTracks.first.coverUrl
+            : null);
+
     return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Colors.blue.shade700, Colors.blue.shade400],
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.event, size: 60, color: Colors.white),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  event.name,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.blue.shade700, Colors.blue.shade400],
                   ),
                 ),
-                const SizedBox(height: 8),
-                if (isAdmin)
-                  Chip(
-                    label: const Text('You are the admin'),
-                    backgroundColor: Colors.amber,
-                    labelStyle: const TextStyle(color: Colors.black),
-                  ),
-                const SizedBox(height: 16),
-                // Action Buttons
-                Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (isAdmin)
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _toggleEditMode(event),
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Edit Event'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.blue.shade700,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Event Icon/Cover
+                        Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: eventCover != null && eventCover.isNotEmpty
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    eventCover,
+                                    fit: BoxFit.cover,
+                                    width: 120,
+                                    height: 120,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const Center(
+                                      child: Icon(
+                                        Icons.event,
+                                        size: 60,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.event,
+                                  size: 60,
+                                  color: Colors.white,
+                                ),
+                        ),
+                        const SizedBox(width: 16),
+
+                        // Event Info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              // Event name with admin badge
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      event.name,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Consumer<AuthProvider>(
+                                    builder: (context, authProvider, _) {
+                                      final currentUser =
+                                          authProvider.currentUser;
+                                      final isOwner =
+                                          currentUser?.id == event.creatorId;
+                                      if (isOwner) {
+                                        return Container(
+                                          margin: const EdgeInsets.only(
+                                            left: 8,
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.25,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.4,
+                                              ),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.admin_panel_settings,
+                                                color: Colors.white,
+                                                size: 14,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'Admin',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                      return const SizedBox.shrink();
+                                    },
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Description
+                              if (event.description != null &&
+                                  event.description!.isNotEmpty)
+                                Text(
+                                  event.description!,
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(color: Colors.white70),
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
                           ),
                         ),
+                        const SizedBox(width: 8),
+
+                        // Invite/Manage Button
+                        Consumer<AuthProvider>(
+                          builder: (context, authProvider, _) {
+                            final currentUser = authProvider.currentUser;
+                            final isOwner = currentUser?.id == event.creatorId;
+
+                            if (isOwner) {
+                              return Material(
+                                color: Colors.white.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(8),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () =>
+                                      _showInviteFriendsDialog(context, event),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    child: const Icon(
+                                      Icons.person_add,
+                                      color: Colors.white,
+                                      size: 24,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Details in banner
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    if (isAdmin && !event.isPlaylist) const SizedBox(width: 12),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildBannerDetail(
+                                  context,
+                                  icon: Icons.calendar_today,
+                                  label: 'Event Date',
+                                  value: event.eventDate != null
+                                      ? _formatDate(event.eventDate!)
+                                      : 'Not set',
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildBannerDetail(
+                                  context,
+                                  icon: Icons.people,
+                                  label: 'Participants',
+                                  value: '${event.participants?.length ?? 0}',
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: _buildBannerDetail(
+                                  context,
+                                  icon: Icons.visibility,
+                                  label: 'Visibility',
+                                  value: _getEnumLabel(event.visibility),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (event.locationName != null &&
+                              event.locationName!.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            _buildBannerDetail(
+                              context,
+                              icon: Icons.location_on,
+                              label: 'Location',
+                              value: event.locationName!,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Action Button
                     if (!event.isPlaylist)
-                      Expanded(
+                      SizedBox(
+                        width: double.infinity,
                         child: ElevatedButton.icon(
                           onPressed: () =>
                               _navigateToPlaylist(context, event.id),
                           icon: const Icon(Icons.queue_music),
-                          label: const Text('View Playlist'),
+                          label: const Text('View Event Playlist'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: Colors.blue.shade700,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
                         ),
                       ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          // Content
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (event.description != null &&
-                    event.description!.isNotEmpty) ...[
-                  _buildDetailSection('Description', event.description!),
-                  const SizedBox(height: 24),
-                ],
+              ),
 
-                _buildDetailSection('Type', _getEnumLabel(event.type)),
-                _buildDetailSection(
-                  'Visibility',
-                  _getEnumLabel(event.visibility),
-                ),
-                if (event.licenseType != null)
-                  _buildDetailSection(
-                    'License Type',
-                    _getEnumLabel(event.licenseType!),
-                  ),
-                _buildDetailSection(
-                  'Voting Enabled',
-                  (event.votingEnabled ?? true) ? 'Yes' : 'No',
-                ),
+              // Event Details Section
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Additional Details
+                    Text(
+                      'Additional Information',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
 
-                if (event.eventDate != null)
-                  _buildDetailSection(
-                    'Event Date',
-                    event.eventDate.toString().split('.')[0],
-                  ),
-                if (event.startDate != null)
-                  _buildDetailSection(
-                    'Start Date',
-                    event.startDate.toString().split('.')[0],
-                  ),
-                if (event.endDate != null)
-                  _buildDetailSection(
-                    'End Date',
-                    event.endDate.toString().split('.')[0],
-                  ),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildDetailRow('Type', _getEnumLabel(event.type)),
+                          if (event.licenseType != null) ...[
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Access',
+                              _getEnumLabel(event.licenseType!),
+                            ),
+                          ],
+                          const Divider(height: 16),
+                          _buildDetailRow(
+                            'Voting',
+                            (event.votingEnabled ?? true)
+                                ? 'Enabled'
+                                : 'Disabled',
+                          ),
+                          if (event.votingStartTime != null) ...[
+                            const Divider(height: 16),
+                            _buildDetailRow(
+                              'Voting Start',
+                              event.votingStartTime!,
+                            ),
+                          ],
+                          if (event.votingEndTime != null) ...[
+                            const Divider(height: 16),
+                            _buildDetailRow('Voting End', event.votingEndTime!),
+                          ],
+                        ],
+                      ),
+                    ),
 
-                if (event.locationName != null &&
-                    event.locationName!.isNotEmpty)
-                  _buildDetailSection('Location', event.locationName!),
+                    const SizedBox(height: 24),
 
-                if (event.votingStartTime != null)
-                  _buildDetailSection(
-                    'Voting Start Time',
-                    event.votingStartTime!,
-                  ),
-                if (event.votingEndTime != null)
-                  _buildDetailSection('Voting End Time', event.votingEndTime!),
+                    // Participants Section
+                    Text(
+                      'Participants (${event.participants?.length ?? 0})',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
 
-                if (event.playlistName != null &&
-                    event.playlistName!.isNotEmpty)
-                  _buildDetailSection('Playlist Name', event.playlistName!),
-
-                if (event.trackCount != null && event.trackCount! > 0)
-                  _buildDetailSection(
-                    'Track Count',
-                    event.trackCount.toString(),
-                  ),
-
-                const SizedBox(height: 24),
-                Text(
-                  'Participants (${event.participants?.length ?? 0})',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                if (event.participants != null &&
-                    event.participants!.isNotEmpty)
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: event.participants!.length,
-                    itemBuilder: (context, index) {
-                      final participant = event.participants![index];
-                      final user = participant.user;
-                      final name = user?.displayName ?? 'Unknown User';
-                      final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: user?.avatarUrl != null
-                              ? NetworkImage(user!.avatarUrl!)
-                              : null,
-                          child: user?.avatarUrl == null ? Text(initial) : null,
+                    if (event.participants != null &&
+                        event.participants!.isNotEmpty)
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                        title: Text(name),
-                        subtitle: Text(user?.email ?? 'No email'),
-                      );
-                    },
-                  )
-                else
-                  const Text('No participants yet'),
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: event.participants!.length,
+                          separatorBuilder: (context, index) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final participant = event.participants![index];
+                            final user = participant.user;
+                            final name = user?.displayName ?? 'Unknown User';
+                            final isCreator = user?.id == event.creatorId;
 
-                const SizedBox(height: 24),
-
-                // Invite Friends Button - only visible for private/friends_only events if user is owner/collaborator
-                if (isAdmin &&
-                    (event.visibility == EventVisibility.private)) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.person_add),
-                      label: const Text('Invite Friends'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: Colors.blue.shade100,
+                                child: user?.avatarUrl != null
+                                    ? ClipOval(
+                                        child: Image.network(
+                                          user!.avatarUrl!,
+                                          width: 40,
+                                          height: 40,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  Icon(
+                                                    Icons.person,
+                                                    color: Colors.blue.shade700,
+                                                  ),
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.person,
+                                        color: Colors.blue.shade700,
+                                      ),
+                              ),
+                              title: Text(
+                                name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              subtitle: Text(
+                                isCreator
+                                    ? 'Creator'
+                                    : _getEnumLabel(participant.role),
+                                style: TextStyle(
+                                  color: isCreator
+                                      ? Colors.blue.shade700
+                                      : Colors.grey.shade600,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      )
+                    else
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.people_outline,
+                                size: 48,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No participants yet',
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      onPressed: () => _showInviteFriendsDialog(context, event),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
 
-                if (isAdmin) ...[
-                  const Divider(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Admin Actions',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleMedium?.copyWith(color: Colors.red),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.delete),
-                      label: const Text('Delete Event'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      onPressed: () => _showDeleteConfirmation(eventProvider),
-                    ),
-                  ),
-                ],
-              ],
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBannerDetail(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, color: Colors.white, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+              ),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoCard(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.blue.shade700, size: 28),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: Colors.blue.shade700,
             ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.blue.shade600),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDetailSection(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: Colors.grey),
+  Widget _buildDetailRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.grey,
+            fontWeight: FontWeight.w500,
           ),
-          const SizedBox(height: 4),
-          Text(
+        ),
+        Flexible(
+          child: Text(
             value,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+            textAlign: TextAlign.right,
           ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   void _showDeleteConfirmation(EventProvider eventProvider) {

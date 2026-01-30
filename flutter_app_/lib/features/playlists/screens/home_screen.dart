@@ -147,9 +147,12 @@ class _HomeScreenState extends State<HomeScreen> {
             return Column(
               children: [
                 // Search and Filter section
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1200),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Search field
@@ -233,11 +236,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                    ),
+                  ),
                 ),
                 // List of playlists
-                if (playlists.isEmpty)
-                  Expanded(
-                    child: Center(
+                Expanded(
+                  child: playlists.isEmpty
+                      ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -249,36 +254,74 @@ class _HomeScreenState extends State<HomeScreen> {
                             onPressed: _showCreatePlaylistDialog,
                             child: const Text('Create Playlist'),
                           ),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: ListView.builder(
+                          ],
+                        ),
+                      )
+                      : Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 1200),
+                            child: ListView.builder(
                       itemCount: playlists.length,
                       itemBuilder: (context, index) {
                         final playlist = playlists[index];
-                        return ListTile(
-                          title: Text(playlist.name),
-                          subtitle: Text(
-                            '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
                           ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => PlaylistDetailsScreen(
-                                  playlistId: playlist.id,
-                                ),
+                          child: ListTile(
+                            leading: Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: Colors.purple.shade100,
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                            );
-                          },
+                              child:
+                                  playlist.coverImageUrl != null &&
+                                      playlist.coverImageUrl!.isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(
+                                        playlist.coverImageUrl!,
+                                        fit: BoxFit.cover,
+                                        errorBuilder:
+                                            (context, error, stackTrace) =>
+                                                const Icon(
+                                                  Icons.music_note,
+                                                  color: Colors.purple,
+                                                  size: 30,
+                                                ),
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.music_note,
+                                      color: Colors.purple,
+                                      size: 30,
+                                    ),
+                            ),
+                            title: Text(playlist.name),
+                            subtitle: Text(
+                              '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => PlaylistDetailsScreen(
+                                    playlistId: playlist.id,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         );
                       },
                     ),
-                  ),
+                          ),
+                        ),
+                ),
               ],
             );
           },
