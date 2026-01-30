@@ -34,6 +34,7 @@ import { GeocodingService } from '../common/services/geocoding.service';
 import { toZonedTime } from 'date-fns-tz';
 
 export interface EventWithStats extends Event {
+  collaboratorCount?: number;
   stats: {
     participantCount: number;
     voteCount: number;
@@ -466,7 +467,15 @@ export class EventService {
   }
 
   async removeParticipant(eventId: string, userId: string): Promise<void> {
-    const event = await this.findById(eventId, userId);
+    // Get the event without checking access for the userId being removed
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: ['creator', 'participants', 'participants.user'],
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
 
     // Can't remove creator
     if (event.creatorId === userId) {
@@ -478,11 +487,8 @@ export class EventService {
       throw new NotFoundException('User not found');
     }
 
-    await this.eventRepository
-      .createQueryBuilder()
-      .relation(Event, 'participants')
-      .of(eventId)
-      .remove(userId);
+    // Use EventParticipantService to remove participant
+    await this.eventParticipantService.removeParticipant(eventId, userId);
 
     // Remove user's votes
     await this.voteRepository.delete({ eventId, userId });
@@ -1238,8 +1244,29 @@ export class EventService {
     const isUserParticipating = userId ? 
       event.participants?.some(p => p.userId === userId) || false : false;
 
+    // Get collaborator count for the event
+    const collaboratorCount = await this.eventParticipantService.getCollaboratorCount(event.id);
+
+    // Get first track's cover image for the event/playlist
+    let coverImageUrl = event.coverImageUrl;
+    if (!coverImageUrl) {
+      const firstTrack = await this.eventRepository
+        .createQueryBuilder('event')
+        .leftJoinAndSelect('event.tracks', 'playlistTrack')
+        .leftJoinAndSelect('playlistTrack.track', 'track')
+        .where('event.id = :eventId', { eventId: event.id })
+        .orderBy('playlistTrack.position', 'ASC')
+        .getOne();
+      
+      if (firstTrack?.tracks && firstTrack.tracks.length > 0) {
+        coverImageUrl = firstTrack.tracks[0].track?.albumCoverUrl;
+      }
+    }
+
     return {
       ...event,
+      collaboratorCount,
+      coverImageUrl,
       // eventDate: toZonedTime(new Date(event.eventDate), timeZone),
       // eventEndDate: toZonedTime(new Date(event.eventEndDate), timeZone),
       status: this.computeStatus(event),

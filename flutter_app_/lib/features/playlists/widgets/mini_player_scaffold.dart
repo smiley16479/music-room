@@ -123,8 +123,13 @@ class MiniPlayerScaffold extends StatelessWidget {
                               ],
                             ),
                           ),
-                          // Volume control
-                          _VolumeControl(audioProvider: audioProvider),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 140),
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: _VolumeControl(audioProvider: audioProvider),
+                            ),
+                          ),
                           const SizedBox(width: 8),
                           // Play/Pause button
                           IconButton(
@@ -180,19 +185,22 @@ class _VolumeControlState extends State<_VolumeControl> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+        return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (_showVolumeSlider)
-          SizedBox(
-            width: 100,
-            child: Slider(
-              value: widget.audioProvider.volume,
-              min: 0.0,
-              max: 1.0,
-              onChanged: (value) => widget.audioProvider.setVolume(value),
+            // allow the slider to shrink when there's not enough space
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: Slider(
+                  value: widget.audioProvider.volume,
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: (value) => widget.audioProvider.setVolume(value),
+                ),
+              ),
             ),
-          ),
         IconButton(
           icon: Icon(
             widget.audioProvider.volume == 0

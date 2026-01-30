@@ -274,10 +274,8 @@ class EventProvider extends ChangeNotifier {
 
     try {
       _currentEvent = await eventService.getEvent(eventId);
-      // If it's a playlist, also load tracks
-      if (_currentEvent?.isPlaylist ?? false) {
-        _currentPlaylistTracks = await eventService.getPlaylistTracks(eventId);
-      }
+      // Load tracks for both playlists and events (events have associated playlists)
+      _currentPlaylistTracks = await eventService.getPlaylistTracks(eventId);
     } catch (e) {
       _error = e.toString();
     }
@@ -357,6 +355,10 @@ class EventProvider extends ChangeNotifier {
     String? previewUrl,
     int? duration,
   }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
       await eventService.addTrackToPlaylist(
         playlistId,
@@ -368,10 +370,12 @@ class EventProvider extends ChangeNotifier {
         previewUrl: previewUrl,
         duration: duration,
       );
+      // Reload playlist details to get the updated track list
       await loadPlaylistDetails(playlistId);
       return true;
     } catch (e) {
       _error = e.toString();
+      _isLoading = false;
       notifyListeners();
       return false;
     }
