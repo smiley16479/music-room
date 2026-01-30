@@ -139,14 +139,21 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     try {
 
       const eventId = Array.isArray(data) && data.length > 0 ? data[0]?.eventId : data?.eventId;
-      this.logger.debug(`User ${client.userId} is joining global & event room ${eventId}`);
+      this.logger.debug(`User ${client.userId} is joining global events room ${eventId ? `and event room ${eventId}` : ''}`);
 
       if (!client.userId) {
         client.emit('error', { message: 'Authentication required' });
         return;
       }
 
-      await client.join(SOCKET_ROOMS.EVENT(eventId));
+      // Join the global EVENTS room to receive all event notifications
+      await client.join(SOCKET_ROOMS.EVENTS);
+      
+      // Also join specific event room if eventId is provided
+      if (eventId) {
+        await client.join(SOCKET_ROOMS.EVENT(eventId));
+      }
+      
       client.emit('joined-events-room', { room: SOCKET_ROOMS.EVENTS });
       this.logger.log(`User ${client.userId} joined global events room`);
     } catch (error) {
@@ -315,6 +322,143 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     }
   }
 
+  // ========== VOTING SOCKET HANDLERS ==========
+
+  /**
+   * Handle upvote for a track via WebSocket
+   * Provides real-time voting without needing HTTP call
+   */
+  @SubscribeMessage('upvote-track')
+  async handleUpvoteTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      await this.eventService.voteForTrack(eventId, client.userId, {
+        trackId,
+        type: 'upvote' as any,
+      });
+
+      this.logger.log(`User ${client.userId} upvoted track ${trackId} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Upvote error for user ${client.userId}: ${error.message}`);
+      client.emit('error', { message: error.message || 'Failed to upvote track' });
+    }
+  }
+
+  /**
+   * Handle downvote for a track via WebSocket
+   */
+  @SubscribeMessage('downvote-track')
+  async handleDownvoteTrack(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      await this.eventService.voteForTrack(eventId, client.userId, {
+        trackId,
+        type: 'downvote' as any,
+      });
+
+      this.logger.log(`User ${client.userId} downvoted track ${trackId} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Downvote error for user ${client.userId}: ${error.message}`);
+      client.emit('error', { message: error.message || 'Failed to downvote track' });
+    }
+  }
+
+  /**
+   * Handle vote removal via WebSocket
+   */
+  @SubscribeMessage('remove-vote')
+  async handleRemoveVote(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      await this.eventService.removeVote(eventId, client.userId, trackId);
+
+      this.logger.log(`User ${client.userId} removed vote for track ${trackId} in event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Remove vote error for user ${client.userId}: ${error.message}`);
+      client.emit('error', { message: error.message || 'Failed to remove vote' });
+    }
+  }
+
+  /**
+   * Request current voting results
+   */
+  @SubscribeMessage('get-voting-results')
+  async handleGetVotingResults(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      const results = await this.eventService.getVotingResults(eventId, client.userId);
+      
+      client.emit('voting-results', {
+        eventId,
+        results,
+        timestamp: new Date().toISOString(),
+      });
+      
+      this.logger.log(`Sent voting results to user ${client.userId} for event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Get voting results error: ${error.message}`);
+      client.emit('error', { message: 'Failed to get voting results' });
+    }
+  }
+
+  /**
+   * Request queue reorder (trigger manual reorder based on votes)
+   */
+  @SubscribeMessage('reorder-queue')
+  async handleReorderQueue(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user can control playback (admin/creator)
+      const canControl = await this.canControlPlayback(eventId, client.userId);
+      if (!canControl) {
+        client.emit('error', { message: 'Only event creators and admins can reorder queue' });
+        return;
+      }
+
+      await this.eventService.reorderQueueByVotes(eventId);
+
+      this.logger.log(`User ${client.userId} triggered queue reorder for event ${eventId}`);
+    } catch (error) {
+      this.logger.error(`Reorder queue error: ${error.message}`);
+      client.emit('error', { message: 'Failed to reorder queue' });
+    }
+  }
+
   // Track Suggestions (for real-time suggestions without voting)
   @SubscribeMessage('suggest-track')
   async handleSuggestTrack(
@@ -424,23 +568,69 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   // Server-side notification methods (called by EventsService)
   notifyEventCreated(event: Event, creator: User) {
-    this.server.to(SOCKET_ROOMS.EVENTS).emit('event-created', {
+    // Only broadcast new events to the global events room when they are public.
+    // Private events should not be announced to everyone.
+    const safeDateToISOString = (value: any) => {
+      if (!value) return null;
+      try {
+        const d = value instanceof Date ? value : new Date(value);
+        if (isNaN(d.getTime())) return null;
+        return d.toISOString();
+      } catch {
+        return null;
+      }
+    };
+
+    const payload = {
       event : {
         id: event.id,
         name: event.name,
         description: event.description,
-        visibility: event.visibility,
-        licenseType: event.licenseType,
-        status: event.status,
-        locationName: event.locationName,
-        eventDate: event.eventDate,
-        endDate: event.endDate,
-        participants: event.participants ? event.participants.map(p => ({ id: p.userId, displayName: p.user.displayName, avatarUrl: p.user.avatarUrl })) : [],
+        // Ensure string values for enums to avoid client-side decode errors
+        type: event.type ?? 'playlist',
+        visibility: event.visibility ?? 'private',
+        licenseType: event.licenseType ?? null,
+        status: event.status ?? null,
+        locationName: event.locationName ?? null,
+        eventDate: safeDateToISOString(event.eventDate),
+        endDate: safeDateToISOString(event.endDate),
+        createdAt: safeDateToISOString(event.createdAt) ?? new Date().toISOString(),
+        updatedAt: safeDateToISOString(event.updatedAt) ?? new Date().toISOString(),
+        participants: event.participants ? event.participants.map(p => ({
+          eventId: p.eventId,
+          userId: p.userId,
+          role: p.role,
+          joinedAt: safeDateToISOString(p.joinedAt),
+          user: p.user ? {
+            id: p.user.id,
+            displayName: p.user.displayName ?? null,
+            avatarUrl: p.user.avatarUrl ?? null,
+            createdAt: safeDateToISOString(p.user.createdAt),
+            updatedAt: safeDateToISOString(p.user.updatedAt),
+          } : null,
+        })) : [],
         participantsCount: event.participants ? event.participants.length : 0,
-        creator: creator ? { id: creator.id, displayName: creator.displayName, avatarUrl: creator.avatarUrl } : null,
+        // Playlist stats
+        trackCount: event.tracks ? event.tracks.length : 0,
+        totalDuration: event.totalDuration ?? 0,
+        collaboratorCount: event.participants ? event.participants.filter(p => p.role === ParticipantRole.COLLABORATOR || p.role === ParticipantRole.ADMIN).length : 0,
+        creator: creator ? {
+          id: creator.id,
+          displayName: creator.displayName ?? null,
+          avatarUrl: creator.avatarUrl ?? null,
+          createdAt: safeDateToISOString(creator.createdAt) ?? new Date().toISOString(),
+          updatedAt: safeDateToISOString(creator.updatedAt),
+        } : null,
       },
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    if (event.visibility === EventVisibility.PUBLIC) {
+      this.server.to(SOCKET_ROOMS.EVENTS).emit('event-created', payload);
+    } else if (creator && creator.id) {
+      // Emit to the creator's personal room so the creator still receives the confirmation via sockets
+      this.server.to(SOCKET_ROOMS.USER(creator.id)).emit('event-created', payload);
+    }
   }
 
   notifyEventUpdated(eventId: string, event: Event) {
@@ -452,18 +642,44 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
-  notifyEventDeleted(eventId: string) {
-    const rooms = SOCKET_ROOMS.EVENTS;
-    this.server.to(rooms).emit('event-deleted', {
-      eventId,
-      timestamp: new Date().toISOString(),
-    });
+  async notifyEventDeleted(eventId: string) {
+    try {
+      const event = await this.eventService.findByIdNoAccess(eventId);
 
-    const room = SOCKET_ROOMS.EVENT(eventId);
-    this.server.to(room).emit('event-deleted', {
-      eventId,
-      timestamp: new Date().toISOString(),
-    });
+      const payload = {
+        eventId,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Only broadcast to the global events room for PUBLIC events
+      if (event.visibility === EventVisibility.PUBLIC) {
+        this.server.to(SOCKET_ROOMS.EVENTS).emit('event-deleted', payload);
+      } else {
+        // For private events, notify the creator and known participants via their user rooms
+        if (event.creatorId) {
+          this.server.to(SOCKET_ROOMS.USER(event.creatorId)).emit('event-deleted', payload);
+        }
+
+        if (event.participants) {
+          for (const p of event.participants) {
+            if (p && p.userId) {
+              this.server.to(SOCKET_ROOMS.USER(p.userId)).emit('event-deleted', payload);
+            }
+          }
+        }
+      }
+
+      // Always emit to the specific event room (clients currently in the room)
+      const room = SOCKET_ROOMS.EVENT(eventId);
+      this.server.to(room).emit('event-deleted', payload);
+    } catch (error) {
+      // If we couldn't load the event for any reason, fall back to emitting to the event room only
+      const room = SOCKET_ROOMS.EVENT(eventId);
+      this.server.to(room).emit('event-deleted', {
+        eventId,
+        timestamp: new Date().toISOString(),
+      });
+    }
   }
 
   notifyAdminAdded(eventId: string, userId: string) {
@@ -541,6 +757,43 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     });
   }
 
+  /**
+   * Notify when queue is reordered based on votes
+   */
+  notifyQueueReordered(eventId: string, trackOrder: string[], trackScores: Map<string, number>) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    
+    // Convert Map to object for JSON serialization
+    const scoresObject: Record<string, number> = {};
+    trackScores.forEach((score, trackId) => {
+      scoresObject[trackId] = score;
+    });
+
+    this.server.to(room).emit('queue-reordered', {
+      eventId,
+      trackOrder,
+      trackScores: scoresObject,
+      timestamp: new Date().toISOString(),
+    });
+    
+    this.logger.log(`Queue reordered for event ${eventId} based on votes`);
+  }
+
+  /**
+   * Notify when a track's vote count changes (for real-time UI updates)
+   */
+  notifyTrackVotesChanged(eventId: string, trackId: string, upvotes: number, downvotes: number, score: number) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    this.server.to(room).emit('track-votes-changed', {
+      eventId,
+      trackId,
+      upvotes,
+      downvotes,
+      score,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   notifyNowPlaying(eventId: string, trackId: string) {
     const room = SOCKET_ROOMS.EVENT(eventId);
     this.server.to(room).emit('now-playing', {
@@ -564,7 +817,10 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     
     // Handle both Track and PlaylistTrackWithDetails
     const trackData = track.track ? {
-      id: track.track.id,
+      // Use the playlist-track id as the emitted id (so clients can deduplicate)
+      id: track.id,
+      // Keep the underlying music track id available as trackId
+      trackId: track.track.id,
       title: track.track.title,
       artist: track.track.artist,
       album: track.track.album,
@@ -580,6 +836,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       addedAt: track.addedAt,
     } : {
       id: track.id,
+      trackId: track.trackId || track.track?.id,
       title: track.title,
       artist: track.artist,
       album: track.album,
@@ -1243,8 +1500,11 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
           id: playlist.id,
           name: playlist.event?.name,
           description: playlist.event?.description,
+          type: playlist.event?.type,
+          visibility: playlist.event?.visibility,
           coverImageUrl: playlist.event?.coverImageUrl,
           createdAt: playlist.createdAt,
+          updatedAt: playlist.updatedAt || playlist.createdAt,
           creator: creator ? {
             id: creator.id,
             displayName: creator.displayName,
@@ -1328,5 +1588,98 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       removedBy,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  // ============================================
+  // INVITATION NOTIFICATIONS
+  // ============================================
+
+  /**
+   * Notify a user that they received an invitation
+   */
+  notifyInvitationReceived(inviteeId: string, invitation: any) {
+    const userRoom = SOCKET_ROOMS.USER(inviteeId);
+    this.server.to(userRoom).emit('invitation-received', {
+      invitation: {
+        id: invitation.id,
+        type: invitation.type,
+        status: invitation.status,
+        message: invitation.message,
+        eventId: invitation.eventId,
+        eventName: invitation.event?.name,
+        inviter: invitation.inviter ? {
+          id: invitation.inviter.id,
+          displayName: invitation.inviter.displayName,
+          avatarUrl: invitation.inviter.avatarUrl,
+        } : null,
+        createdAt: invitation.createdAt,
+        expiresAt: invitation.expiresAt,
+      },
+      timestamp: new Date().toISOString(),
+    });
+    this.logger.log(`Notified user ${inviteeId} of new invitation`);
+  }
+
+  /**
+   * Notify the inviter that their invitation was responded to
+   */
+  notifyInvitationResponded(inviterId: string, invitation: any, response: string) {
+    const userRoom = SOCKET_ROOMS.USER(inviterId);
+    this.server.to(userRoom).emit('invitation-responded', {
+      invitation: {
+        id: invitation.id,
+        type: invitation.type,
+        status: response,
+        eventId: invitation.eventId,
+        eventName: invitation.event?.name,
+        invitee: invitation.invitee ? {
+          id: invitation.invitee.id,
+          displayName: invitation.invitee.displayName,
+          avatarUrl: invitation.invitee.avatarUrl,
+        } : null,
+      },
+      response,
+      timestamp: new Date().toISOString(),
+    });
+    this.logger.log(`Notified user ${inviterId} that invitation was ${response}`);
+  }
+
+  /**
+   * Notify event participants when a new user joins via invitation
+   */
+  notifyInvitationAccepted(eventId: string, user: any) {
+    const room = SOCKET_ROOMS.EVENT(eventId);
+    this.server.to(room).emit('invitation-accepted', {
+      eventId,
+      user: {
+        id: user.id,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Allow users to join their personal notification room
+   */
+  @SubscribeMessage('join-user-room')
+  async handleJoinUserRoom(
+    @ConnectedSocket() client: AuthenticatedSocket,
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      const userRoom = SOCKET_ROOMS.USER(client.userId);
+      await client.join(userRoom);
+      
+      client.emit('joined-user-room', { room: userRoom });
+      this.logger.log(`User ${client.userId} joined their personal room`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to join user room' });
+    }
   }
 }

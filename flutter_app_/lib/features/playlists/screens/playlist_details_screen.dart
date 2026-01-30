@@ -6,6 +6,7 @@ import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
+import '../widgets/track_voting_widget.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -53,6 +54,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   Future<void> _loadPlaylist() async {
     final eventProvider = context.read<EventProvider>();
     await eventProvider.loadPlaylistDetails(widget.playlistId);
+    
+    // Load voting results if this is an event (not a simple playlist)
+    final playlist = eventProvider.currentPlaylist;
+    if (playlist != null && playlist.type == EventType.event) {
+      final votingProvider = context.read<VotingProvider>();
+      await votingProvider.setCurrentEvent(widget.playlistId);
+    }
   }
 
   void _toggleEditMode(dynamic playlist) {
@@ -573,6 +581,28 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                           ),
                                         ),
 
+                                        // Voting Widget (Events only, not playlists)
+                                        if (playlist.type == EventType.event)
+                                          Consumer<VotingProvider>(
+                                            builder: (context, votingProvider, _) {
+                                              final voteInfo = votingProvider.getTrackVoteInfo(track.trackId);
+                                              final userVote = votingProvider.getUserVote(track.trackId);
+                                              
+                                              return CompactTrackVotingWidget(
+                                                score: voteInfo?.score ?? 0,
+                                                userVote: userVote,
+                                                isCurrentTrack: isCurrentTrack,
+                                                isEnabled: playlist.votingEnabled ?? true,
+                                                onVote: (voteType) {
+                                                  votingProvider.vote(track.trackId, voteType);
+                                                },
+                                                onRemoveVote: () {
+                                                  votingProvider.removeVote(track.trackId);
+                                                },
+                                              );
+                                            },
+                                          ),
+
                                         // Delete Button (Owner/Admin only)
                                         if (canDelete)
                                           IconButton(
@@ -582,9 +612,12 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                               color: Colors.red.shade400,
                                             ),
                                             onPressed: () async {
+                                              // Capture the State's stable context (page/scaffold) before opening dialog
+                                              final scaffoldContext = this.context;
+
                                               // Show confirmation dialog
                                               final confirm = await showDialog<bool>(
-                                                context: context,
+                                                context: scaffoldContext,
                                                 builder: (context) => AlertDialog(
                                                   title: const Text(
                                                     'Remove Track',
@@ -632,7 +665,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
 
                                                 if (mounted) {
                                                   ScaffoldMessenger.of(
-                                                    context,
+                                                    scaffoldContext,
                                                   ).showSnackBar(
                                                     SnackBar(
                                                       content: Text(
