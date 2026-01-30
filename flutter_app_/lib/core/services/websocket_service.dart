@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
@@ -62,6 +63,22 @@ class WebSocketService {
     _setupEventHandlers();
 
     _socket!.connect();
+    // Wait until socket actually connects (or timeout)
+    final completer = Completer<void>();
+    void onConnected(_) {
+      if (!completer.isCompleted) completer.complete();
+    }
+
+    // Temporary one-shot listener to await connection
+    _socket!.once('connect', onConnected);
+
+    try {
+      // Wait for connection up to 5 seconds
+      await completer.future.timeout(const Duration(seconds: 5));
+      debugPrint('🔌 WebSocket connection established (awaited)');
+    } catch (e) {
+      debugPrint('⚠️ WebSocket connection timed out or failed: $e');
+    }
   }
 
   /// Setup all WebSocket event handlers
@@ -180,12 +197,12 @@ class WebSocketService {
 
     // Voting events
     _socket!.on('vote-updated', (data) {
-      debugPrint('🗳️ Vote updated: $data');
+      debugPrint('🗳️ ✅ Vote updated: $data');
       _notifyCallbacks('vote-updated', data);
     });
 
     _socket!.on('vote-removed', (data) {
-      debugPrint('🗳️ Vote removed: $data');
+      debugPrint('🗳️ ❌ Vote removed: $data');
       _notifyCallbacks('vote-removed', data);
     });
 
@@ -228,6 +245,45 @@ class WebSocketService {
     _socket!.on('playback-state-updated', (data) {
       debugPrint('📊 Playback state updated: $data');
       _notifyCallbacks('playback-state-updated', data);
+    });
+
+    // Queue reordering (based on votes)
+    _socket!.on('queue-reordered', (data) {
+      debugPrint('🔀 Queue reordered by votes: $data');
+      _notifyCallbacks('queue-reordered', data);
+    });
+
+    // Track vote changes
+    _socket!.on('track-votes-changed', (data) {
+      debugPrint('📊 Track votes changed: $data');
+      _notifyCallbacks('track-votes-changed', data);
+    });
+
+    // Voting results
+    _socket!.on('voting-results', (data) {
+      debugPrint('🗳️ Voting results received: $data');
+      _notifyCallbacks('voting-results', data);
+    });
+
+    // Invitation events
+    _socket!.on('invitation-received', (data) {
+      debugPrint('📩 Invitation received: $data');
+      _notifyCallbacks('invitation-received', data);
+    });
+
+    _socket!.on('invitation-responded', (data) {
+      debugPrint('📨 Invitation responded: $data');
+      _notifyCallbacks('invitation-responded', data);
+    });
+
+    _socket!.on('invitation-accepted', (data) {
+      debugPrint('✅ Invitation accepted: $data');
+      _notifyCallbacks('invitation-accepted', data);
+    });
+
+    _socket!.on('joined-user-room', (data) {
+      debugPrint('🏠 Joined user room: $data');
+      _notifyCallbacks('joined-user-room', data);
     });
 
     // Chat events
@@ -411,6 +467,52 @@ class WebSocketService {
     if (!_isConnected) return;
     _socket!.emit('playback-state', {'eventId': eventId, 'state': state});
     debugPrint('📤 Playback state: $state');
+  }
+
+  // ========== VOTING METHODS ==========
+
+  /// Upvote a track via WebSocket
+  void upvoteTrack(String eventId, String trackId) {
+    if (!_isConnected) return;
+    _socket!.emit('upvote-track', {'eventId': eventId, 'trackId': trackId});
+    debugPrint('📤 Upvote track: $trackId');
+  }
+
+  /// Downvote a track via WebSocket
+  void downvoteTrack(String eventId, String trackId) {
+    if (!_isConnected) return;
+    _socket!.emit('downvote-track', {'eventId': eventId, 'trackId': trackId});
+    debugPrint('📤 Downvote track: $trackId');
+  }
+
+  /// Remove vote for a track via WebSocket
+  void removeVote(String eventId, String trackId) {
+    if (!_isConnected) return;
+    _socket!.emit('remove-vote', {'eventId': eventId, 'trackId': trackId});
+    debugPrint('📤 Remove vote for track: $trackId');
+  }
+
+  /// Request current voting results
+  void getVotingResults(String eventId) {
+    if (!_isConnected) return;
+    _socket!.emit('get-voting-results', {'eventId': eventId});
+    debugPrint('📤 Get voting results for event: $eventId');
+  }
+
+  /// Request queue reorder based on votes
+  void reorderQueue(String eventId) {
+    if (!_isConnected) return;
+    _socket!.emit('reorder-queue', {'eventId': eventId});
+    debugPrint('📤 Reorder queue for event: $eventId');
+  }
+
+  // ========== USER ROOM ==========
+
+  /// Join user's personal notification room for invitations, etc.
+  void joinUserRoom() {
+    if (!_isConnected) return;
+    _socket!.emit('join-user-room');
+    debugPrint('📤 Joining user room for notifications');
   }
 
   /// Disconnect WebSocket

@@ -41,6 +41,7 @@ void main() async {
     apiService: apiService,
   );
   final webSocketService = WebSocketService();
+  final votingService = VotingService(apiService: apiService);
   // PlaylistService is now an alias for EventService
 
   debugPrint('🟢 Services initialized');
@@ -67,6 +68,9 @@ void main() async {
         Provider<DeviceRegistrationService>(
           create: (_) => deviceRegistrationService,
         ),
+        Provider<VotingService>(
+          create: (_) => votingService,
+        ),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(
             authService: authService,
@@ -77,10 +81,14 @@ void main() async {
         ChangeNotifierProvider(
           create: (_) => PlaylistProvider(
             eventService: eventService,
+            webSocketService: webSocketService,
           ), // PlaylistProvider is typedef for EventProvider
         ),
         ChangeNotifierProvider(
-          create: (_) => EventProvider(eventService: eventService),
+          create: (_) => EventProvider(
+            eventService: eventService,
+            webSocketService: webSocketService,
+          ),
         ),
         ChangeNotifierProvider(
           create: (_) => FriendProvider(friendService: friendService),
@@ -90,6 +98,12 @@ void main() async {
         ),
         ChangeNotifierProvider(
           create: (_) => AudioPlayerProvider(audioService: audioPlayerService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => VotingProvider(
+            votingService: votingService,
+            webSocketService: webSocketService,
+          ),
         ),
       ],
       child: const MyApp(),

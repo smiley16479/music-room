@@ -4,6 +4,8 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThan } from 'typeorm';
@@ -18,6 +20,7 @@ import { User } from 'src/user/entities/user.entity';
 import { Event } from 'src/event/entities/event.entity';
 import { EventParticipantService } from '../event/event-participant.service';
 import { ParticipantRole } from '../event/entities/event-participant.entity';
+import { EventGateway } from '../event/event.gateway';
 
 import { CreateInvitationDto } from './dto/create-invitation.dto';
 import { RespondInvitationDto } from './dto/respond-invitation.dto';
@@ -55,6 +58,8 @@ export class InvitationService {
     private readonly eventRepository: Repository<Event>,
     private readonly emailService: EmailService,
     private readonly eventParticipantService: EventParticipantService,
+    @Inject(forwardRef(() => EventGateway))
+    private readonly eventGateway: EventGateway,
   ) {}
 
   // Core CRUD Operations
@@ -131,7 +136,13 @@ export class InvitationService {
     // Send email notification
     await this.sendInvitationEmail(savedInvitation, inviter, invitee);
 
-    return this.findByIdWithDetails(savedInvitation.id);
+    // Get full invitation with details for socket notification
+    const invitationWithDetails = await this.findByIdWithDetails(savedInvitation.id);
+
+    // Send real-time socket notification to invitee
+    this.eventGateway.notifyInvitationReceived(inviteeId, invitationWithDetails);
+
+    return invitationWithDetails;
   }
 
   async findAll(paginationDto: PaginationDto, userId?: string) {
@@ -308,6 +319,9 @@ export class InvitationService {
       throw new BadRequestException('This invitation has expired');
     }
 
+    // Get invitee user for notifications
+    const invitee = await this.userRepository.findOne({ where: { id: userId } });
+
     // Process the response based on status
     if (respondDto.status === InvitationStatus.ACCEPTED) {
       // Process the accepted invitation (add to participants, etc.)
@@ -322,6 +336,14 @@ export class InvitationService {
         // Email errors shouldn't prevent acceptance
       }
 
+      // Notify inviter via socket
+      this.eventGateway.notifyInvitationResponded(invitation.inviterId, invitation, respondDto.status);
+
+      // Notify event participants if this is an event invitation
+      if (invitation.eventId && invitee) {
+        this.eventGateway.notifyInvitationAccepted(invitation.eventId, invitee);
+      }
+
       // For friend invitations, delete the invitation after accepting
       if (invitation.type === InvitationType.FRIEND) {
         // Get the full details before deletion for the return value
@@ -334,6 +356,11 @@ export class InvitationService {
     // For non-accepted responses or non-friend invitations, update the status
     invitation.status = respondDto.status;
     const updatedInvitation = await this.invitationRepository.save(invitation);
+
+    // Notify inviter via socket for declined invitations
+    if (respondDto.status === InvitationStatus.DECLINED) {
+      this.eventGateway.notifyInvitationResponded(invitation.inviterId, invitation, respondDto.status);
+    }
 
     // Send notification email to inviter (async, don't wait or fail)
     try {

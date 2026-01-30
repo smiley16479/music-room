@@ -31,7 +31,9 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _playlistSearchController = TextEditingController();
     debugPrint('🔵 HomeScreen.initState() - calling _loadAllEvents()');
-    _loadAllEvents();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadAllEvents();
+    });
   }
 
   @override
@@ -44,9 +46,10 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('🟡 _loadAllEvents() called');
     final eventProvider = context.read<EventProvider>();
     debugPrint('🟡 EventProvider obtained');
-    await eventProvider.loadMyEvents();
+    // Load both public events and user's events (playlists + events)
+    await eventProvider.loadEvents();
     debugPrint(
-      '🟡 loadMyEvents() completed - Total: ${eventProvider.myEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
+      '🟡 loadEvents() completed - Total: ${eventProvider.allEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
     );
   }
 
