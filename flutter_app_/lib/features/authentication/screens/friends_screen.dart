@@ -988,9 +988,12 @@ class _FriendsScreenState extends State<FriendsScreen>
   }
 
   /// Build device control delegation section
-  Widget _buildDeviceDelegationSection(BuildContext context, String delegateToUserId) {
+  Widget _buildDeviceDelegationSection(
+    BuildContext context,
+    String delegateToUserId,
+  ) {
     final currentUser = context.read<AuthProvider>().user;
-    
+
     return FutureBuilder<List<Device>>(
       future: _loadUserDevices(currentUser?.id ?? ''),
       builder: (context, snapshot) {

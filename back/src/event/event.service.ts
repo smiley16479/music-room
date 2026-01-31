@@ -67,6 +67,8 @@ export class EventService {
     private readonly eventParticipantRepository: Repository<EventParticipant>,
     @InjectRepository(Vote)
     private readonly voteRepository: Repository<Vote>,
+    @InjectRepository(PlaylistTrack)
+    private readonly playlistTrackRepository: Repository<PlaylistTrack>,
     @InjectRepository(Track)
     private readonly trackRepository: Repository<Track>,
     @InjectRepository(User)
@@ -322,7 +324,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['creator', 'participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
+      relations: ['participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
     });
 
     if (!event) {
@@ -1236,10 +1238,16 @@ export class EventService {
   private async addEventStats(event: Event, userId?: string): Promise<EventWithStats> {
     const participantCount = event.participants?.length || 0;
     const voteCount = event.votes?.length || 0;
-    
+
+    const trackCount = await this.playlistTrackRepository.count({
+      where: {
+        event: { id: event.id }
+      }
+    });
+    event.trackCount = trackCount;
+
     // Get unique tracks from votes
     const uniqueTrackIds = new Set(event.votes?.map(v => v.trackId) || []);
-    const trackCount = uniqueTrackIds.size;
     const timeZone = 'Europe/Paris';
     const isUserParticipating = userId ? 
       event.participants?.some(p => p.userId === userId) || false : false;

@@ -464,17 +464,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
           Text(
             'Access Control',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          Text(
-            'Access Control',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
 
@@ -508,10 +500,16 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      label,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     Text(
                       description,
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
                   ],
                 ),
@@ -798,7 +796,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     EventProvider eventProvider,
   ) {
     // Get cover image from event or first track
-    final String? eventCover = event.coverImageUrl ??
+    final String? eventCover =
+        event.coverImageUrl ??
         (eventProvider.currentPlaylistTracks.isNotEmpty
             ? eventProvider.currentPlaylistTracks.first.coverUrl
             : null);
@@ -846,12 +845,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
                                     errorBuilder:
                                         (context, error, stackTrace) =>
                                             const Center(
-                                      child: Icon(
-                                        Icons.event,
-                                        size: 60,
-                                        color: Colors.white,
-                                      ),
-                                    ),
+                                              child: Icon(
+                                                Icons.event,
+                                                size: 60,
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                   ),
                                 )
                               : const Icon(

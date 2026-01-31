@@ -26,7 +26,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   late TextEditingController _descriptionController;
 
   // Playlist settings
-  late bool _votingInvitedOnly;
+  late EventVisibility? _selectedVisibility; // Public/Private
+  late bool _votingInvitedOnly; // License type
 
   @override
   void initState() {
@@ -38,6 +39,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   void _initControllers() {
     _nameController = TextEditingController();
     _descriptionController = TextEditingController();
+    _selectedVisibility = null;
     _votingInvitedOnly = false;
   }
 
@@ -58,6 +60,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
       if (!_isEditMode) {
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
+        _selectedVisibility = playlist.visibility;
         _votingInvitedOnly = playlist.licenseType == 'invited';
       }
       _isEditMode = !_isEditMode;
@@ -111,7 +114,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
               builder: (context, playlistProvider, authProvider, _) {
                 final playlist = playlistProvider.currentPlaylist;
                 final currentUser = authProvider.currentUser;
-                final isOwner = playlist != null && currentUser?.id == playlist.creatorId;
+                final isOwner =
+                    playlist != null && currentUser?.id == playlist.creatorId;
                 // treat owner as admin for playlist editing permissions
                 final isAdmin = isOwner;
 
@@ -730,6 +734,22 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
             maxLines: 3,
           ),
           const SizedBox(height: 24),
+
+          DropdownButton<EventVisibility>(
+            isExpanded: true,
+            value: _selectedVisibility,
+            hint: const Text('Select Visibility'),
+            onChanged: (EventVisibility? newValue) {
+              setState(() => _selectedVisibility = newValue);
+            },
+            items: EventVisibility.values.map((EventVisibility visibility) {
+              return DropdownMenuItem<EventVisibility>(
+                value: visibility,
+                child: Text(_getEnumLabel(visibility)),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
 
           // Voting Settings
           CheckboxListTile(

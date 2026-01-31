@@ -60,13 +60,13 @@ class EventProvider extends ChangeNotifier {
     try {
       // Load user's events first
       final myEvents = await eventService.getMyEvents(page: page, limit: limit);
-      
+
       // Load public events (scope='all') - accessible to everyone
       final publicEvents = await eventService.getEvents(
         page: page,
         limit: limit,
       );
-      
+
       // Merge both lists, avoiding duplicates
       _events.clear();
       _events.addAll(myEvents);
@@ -84,8 +84,6 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-
-
   /// Load my events (all types)
   /// The UI will filter using myPlaylists or realEvents getters
   Future<void> loadMyEvents({int page = 1, int limit = 20}) async {
@@ -102,7 +100,9 @@ class EventProvider extends ChangeNotifier {
       debugPrint('✅ Loaded my events count: ${_events.length}');
       debugPrint('📋 Event details:');
       for (var e in _events) {
-        debugPrint('  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})');
+        debugPrint(
+          '  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})',
+        );
       }
       debugPrint(
         '🎵 Playlists: ${myPlaylists.length}, 🎉 Real Events: ${realEvents.length}',
@@ -214,6 +214,7 @@ class EventProvider extends ChangeNotifier {
       return true;
     } catch (e) {
       _error = e.toString();
+      debugPrint('❌ Error updateEvent events: $e');
       _isLoading = false;
       notifyListeners();
       return false;
@@ -332,11 +333,7 @@ class EventProvider extends ChangeNotifier {
     bool? isPublic,
     String? eventLicenseType,
   }) async {
-    return updateEvent(
-      id,
-      name: name,
-      description: description,
-    );
+    return updateEvent(id, name: name, description: description);
   }
 
   /// Delete playlist (same as deleteEvent)
@@ -400,22 +397,30 @@ class EventProvider extends ChangeNotifier {
 
   /// Reorder track in playlist (local only - call persistReorder to save)
   void reorderTrack(int oldIndex, int newIndex) {
-    if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length ||
-        newIndex < 0 || newIndex > _currentPlaylistTracks.length) {
+    if (oldIndex < 0 ||
+        oldIndex >= _currentPlaylistTracks.length ||
+        newIndex < 0 ||
+        newIndex > _currentPlaylistTracks.length) {
       return;
     }
 
     // Remove the item from the old position
     final track = _currentPlaylistTracks.removeAt(oldIndex);
-    
+
     // Insert at the new position
-    _currentPlaylistTracks.insert(newIndex > oldIndex ? newIndex - 1 : newIndex, track);
-    
+    _currentPlaylistTracks.insert(
+      newIndex > oldIndex ? newIndex - 1 : newIndex,
+      track,
+    );
+
     notifyListeners();
   }
 
   /// Persist playlist reorder to backend
-  Future<bool> persistReorder(String playlistId, List<String> playlistTrackIds) async {
+  Future<bool> persistReorder(
+    String playlistId,
+    List<String> playlistTrackIds,
+  ) async {
     try {
       await eventService.reorderPlaylistTracks(playlistId, playlistTrackIds);
       return true;
@@ -491,11 +496,7 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await eventService.inviteUsers(
-        eventId,
-        userIds,
-        message: message,
-      );
+      await eventService.inviteUsers(eventId, userIds, message: message);
       _isLoading = false;
       notifyListeners();
       return true;

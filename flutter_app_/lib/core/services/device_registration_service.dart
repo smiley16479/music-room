@@ -28,23 +28,28 @@ class DeviceRegistrationService {
 
       try {
         final iosInfo = await deviceInfo.iosInfo;
-        fingerprintData = '${iosInfo.model}_${iosInfo.identifierForVendor}_${iosInfo.systemVersion}';
+        fingerprintData =
+            '${iosInfo.model}_${iosInfo.identifierForVendor}_${iosInfo.systemVersion}';
       } catch (_) {
         try {
           final androidInfo = await deviceInfo.androidInfo;
-          fingerprintData = '${androidInfo.model}_${androidInfo.id}_${androidInfo.version.release}';
+          fingerprintData =
+              '${androidInfo.model}_${androidInfo.id}_${androidInfo.version.release}';
         } catch (_) {
           try {
             final windowsInfo = await deviceInfo.windowsInfo;
-            fingerprintData = '${windowsInfo.computerName}_${windowsInfo.productId}_${windowsInfo.buildNumber}';
+            fingerprintData =
+                '${windowsInfo.computerName}_${windowsInfo.productId}_${windowsInfo.buildNumber}';
           } catch (_) {
             try {
               final macOsInfo = await deviceInfo.macOsInfo;
-              fingerprintData = '${macOsInfo.model}_${macOsInfo.systemGUID}_${macOsInfo.osRelease}';
+              fingerprintData =
+                  '${macOsInfo.model}_${macOsInfo.systemGUID}_${macOsInfo.osRelease}';
             } catch (_) {
               try {
                 final linuxInfo = await deviceInfo.linuxInfo;
-                fingerprintData = '${linuxInfo.id}_${linuxInfo.versionId}_${linuxInfo.machineId}';
+                fingerprintData =
+                    '${linuxInfo.id}_${linuxInfo.versionId}_${linuxInfo.machineId}';
               } catch (_) {
                 // For web/unknown platforms, create a deterministic fingerprint
                 fingerprintData = _generateWebFingerprint();
@@ -55,7 +60,9 @@ class DeviceRegistrationService {
       }
 
       // Create a hash from the fingerprint data
-      final fingerprint = sha256.convert(utf8.encode(fingerprintData)).toString();
+      final fingerprint = sha256
+          .convert(utf8.encode(fingerprintData))
+          .toString();
       debugPrint('Generated device fingerprint: $fingerprint');
       return fingerprint;
     } catch (e) {
@@ -71,7 +78,7 @@ class DeviceRegistrationService {
       // For web/desktop, create fingerprint from platform and static data
       // This ensures the same browser always gets the same fingerprint
       String browserInfo = '';
-      
+
       if (Platform.isWindows) {
         browserInfo = 'windows_desktop';
       } else if (Platform.isMacOS) {
@@ -81,10 +88,12 @@ class DeviceRegistrationService {
       } else {
         browserInfo = 'web_browser';
       }
-      
+
       // Create deterministic hash from platform
       final fingerprint = sha256.convert(utf8.encode(browserInfo)).toString();
-      debugPrint('Generated web fingerprint: $fingerprint (from: $browserInfo)');
+      debugPrint(
+        'Generated web fingerprint: $fingerprint (from: $browserInfo)',
+      );
       return fingerprint;
     } catch (e) {
       debugPrint('Error generating web fingerprint: $e');
@@ -105,7 +114,7 @@ class DeviceRegistrationService {
     }
 
     final prefs = await SharedPreferences.getInstance();
-    
+
     // Try to get stored UUID first
     String? deviceId = prefs.getString(_deviceIdKey);
     if (deviceId != null) {

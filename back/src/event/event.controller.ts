@@ -157,6 +157,8 @@ export class EventController {
     required: true
   })
   async findOne(@Param('id') id: string, @CurrentUser() user?: User) {
+    console.log('Getting ":id" event by ID:', id, 'for user:', user?.id);
+
     const event = await this.eventService.findById(id, user?.id);
     return {
       success: true,
@@ -177,6 +179,7 @@ export class EventController {
     required: true
   })
   async getVotingResults(@Param('id') id: string, @CurrentUser() user?: User) {
+    console.log('Getting ":id/voting-results" voting results for event ID:', id, 'for user:', user?.id);
     const results = await this.eventService.getVotingResults(id, user?.id);
     return {
       success: true,
@@ -471,6 +474,7 @@ export class EventController {
   async getPlaylistTracks(
     @Param('id') playlistId: string,
   ) {
+    console.log('Getting ":id/tracks" for playlist ID:', playlistId);
     const tracks = await this.eventService.getPlaylistTracks(playlistId);
     return {
       success: true,

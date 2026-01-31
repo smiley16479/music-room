@@ -44,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
     debugPrint('🟡 _loadAllEvents() called');
     final eventProvider = context.read<EventProvider>();
     debugPrint('🟡 EventProvider obtained');
-    await eventProvider.loadMyEvents();
+    await eventProvider.loadEvents();
     debugPrint(
       '🟡 loadMyEvents() completed - Total: ${eventProvider.myEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
     );
