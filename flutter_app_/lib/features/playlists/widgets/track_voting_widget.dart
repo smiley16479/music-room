@@ -46,11 +46,8 @@ class TrackVotingWidget extends StatelessWidget {
           isEnabled: canVote,
           color: Colors.green,
           onTap: canVote ? () {
-            if (userVote == VoteType.upvote) {
-              onRemoveVote?.call();
-            } else {
-              onVote?.call(VoteType.upvote);
-            }
+            // Always call onVote - backend handles toggle behavior
+            onVote?.call(VoteType.upvote);
           } : null,
         ),
         
@@ -79,11 +76,8 @@ class TrackVotingWidget extends StatelessWidget {
           isEnabled: canVote,
           color: Colors.red,
           onTap: canVote ? () {
-            if (userVote == VoteType.downvote) {
-              onRemoveVote?.call();
-            } else {
-              onVote?.call(VoteType.downvote);
-            }
+            // Always call onVote - backend handles toggle behavior
+            onVote?.call(VoteType.downvote);
           } : null,
         ),
         
@@ -199,11 +193,8 @@ class CompactTrackVotingWidget extends StatelessWidget {
           ),
           color: userVote == VoteType.upvote ? Colors.green : null,
           onPressed: canVote ? () {
-            if (userVote == VoteType.upvote) {
-              onRemoveVote?.call();
-            } else {
-              onVote?.call(VoteType.upvote);
-            }
+            // Always call onVote - backend handles toggle behavior
+            onVote?.call(VoteType.upvote);
           } : null,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -234,11 +225,8 @@ class CompactTrackVotingWidget extends StatelessWidget {
           ),
           color: userVote == VoteType.downvote ? Colors.red : null,
           onPressed: canVote ? () {
-            if (userVote == VoteType.downvote) {
-              onRemoveVote?.call();
-            } else {
-              onVote?.call(VoteType.downvote);
-            }
+            // Always call onVote - backend handles toggle behavior
+            onVote?.call(VoteType.downvote);
           } : null,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),

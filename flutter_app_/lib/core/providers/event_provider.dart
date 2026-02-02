@@ -16,10 +16,7 @@ class EventProvider extends ChangeNotifier {
   String? _error;
   bool _createdByMeOnly = false;
 
-  EventProvider({
-    required this.eventService,
-    this.webSocketService,
-  }) {
+  EventProvider({required this.eventService, this.webSocketService}) {
     _setupWebSocketListeners();
   }
 
@@ -283,7 +280,9 @@ class EventProvider extends ChangeNotifier {
     try {
       // Leave previous event room if any
       final previousEventId = _currentEvent?.id;
-      if (previousEventId != null && webSocketService != null && webSocketService!.currentEventId != null) {
+      if (previousEventId != null &&
+          webSocketService != null &&
+          webSocketService!.currentEventId != null) {
         try {
           webSocketService!.leaveEvent(previousEventId);
         } catch (_) {}
@@ -435,17 +434,15 @@ class EventProvider extends ChangeNotifier {
   void reorderTrack(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length) return;
     if (newIndex < 0) newIndex = 0;
-    if (newIndex > _currentPlaylistTracks.length) newIndex = _currentPlaylistTracks.length;
+    if (newIndex > _currentPlaylistTracks.length)
+      newIndex = _currentPlaylistTracks.length;
 
     final track = _currentPlaylistTracks.removeAt(oldIndex);
     final insertIndex = newIndex > oldIndex ? newIndex - 1 : newIndex;
     _currentPlaylistTracks.insert(insertIndex, track);
 
     // Rebuild list with updated position values (positions are 1-based)
-    _currentPlaylistTracks = _currentPlaylistTracks
-        .asMap()
-        .entries
-        .map((e) {
+    _currentPlaylistTracks = _currentPlaylistTracks.asMap().entries.map((e) {
       final idx = e.key;
       final t = e.value;
       return PlaylistTrack(
@@ -469,7 +466,10 @@ class EventProvider extends ChangeNotifier {
   }
 
   /// Remove a track from the playlist (calls API and updates local list)
-  Future<bool> removeTrackFromPlaylist(String playlistId, String trackId) async {
+  Future<bool> removeTrackFromPlaylist(
+    String playlistId,
+    String trackId,
+  ) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -622,7 +622,9 @@ class EventProvider extends ChangeNotifier {
       debugPrint('📡 Event updated: $data');
       if (data is Map<String, dynamic> && data['event'] != null) {
         try {
-          final updatedEvent = Event.fromJson(data['event'] as Map<String, dynamic>);
+          final updatedEvent = Event.fromJson(
+            data['event'] as Map<String, dynamic>,
+          );
           final index = _events.indexWhere((e) => e.id == updatedEvent.id);
           if (index != -1) {
             _events[index] = updatedEvent;
@@ -641,7 +643,8 @@ class EventProvider extends ChangeNotifier {
     webSocketService!.on('track-added', (data) {
       debugPrint('📡 Track added: $data');
       if (data is Map<String, dynamic>) {
-        final eventId = data['eventId'] as String? ?? data['playlistId'] as String?;
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
         if (eventId != null && _currentEvent?.id == eventId) {
           try {
             final trackMap = data['track'] as Map<String, dynamic>?;
@@ -651,7 +654,8 @@ class EventProvider extends ChangeNotifier {
                 'id': trackMap['id'],
                 'eventId': eventId,
                 'trackId': trackMap['trackId'] ?? trackMap['id'],
-                'position': trackMap['position'] ?? _currentPlaylistTracks.length + 1,
+                'position':
+                    trackMap['position'] ?? _currentPlaylistTracks.length + 1,
                 'votes': 0,
                 'trackTitle': trackMap['title'],
                 'trackArtist': trackMap['artist'],
@@ -663,10 +667,14 @@ class EventProvider extends ChangeNotifier {
                 'updatedAt': trackMap['addedAt'] ?? data['timestamp'],
               });
 
-              final exists = _currentPlaylistTracks.any((t) => t.id == newTrack.id);
+              final exists = _currentPlaylistTracks.any(
+                (t) => t.id == newTrack.id,
+              );
               if (!exists) {
                 _currentPlaylistTracks.add(newTrack);
-                _currentPlaylistTracks.sort((a, b) => a.position.compareTo(b.position));
+                _currentPlaylistTracks.sort(
+                  (a, b) => a.position.compareTo(b.position),
+                );
               }
               notifyListeners();
               return;
@@ -685,7 +693,8 @@ class EventProvider extends ChangeNotifier {
     webSocketService!.on('track-removed', (data) {
       debugPrint('📡 Track removed: $data');
       if (data is Map<String, dynamic>) {
-        final eventId = data['eventId'] as String? ?? data['playlistId'] as String?;
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
         final trackId = data['trackId'] as String?;
         if (eventId != null && _currentEvent?.id == eventId) {
           if (trackId != null) {
@@ -700,13 +709,153 @@ class EventProvider extends ChangeNotifier {
     webSocketService!.on('tracks-reordered', (data) {
       debugPrint('📡 Tracks reordered: $data');
       if (data is Map<String, dynamic>) {
-        final eventId = data['eventId'] as String? ?? data['playlistId'] as String?;
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
+        final trackOrder =
+            data['trackOrder'] as List<dynamic>? ??
+            data['trackIds'] as List<dynamic>?;
+
         if (eventId != null && _currentEvent?.id == eventId) {
-          // Reload tracks to get new order
-          loadPlaylistDetails(eventId);
+          if (trackOrder != null && trackOrder.isNotEmpty) {
+            // Reorder tracks in-place without reloading entire page
+            _reorderTracksInPlace(trackOrder.cast<String>());
+          } else {
+            // Fallback to reload if no track order provided
+            loadPlaylistDetails(eventId);
+          }
         }
       }
     });
+
+    // Listen for queue reordered (voting system)
+    webSocketService!.on('queue-reordered', (data) {
+      debugPrint('📡 Queue reordered: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId = data['eventId'] as String?;
+        final trackOrder = data['trackOrder'] as List<dynamic>?;
+        final trackScores = data['trackScores'] as Map<String, dynamic>?;
+
+        if (eventId != null &&
+            _currentEvent?.id == eventId &&
+            trackOrder != null) {
+          // Reorder tracks in-place without reloading entire page
+          _reorderTracksInPlaceByVotes(trackOrder.cast<String>(), trackScores);
+        }
+      }
+    });
+  }
+
+  /// Reorder current playlist tracks based on new order from backend
+  /// This avoids a full page reload
+  void _reorderTracksInPlace(List<String> newOrder) {
+    if (_currentPlaylistTracks.isEmpty) return;
+
+    // Create a map of track ID to track for quick lookup
+    final trackMap = <String, PlaylistTrack>{};
+    for (final track in _currentPlaylistTracks) {
+      trackMap[track.id] = track;
+    }
+
+    // Reorder tracks according to new order
+    final reorderedTracks = <PlaylistTrack>[];
+    for (final trackId in newOrder) {
+      final track = trackMap[trackId];
+      if (track != null) {
+        reorderedTracks.add(track);
+      }
+    }
+
+    // Add any tracks that weren't in the new order (shouldn't happen, but defensive)
+    for (final track in _currentPlaylistTracks) {
+      if (!reorderedTracks.contains(track)) {
+        reorderedTracks.add(track);
+      }
+    }
+
+    _currentPlaylistTracks = reorderedTracks;
+    notifyListeners();
+    debugPrint('✅ Reordered ${_currentPlaylistTracks.length} tracks in-place');
+  }
+
+  /// Reorder tracks based on voting results
+  /// trackOrder contains playlist track IDs in the new order
+  /// trackScores contains trackId -> score mapping
+  void _reorderTracksInPlaceByVotes(
+    List<String> newOrder,
+    Map<String, dynamic>? trackScores,
+  ) {
+    if (_currentPlaylistTracks.isEmpty) return;
+
+    // Create maps for quick lookup
+    final trackMapById =
+        <String, PlaylistTrack>{}; // playlist track id -> track
+    final trackMapByTrackId = <String, PlaylistTrack>{}; // trackId -> track
+
+    for (final track in _currentPlaylistTracks) {
+      trackMapById[track.id] = track;
+      trackMapByTrackId[track.trackId] = track;
+    }
+
+    // Reorder tracks according to new order (using playlist track IDs)
+    final reorderedTracks = <PlaylistTrack>[];
+    int position = 1;
+
+    for (final playlistTrackId in newOrder) {
+      var track = trackMapById[playlistTrackId];
+
+      if (track != null) {
+        // Update the track with new position and vote score
+        final score = trackScores?[track.trackId] as num?;
+        track = PlaylistTrack(
+          id: track.id,
+          playlistId: track.playlistId,
+          trackId: track.trackId,
+          position: position,
+          votes: score?.toInt() ?? track.votes,
+          trackTitle: track.trackTitle,
+          trackArtist: track.trackArtist,
+          trackAlbum: track.trackAlbum,
+          coverUrl: track.coverUrl,
+          previewUrl: track.previewUrl,
+          duration: track.duration,
+          createdAt: track.createdAt,
+          updatedAt: track.updatedAt,
+        );
+        reorderedTracks.add(track);
+        position++;
+      }
+    }
+
+    // Add any tracks that weren't in the new order (shouldn't happen, but defensive)
+    for (final track in _currentPlaylistTracks) {
+      final alreadyAdded = reorderedTracks.any((t) => t.id == track.id);
+      if (!alreadyAdded) {
+        reorderedTracks.add(
+          PlaylistTrack(
+            id: track.id,
+            playlistId: track.playlistId,
+            trackId: track.trackId,
+            position: position,
+            votes: track.votes,
+            trackTitle: track.trackTitle,
+            trackArtist: track.trackArtist,
+            trackAlbum: track.trackAlbum,
+            coverUrl: track.coverUrl,
+            previewUrl: track.previewUrl,
+            duration: track.duration,
+            createdAt: track.createdAt,
+            updatedAt: track.updatedAt,
+          ),
+        );
+        position++;
+      }
+    }
+
+    _currentPlaylistTracks = reorderedTracks;
+    notifyListeners();
+    debugPrint(
+      '✅ Reordered ${_currentPlaylistTracks.length} tracks by votes in-place',
+    );
   }
 
   @override
@@ -719,6 +868,7 @@ class EventProvider extends ChangeNotifier {
       webSocketService!.off('track-added');
       webSocketService!.off('track-removed');
       webSocketService!.off('tracks-reordered');
+      webSocketService!.off('queue-reordered');
     }
     super.dispose();
   }

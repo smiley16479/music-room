@@ -667,6 +667,18 @@ export class EventService {
         // Reorder queue after vote removal
         await this.reorderQueueByVotes(eventId);
         
+        // Calculate and notify updated vote counts for this track
+        const trackVotes = await this.voteRepository.find({
+          where: { eventId, trackId: voteDto.trackId },
+        });
+        
+        const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+        const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+        const score = upvotes - downvotes;
+        
+        // Notify about track vote change for immediate UI update
+        this.eventGateway.notifyTrackVotesChanged(eventId, voteDto.trackId, upvotes, downvotes, score);
+        
         this.eventGateway.notifyVoteRemoved(eventId, existingVote);
         return;
       }
@@ -722,16 +734,19 @@ export class EventService {
     // Reorder queue based on votes
     await this.reorderQueueByVotes(eventId);
 
-    // Notify participants
-    this.eventGateway.notifyVoteUpdated(eventId, vote);
+    // Calculate and notify updated vote counts for this track
+    const trackVotes = await this.voteRepository.find({
+      where: { eventId, trackId: voteDto.trackId },
+    });
+    
+    const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const score = upvotes - downvotes;
+    
+    // Notify about track vote change for immediate UI update
+    this.eventGateway.notifyTrackVotesChanged(eventId, voteDto.trackId, upvotes, downvotes, score);
 
-    /* // Get updated voting results
-    const results = await this.getVotingResults(eventId, userId);
-
-    // Reorder playlist tracks based on votes
-    await this.reorderPlaylistByVotes(eventId); */
-
-    // Notify participants
+    // Notify participants about the vote
     this.eventGateway.notifyVoteUpdated(eventId, vote/* , results */);
 
     return;
@@ -772,13 +787,27 @@ export class EventService {
     });
 
     if (!vote) {
-      throw new NotFoundException('Vote not found');
+      // Vote already removed or doesn't exist - this is idempotent, so just return
+      console.warn(`Vote not found for removal: eventId=${eventId}, userId=${userId}, trackId=${trackId}`);
+      return;
     }
 
     await this.voteRepository.remove(vote);
 
     // Reorder queue after vote removed
     await this.reorderQueueByVotes(eventId);
+
+    // Calculate and notify updated vote counts for this track
+    const trackVotes = await this.voteRepository.find({
+      where: { eventId, trackId },
+    });
+    
+    const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const score = upvotes - downvotes;
+    
+    // Notify about track vote change for immediate UI update
+    this.eventGateway.notifyTrackVotesChanged(eventId, trackId, upvotes, downvotes, score);
 
     // Notify participants (without user-specific vote data)
     this.eventGateway.notifyVoteRemoved(eventId, vote);

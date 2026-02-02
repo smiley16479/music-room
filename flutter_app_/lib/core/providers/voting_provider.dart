@@ -51,11 +51,28 @@ class VotingProvider extends ChangeNotifier {
       }
     });
 
+    // Listen for individual vote updates (when someone votes)
+    webSocketService.on('vote-updated', (data) {
+      debugPrint('🗳️ ✅ Vote updated: $data');
+      if (data is Map<String, dynamic>) {
+        _handleVoteUpdated(data);
+      }
+    });
+
+    // Listen for vote removals (when someone removes their vote)
+    webSocketService.on('vote-removed', (data) {
+      debugPrint('🗳️ ❌ Vote removed: $data');
+      if (data is Map<String, dynamic>) {
+        _handleVoteRemoved(data);
+      }
+    });
+
     // Listen for queue reordered (votes changed order)
     webSocketService.on('queue-reordered', (data) {
       debugPrint('🔄 Queue reordered: $data');
-      // Notify listeners so UI can refresh
-      notifyListeners();
+      if (data is Map<String, dynamic>) {
+        _handleQueueReordered(data);
+      }
     });
 
     // Listen for individual track vote changes
@@ -74,7 +91,9 @@ class VotingProvider extends ChangeNotifier {
       if (tracks != null) {
         _trackVotes.clear();
         for (final track in tracks) {
-          final trackInfo = TrackVoteInfo.fromJson(track as Map<String, dynamic>);
+          final trackInfo = TrackVoteInfo.fromJson(
+            track as Map<String, dynamic>,
+          );
           _trackVotes[trackInfo.trackId] = trackInfo;
         }
         notifyListeners();
@@ -87,6 +106,9 @@ class VotingProvider extends ChangeNotifier {
   /// Handle individual track vote change
   void _handleTrackVoteChanged(Map<String, dynamic> data) {
     try {
+      final eventId = data['eventId'] as String?;
+      if (eventId != _currentEventId) return;
+
       final trackId = data['trackId'] as String?;
       final upvotes = data['upvotes'] as int? ?? 0;
       final downvotes = data['downvotes'] as int? ?? 0;
@@ -104,9 +126,111 @@ class VotingProvider extends ChangeNotifier {
           userVote: existing?.userVote, // Keep existing user vote until updated
         );
         notifyListeners();
+        debugPrint(
+          '✅ Track $trackId votes updated: up=$upvotes, down=$downvotes, score=$score',
+        );
       }
     } catch (e) {
       debugPrint('❌ Error handling track vote change: $e');
+    }
+  }
+
+  /// Handle vote updated event from WebSocket
+  void _handleVoteUpdated(Map<String, dynamic> data) {
+    try {
+      final eventId = data['eventId'] as String?;
+      if (eventId != _currentEventId) return;
+
+      final voteData = data['vote'] as Map<String, dynamic>?;
+      if (voteData == null) return;
+
+      final trackId = voteData['trackId'] as String?;
+      if (trackId == null) return;
+
+      // Instead of full reload, just fetch updated voting results
+      // This is lighter than reloading the entire playlist
+      loadVotingResults();
+    } catch (e) {
+      debugPrint('❌ Error handling vote updated: $e');
+    }
+  }
+
+  /// Handle vote removed event from WebSocket
+  void _handleVoteRemoved(Map<String, dynamic> data) {
+    try {
+      final eventId = data['eventId'] as String?;
+      if (eventId != _currentEventId) return;
+
+      final voteData = data['vote'] as Map<String, dynamic>?;
+      if (voteData == null) return;
+
+      final trackId = voteData['trackId'] as String?;
+      if (trackId == null) return;
+
+      // Instead of full reload, just fetch updated voting results
+      // This is lighter than reloading the entire playlist
+      loadVotingResults();
+    } catch (e) {
+      debugPrint('❌ Error handling vote removed: $e');
+    }
+  }
+
+  /// Handle queue reordered event from WebSocket
+  /// This is called when votes have changed the track order
+  void _handleQueueReordered(Map<String, dynamic> data) {
+    try {
+      final eventId = data['eventId'] as String?;
+      if (eventId != _currentEventId) return;
+
+      // trackScores contains the updated vote scores for each track
+      final trackScores = data['trackScores'] as Map<String, dynamic>?;
+
+      if (trackScores != null) {
+        // Update scores for all tracks based on the new data
+        for (final entry in trackScores.entries) {
+          final trackId = entry.key;
+          final score = (entry.value as num).toInt();
+
+          final existing = _trackVotes[trackId];
+          if (existing != null) {
+            // Update the score (we don't have individual up/down counts here)
+            // Calculate approximate up/down based on score
+            final upvotes = score > 0 ? score : 0;
+            final downvotes = score < 0 ? -score : 0;
+
+            _trackVotes[trackId] = TrackVoteInfo(
+              trackId: trackId,
+              playlistTrackId: existing.playlistTrackId,
+              upvotes: upvotes,
+              downvotes: downvotes,
+              score: score,
+              position: existing.position,
+              userVote: existing.userVote,
+            );
+          } else {
+            // New track we didn't know about
+            final upvotes = score > 0 ? score : 0;
+            final downvotes = score < 0 ? -score : 0;
+
+            _trackVotes[trackId] = TrackVoteInfo(
+              trackId: trackId,
+              playlistTrackId: null,
+              upvotes: upvotes,
+              downvotes: downvotes,
+              score: score,
+              position: 0,
+              userVote: null,
+            );
+          }
+        }
+      }
+
+      notifyListeners();
+      debugPrint(
+        '✅ Queue reordered handled, updated ${trackScores?.length ?? 0} track scores',
+      );
+    } catch (e) {
+      debugPrint('❌ Error handling queue reordered: $e');
     }
   }
 
@@ -147,22 +271,22 @@ class VotingProvider extends ChangeNotifier {
     if (_currentEventId == null) return false;
 
     try {
-      // Optimistic update
-      _updateLocalVote(trackId, VoteType.upvote);
+      // Check if user already has an upvote - if so, this is a toggle (remove)
+      final currentVote = getUserVote(trackId);
+      final isToggleOff = currentVote == VoteType.upvote;
 
-      // Send via WebSocket for real-time sync
-      webSocketService.upvoteTrack(_currentEventId!, trackId);
+      // Optimistic update for immediate UI feedback
+      _updateLocalVote(trackId, isToggleOff ? null : VoteType.upvote);
 
-      // Also call API for persistence
+      // Call API for persistence - WebSocket events will handle the real-time sync
+      // Note: We don't also send via WebSocket to avoid duplicate vote processing
       await votingService.upvote(_currentEventId!, trackId);
-      
-      // Reload to get updated vote counts
-      await loadVotingResults();
+
       return true;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error upvoting track: $e');
-      // Revert optimistic update
+      // Revert optimistic update on error
       await loadVotingResults();
       return false;
     }
@@ -173,22 +297,21 @@ class VotingProvider extends ChangeNotifier {
     if (_currentEventId == null) return false;
 
     try {
-      // Optimistic update
-      _updateLocalVote(trackId, VoteType.downvote);
+      // Check if user already has a downvote - if so, this is a toggle (remove)
+      final currentVote = getUserVote(trackId);
+      final isToggleOff = currentVote == VoteType.downvote;
 
-      // Send via WebSocket for real-time sync
-      webSocketService.downvoteTrack(_currentEventId!, trackId);
+      // Optimistic update for immediate UI feedback
+      _updateLocalVote(trackId, isToggleOff ? null : VoteType.downvote);
 
-      // Also call API for persistence
+      // Call API for persistence - WebSocket events will handle the real-time sync
       await votingService.downvote(_currentEventId!, trackId);
-      
-      // Reload to get updated vote counts
-      await loadVotingResults();
+
       return true;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error downvoting track: $e');
-      // Revert optimistic update
+      // Revert optimistic update on error
       await loadVotingResults();
       return false;
     }
@@ -199,22 +322,17 @@ class VotingProvider extends ChangeNotifier {
     if (_currentEventId == null) return false;
 
     try {
-      // Optimistic update
+      // Optimistic update for immediate UI feedback
       _updateLocalVote(trackId, null);
 
-      // Send via WebSocket for real-time sync
-      webSocketService.removeVote(_currentEventId!, trackId);
-
-      // Also call API for persistence
+      // Call API for persistence - WebSocket events will handle the real-time sync
       await votingService.removeVote(_currentEventId!, trackId);
-      
-      // Reload to get updated vote counts
-      await loadVotingResults();
+
       return true;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error removing vote: $e');
-      // Revert optimistic update
+      // Revert optimistic update on error
       await loadVotingResults();
       return false;
     }
@@ -233,14 +351,16 @@ class VotingProvider extends ChangeNotifier {
   void _updateLocalVote(String trackId, VoteType? newVote) {
     final existing = _trackVotes[trackId];
     final newUserVote = newVote != null ? UserVoteInfo(type: newVote) : null;
-    
+
     if (existing == null) {
       _trackVotes[trackId] = TrackVoteInfo(
         trackId: trackId,
         playlistTrackId: null,
         upvotes: newVote == VoteType.upvote ? 1 : 0,
         downvotes: newVote == VoteType.downvote ? 1 : 0,
-        score: newVote == VoteType.upvote ? 1 : (newVote == VoteType.downvote ? -1 : 0),
+        score: newVote == VoteType.upvote
+            ? 1
+            : (newVote == VoteType.downvote ? -1 : 0),
         position: 0,
         userVote: newUserVote,
       );
@@ -268,7 +388,9 @@ class VotingProvider extends ChangeNotifier {
         playlistTrackId: existing.playlistTrackId,
         upvotes: existing.upvotes + upvoteChange,
         downvotes: existing.downvotes + downvoteChange,
-        score: (existing.upvotes + upvoteChange) - (existing.downvotes + downvoteChange),
+        score:
+            (existing.upvotes + upvoteChange) -
+            (existing.downvotes + downvoteChange),
         position: existing.position,
         userVote: newUserVote,
       );
@@ -288,6 +410,8 @@ class VotingProvider extends ChangeNotifier {
   void dispose() {
     // Remove WebSocket listeners
     webSocketService.off('voting-results');
+    webSocketService.off('vote-updated');
+    webSocketService.off('vote-removed');
     webSocketService.off('queue-reordered');
     webSocketService.off('track-votes-changed');
     super.dispose();
