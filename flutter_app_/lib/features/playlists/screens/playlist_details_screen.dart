@@ -6,6 +6,7 @@ import '../../../core/providers/index.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
+import '../widgets/track_voting_widget.dart';
 
 /// Playlist Details screen
 class PlaylistDetailsScreen extends StatefulWidget {
@@ -53,6 +54,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   Future<void> _loadPlaylist() async {
     final eventProvider = context.read<EventProvider>();
     await eventProvider.loadPlaylistDetails(widget.playlistId);
+
+    // Load voting results if this is an event (not a simple playlist)
+    final playlist = eventProvider.currentPlaylist;
+    if (playlist != null && playlist.type == EventType.event) {
+      final votingProvider = context.read<VotingProvider>();
+      await votingProvider.setCurrentEvent(widget.playlistId);
+    }
   }
 
   void _toggleEditMode(dynamic playlist) {
@@ -384,6 +392,32 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: eventProvider.currentPlaylistTracks.length,
+                      // Add animation for reordering
+                      proxyDecorator: (child, index, animation) {
+                        return AnimatedBuilder(
+                          animation: animation,
+                          builder: (context, child) {
+                            final double elevation = Tween<double>(
+                              begin: 0,
+                              end: 6,
+                            ).evaluate(animation);
+                            final double scale = Tween<double>(
+                              begin: 1.0,
+                              end: 1.02,
+                            ).evaluate(animation);
+                            return Transform.scale(
+                              scale: scale,
+                              child: Material(
+                                elevation: elevation,
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.transparent,
+                                child: child,
+                              ),
+                            );
+                          },
+                          child: child,
+                        );
+                      },
                       onReorder: (oldIndex, newIndex) async {
                         // Reorder locally first
                         eventProvider.reorderTrack(oldIndex, newIndex);
@@ -425,257 +459,395 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                       itemBuilder: (context, index) {
                         final track =
                             eventProvider.currentPlaylistTracks[index];
-                        return Consumer<AudioPlayerProvider>(
+                        // First track (index 0) is the current/next track and should not be votable
+                        final isFirstTrack = index == 0;
+
+                        return AnimatedSize(
                           key: Key('track_${track.id}'),
-                          builder: (context, audioProvider, _) {
-                            final isCurrentTrack =
-                                audioProvider.currentTrack?.id == track.id;
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          child: Consumer<AudioPlayerProvider>(
+                            builder: (context, audioProvider, _) {
+                              final isCurrentlyPlaying =
+                                  audioProvider.currentTrack?.id == track.id;
+                              // Consider a track as "current" if it's playing OR if it's the first in queue
+                              final isCurrentTrack =
+                                  isCurrentlyPlaying || isFirstTrack;
 
-                            return Consumer<AuthProvider>(
-                              builder: (context, authProvider, _) {
-                                final currentUser = authProvider.currentUser;
-                                final isOwner =
-                                    currentUser?.id == playlist.creatorId;
-                                final canDelete = isOwner;
-                                final isMobile =
-                                    MediaQuery.of(context).size.width < 600;
+                              return Consumer<AuthProvider>(
+                                builder: (context, authProvider, _) {
+                                  final currentUser = authProvider.currentUser;
+                                  final isOwner =
+                                      currentUser?.id == playlist.creatorId;
+                                  final canDelete = isOwner;
+                                  final isMobile =
+                                      MediaQuery.of(context).size.width < 600;
 
-                                final trackContent = GestureDetector(
-                                  onTap: () {
-                                    // Play this track and set the playlist
-                                    audioProvider.playPlaylist(
-                                      eventProvider.currentPlaylistTracks,
-                                      startIndex: index,
-                                    );
-                                  },
-                                  child: Container(
-                                    key: Key('track_container_${track.id}'),
-                                    color: isCurrentTrack
-                                        ? Colors.purple.shade50
-                                        : Colors.transparent,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        // Drag Handle (Owner only) - hidden on mobile
-                                        if (isOwner && !isMobile)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 8,
-                                            ),
-                                            child: Icon(
-                                              Icons.drag_handle,
-                                              color: Colors.grey.shade400,
-                                              size: 24,
-                                            ),
-                                          ),
-
-                                        // Track Cover Image
-                                        Container(
-                                          width: 48,
-                                          height: 48,
-                                          decoration: BoxDecoration(
+                                  final trackContent = AnimatedContainer(
+                                    duration: const Duration(milliseconds: 300),
+                                    curve: Curves.easeInOut,
+                                    margin: isFirstTrack
+                                        ? const EdgeInsets.only(bottom: 16)
+                                        : EdgeInsets.zero,
+                                    decoration: isFirstTrack
+                                        ? BoxDecoration(
+                                            color: Colors.purple.shade50,
                                             borderRadius: BorderRadius.circular(
-                                              4,
+                                              8,
                                             ),
-                                            color: Colors.grey.shade300,
-                                            boxShadow: [
-                                              if (isCurrentTrack)
-                                                BoxShadow(
-                                                  color: Colors.purple.shade200,
-                                                  blurRadius: 4,
-                                                  spreadRadius: 2,
-                                                ),
-                                            ],
-                                          ),
-                                          child:
-                                              track.coverUrl != null &&
-                                                  track.coverUrl!.isNotEmpty
-                                              ? ClipRRect(
-                                                  borderRadius:
-                                                      BorderRadius.circular(4),
-                                                  child: Image.network(
-                                                    track.coverUrl!,
-                                                    fit: BoxFit.cover,
-                                                    errorBuilder:
-                                                        (
-                                                          context,
-                                                          error,
-                                                          stackTrace,
-                                                        ) {
-                                                          return Center(
-                                                            child: Icon(
-                                                              Icons.music_note,
-                                                              color: Colors
-                                                                  .grey
-                                                                  .shade400,
-                                                              size: 24,
-                                                            ),
-                                                          );
-                                                        },
-                                                  ),
-                                                )
-                                              : Center(
-                                                  child: Icon(
-                                                    Icons.music_note,
-                                                    color: Colors.grey.shade400,
-                                                    size: 24,
-                                                  ),
-                                                ),
+                                            border: Border.all(
+                                              color: Colors.purple.shade200,
+                                              width: 2,
+                                            ),
+                                          )
+                                        : null,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        // Play this track and set the playlist
+                                        audioProvider.playPlaylist(
+                                          eventProvider.currentPlaylistTracks,
+                                          startIndex: index,
+                                        );
+                                      },
+                                      child: Container(
+                                        key: Key('track_container_${track.id}'),
+                                        color: isCurrentTrack && !isFirstTrack
+                                            ? Colors.purple.shade50
+                                            : Colors.transparent,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
                                         ),
-
-                                        // Track Title & Artist
-                                        Expanded(
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                            ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                  track.trackTitle ??
-                                                      'Unknown Track',
-                                                  style: TextStyle(
-                                                    fontWeight: isCurrentTrack
-                                                        ? FontWeight.bold
-                                                        : FontWeight.w500,
-                                                    fontSize: 14,
-                                                    color: isCurrentTrack
-                                                        ? Theme.of(
-                                                            context,
-                                                          ).colorScheme.primary
-                                                        : null,
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
+                                        child: Row(
+                                          children: [
+                                            // Drag Handle (Owner only) - hidden on mobile and for first track
+                                            if (isOwner &&
+                                                !isMobile &&
+                                                !isFirstTrack)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  right: 8,
                                                 ),
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  track.trackArtist ??
-                                                      'Unknown Artist',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey.shade600,
-                                                  ),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
+                                                child: Icon(
+                                                  Icons.drag_handle,
+                                                  color: Colors.grey.shade400,
+                                                  size: 24,
                                                 ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
+                                              ),
 
-                                        // Delete Button (Owner/Admin only)
-                                        if (canDelete)
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.delete_outline,
-                                              size: 22,
-                                              color: Colors.red.shade400,
-                                            ),
-                                            onPressed: () async {
-                                              // Show confirmation dialog
-                                              final confirm = await showDialog<bool>(
-                                                context: context,
-                                                builder: (context) => AlertDialog(
-                                                  title: const Text(
-                                                    'Remove Track',
-                                                  ),
-                                                  content: Text(
-                                                    'Are you sure you want to remove "${track.trackTitle}" from the playlist?',
-                                                  ),
-                                                  actions: [
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            context,
-                                                            false,
+                                            // Track Cover Image
+                                            Container(
+                                              width: 48,
+                                              height: 48,
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                                color: Colors.grey.shade300,
+                                                boxShadow: [
+                                                  if (isCurrentTrack)
+                                                    BoxShadow(
+                                                      color: Colors
+                                                          .purple
+                                                          .shade200,
+                                                      blurRadius: 4,
+                                                      spreadRadius: 2,
+                                                    ),
+                                                ],
+                                              ),
+                                              child:
+                                                  track.coverUrl != null &&
+                                                      track.coverUrl!.isNotEmpty
+                                                  ? ClipRRect(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            4,
                                                           ),
-                                                      child: const Text(
-                                                        'Cancel',
+                                                      child: Image.network(
+                                                        track.coverUrl!,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder:
+                                                            (
+                                                              context,
+                                                              error,
+                                                              stackTrace,
+                                                            ) {
+                                                              return Center(
+                                                                child: Icon(
+                                                                  Icons
+                                                                      .music_note,
+                                                                  color: Colors
+                                                                      .grey
+                                                                      .shade400,
+                                                                  size: 24,
+                                                                ),
+                                                              );
+                                                            },
+                                                      ),
+                                                    )
+                                                  : Center(
+                                                      child: Icon(
+                                                        Icons.music_note,
+                                                        color: Colors
+                                                            .grey
+                                                            .shade400,
+                                                        size: 24,
                                                       ),
                                                     ),
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            context,
-                                                            true,
-                                                          ),
-                                                      style:
-                                                          TextButton.styleFrom(
-                                                            foregroundColor:
-                                                                Colors.red,
-                                                          ),
-                                                      child: const Text(
-                                                        'Remove',
+                                            ),
+
+                                            // Track Title & Artist
+                                            Expanded(
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                    ),
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    Text(
+                                                      track.trackTitle ??
+                                                          'Unknown Track',
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            isCurrentTrack
+                                                            ? FontWeight.bold
+                                                            : FontWeight.w500,
+                                                        fontSize: 14,
+                                                        color: isCurrentTrack
+                                                            ? Theme.of(context)
+                                                                  .colorScheme
+                                                                  .primary
+                                                            : null,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      track.trackArtist ??
+                                                          'Unknown Artist',
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors
+                                                            .grey
+                                                            .shade600,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+
+                                            // For first track: Show "NOW PLAYING" badge instead of voting
+                                            if (isFirstTrack &&
+                                                playlist.type ==
+                                                    EventType.event)
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 6,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(
+                                                    context,
+                                                  ).colorScheme.primary,
+                                                  borderRadius:
+                                                      BorderRadius.circular(16),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.play_circle_filled,
+                                                      color: Colors.white,
+                                                      size: 16,
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      'NOW PLAYING',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 11,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                        letterSpacing: 0.5,
                                                       ),
                                                     ),
                                                   ],
                                                 ),
-                                              );
+                                              )
+                                            // Voting Widget (Events only, not playlists, not first track)
+                                            else if (playlist.type ==
+                                                    EventType.event &&
+                                                !isFirstTrack)
+                                              Consumer<VotingProvider>(
+                                                builder:
+                                                    (
+                                                      context,
+                                                      votingProvider,
+                                                      _,
+                                                    ) {
+                                                      final voteInfo =
+                                                          votingProvider
+                                                              .getTrackVoteInfo(
+                                                                track.trackId,
+                                                              );
+                                                      final userVote =
+                                                          votingProvider
+                                                              .getUserVote(
+                                                                track.trackId,
+                                                              );
 
-                                              if (confirm == true && mounted) {
-                                                final success =
-                                                    await eventProvider
-                                                        .removeTrackFromPlaylist(
-                                                          widget.playlistId,
-                                                          track.trackId,
-                                                        );
+                                                      return CompactTrackVotingWidget(
+                                                        score:
+                                                            voteInfo?.score ??
+                                                            0,
+                                                        userVote: userVote,
+                                                        isCurrentTrack:
+                                                            isCurrentTrack,
+                                                        isEnabled:
+                                                            playlist
+                                                                .votingEnabled ??
+                                                            true,
+                                                        onVote: (voteType) {
+                                                          votingProvider.vote(
+                                                            track.trackId,
+                                                            voteType,
+                                                          );
+                                                        },
+                                                        onRemoveVote: () {
+                                                          votingProvider
+                                                              .removeVote(
+                                                                track.trackId,
+                                                              );
+                                                        },
+                                                      );
+                                                    },
+                                              ),
 
-                                                if (mounted) {
-                                                  ScaffoldMessenger.of(
-                                                    context,
-                                                  ).showSnackBar(
-                                                    SnackBar(
-                                                      content: Text(
-                                                        success
-                                                            ? '✅ Track removed'
-                                                            : '❌ Failed to remove track',
+                                            // Delete Button (Owner/Admin only)
+                                            if (canDelete)
+                                              IconButton(
+                                                icon: Icon(
+                                                  Icons.delete_outline,
+                                                  size: 22,
+                                                  color: Colors.red.shade400,
+                                                ),
+                                                onPressed: () async {
+                                                  // Capture the State's stable context (page/scaffold) before opening dialog
+                                                  final scaffoldContext =
+                                                      this.context;
+
+                                                  // Show confirmation dialog
+                                                  final confirm = await showDialog<bool>(
+                                                    context: scaffoldContext,
+                                                    builder: (context) => AlertDialog(
+                                                      title: const Text(
+                                                        'Remove Track',
                                                       ),
-                                                      backgroundColor: success
-                                                          ? Colors.green
-                                                          : Colors.red,
+                                                      content: Text(
+                                                        'Are you sure you want to remove "${track.trackTitle}" from the playlist?',
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                context,
+                                                                false,
+                                                              ),
+                                                          child: const Text(
+                                                            'Cancel',
+                                                          ),
+                                                        ),
+                                                        TextButton(
+                                                          onPressed: () =>
+                                                              Navigator.pop(
+                                                                context,
+                                                                true,
+                                                              ),
+                                                          style:
+                                                              TextButton.styleFrom(
+                                                                foregroundColor:
+                                                                    Colors.red,
+                                                              ),
+                                                          child: const Text(
+                                                            'Remove',
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
                                                   );
-                                                }
-                                              }
-                                            },
-                                            splashRadius: 24,
-                                          )
-                                        else
-                                          const SizedBox(width: 48),
-                                      ],
+
+                                                  if (confirm == true &&
+                                                      mounted) {
+                                                    final success =
+                                                        await eventProvider
+                                                            .removeTrackFromPlaylist(
+                                                              widget.playlistId,
+                                                              track.trackId,
+                                                            );
+
+                                                    if (mounted) {
+                                                      ScaffoldMessenger.of(
+                                                        scaffoldContext,
+                                                      ).showSnackBar(
+                                                        SnackBar(
+                                                          content: Text(
+                                                            success
+                                                                ? '✅ Track removed'
+                                                                : '❌ Failed to remove track',
+                                                          ),
+                                                          backgroundColor:
+                                                              success
+                                                              ? Colors.green
+                                                              : Colors.red,
+                                                        ),
+                                                      );
+                                                    }
+                                                  }
+                                                },
+                                                splashRadius: 24,
+                                              )
+                                            else
+                                              const SizedBox(width: 48),
+                                          ],
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ); // Wrap entire container with appropriate reorder listener for owners
-                                if (isOwner) {
-                                  if (isMobile) {
-                                    // On mobile, require long-press to start reordering
-                                    return ReorderableDelayedDragStartListener(
-                                      index: index,
-                                      child: trackContent,
-                                    );
+                                  );
+
+                                  // Wrap entire container with appropriate reorder listener for owners
+                                  if (isOwner && !isFirstTrack) {
+                                    if (isMobile) {
+                                      // On mobile, require long-press to start reordering
+                                      return ReorderableDelayedDragStartListener(
+                                        index: index,
+                                        child: trackContent,
+                                      );
+                                    } else {
+                                      // Desktop/tablet: immediate drag handle
+                                      return ReorderableDragStartListener(
+                                        index: index,
+                                        child: trackContent,
+                                      );
+                                    }
                                   } else {
-                                    // Desktop/tablet: immediate drag handle
-                                    return ReorderableDragStartListener(
-                                      index: index,
-                                      child: trackContent,
-                                    );
+                                    return trackContent;
                                   }
-                                } else {
-                                  return trackContent;
-                                }
-                              },
-                            );
-                          },
+                                },
+                              );
+                            },
+                          ),
                         );
                       },
                     ),

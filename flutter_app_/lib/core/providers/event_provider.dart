@@ -7,6 +7,7 @@ import '../services/index.dart';
 /// (Playlist is Event with type=playlist)
 class EventProvider extends ChangeNotifier {
   final EventService eventService;
+  final WebSocketService? webSocketService;
 
   final List<Event> _events = [];
   Event? _currentEvent;
@@ -15,7 +16,9 @@ class EventProvider extends ChangeNotifier {
   String? _error;
   bool _createdByMeOnly = false;
 
-  EventProvider({required this.eventService});
+  EventProvider({required this.eventService, this.webSocketService}) {
+    _setupWebSocketListeners();
+  }
 
   // Getters
   /// All events (user's + public), unfiltered
@@ -150,6 +153,7 @@ class EventProvider extends ChangeNotifier {
         'Playlists: ${myPlaylists.length}, Real Events: ${realEvents.length}',
       );
       _isLoading = false;
+      _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
@@ -274,9 +278,26 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Leave previous event room if any
+      final previousEventId = _currentEvent?.id;
+      if (previousEventId != null &&
+          webSocketService != null &&
+          webSocketService!.currentEventId != null) {
+        try {
+          webSocketService!.leaveEvent(previousEventId);
+        } catch (_) {}
+      }
+
       _currentEvent = await eventService.getEvent(eventId);
       // Load tracks for both playlists and events (events have associated playlists)
       _currentPlaylistTracks = await eventService.getPlaylistTracks(eventId);
+
+      // Join the specific event room to receive track updates
+      if (webSocketService != null) {
+        try {
+          webSocketService!.joinEvent(eventId);
+        } catch (_) {}
+      }
     } catch (e) {
       _error = e.toString();
     }
@@ -356,8 +377,9 @@ class EventProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
+    debugPrint('Adding track to playlist $playlistId: $title — $artist');
     try {
-      await eventService.addTrackToPlaylist(
+      final newTrack = await eventService.addTrackToPlaylist(
         playlistId,
         deezerId: deezerId,
         title: title,
@@ -367,53 +389,29 @@ class EventProvider extends ChangeNotifier {
         previewUrl: previewUrl,
         duration: duration,
       );
-      // Reload playlist details to get the updated track list
-      await loadPlaylistDetails(playlistId);
+
+      if (newTrack == null) {
+        _error = 'Empty response from server';
+        return false;
+      }
+
+      final exists = _currentPlaylistTracks.any((t) => t.id == newTrack.id);
+      if (!exists) {
+        _currentPlaylistTracks.add(newTrack);
+        _currentPlaylistTracks.sort((a, b) => a.position.compareTo(b.position));
+      }
+
+      notifyListeners();
       return true;
     } catch (e) {
       _error = e.toString();
+      debugPrint('❌ Error addTrackToPlaylist: $e');
+      return false;
+    } finally {
       _isLoading = false;
+      debugPrint('addTrackToPlaylist finished, isLoading=false');
       notifyListeners();
-      return false;
     }
-  }
-
-  /// Remove track from playlist
-  Future<bool> removeTrackFromPlaylist(
-    String playlistId,
-    String trackId,
-  ) async {
-    try {
-      await eventService.removeTrackFromPlaylist(playlistId, trackId);
-      _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Reorder track in playlist (local only - call persistReorder to save)
-  void reorderTrack(int oldIndex, int newIndex) {
-    if (oldIndex < 0 ||
-        oldIndex >= _currentPlaylistTracks.length ||
-        newIndex < 0 ||
-        newIndex > _currentPlaylistTracks.length) {
-      return;
-    }
-
-    // Remove the item from the old position
-    final track = _currentPlaylistTracks.removeAt(oldIndex);
-
-    // Insert at the new position
-    _currentPlaylistTracks.insert(
-      newIndex > oldIndex ? newIndex - 1 : newIndex,
-      track,
-    );
-
-    notifyListeners();
   }
 
   /// Persist playlist reorder to backend
@@ -428,6 +426,66 @@ class EventProvider extends ChangeNotifier {
       _error = e.toString();
       notifyListeners();
       return false;
+    }
+  }
+
+  /// Reorder tracks locally in the provider list.
+  /// This updates the in-memory order and refreshes position values.
+  void reorderTrack(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length) return;
+    if (newIndex < 0) newIndex = 0;
+    if (newIndex > _currentPlaylistTracks.length)
+      newIndex = _currentPlaylistTracks.length;
+
+    final track = _currentPlaylistTracks.removeAt(oldIndex);
+    final insertIndex = newIndex > oldIndex ? newIndex - 1 : newIndex;
+    _currentPlaylistTracks.insert(insertIndex, track);
+
+    // Rebuild list with updated position values (positions are 1-based)
+    _currentPlaylistTracks = _currentPlaylistTracks.asMap().entries.map((e) {
+      final idx = e.key;
+      final t = e.value;
+      return PlaylistTrack(
+        id: t.id,
+        playlistId: t.playlistId,
+        trackId: t.trackId,
+        position: idx + 1,
+        votes: t.votes,
+        trackTitle: t.trackTitle,
+        trackArtist: t.trackArtist,
+        trackAlbum: t.trackAlbum,
+        coverUrl: t.coverUrl,
+        previewUrl: t.previewUrl,
+        duration: t.duration,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+      );
+    }).toList();
+
+    notifyListeners();
+  }
+
+  /// Remove a track from the playlist (calls API and updates local list)
+  Future<bool> removeTrackFromPlaylist(
+    String playlistId,
+    String trackId,
+  ) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await eventService.removeTrackFromPlaylist(playlistId, trackId);
+      _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('❌ Error removeTrackFromPlaylist: $e');
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
@@ -520,5 +578,298 @@ class EventProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  /// Setup WebSocket listeners for real-time updates
+  void _setupWebSocketListeners() {
+    if (webSocketService == null) return;
+
+    // Listen for new events created
+    webSocketService!.on('event-created', (data) {
+      debugPrint('📡 Event created: $data');
+      if (data is Map<String, dynamic> && data['event'] != null) {
+        try {
+          final event = Event.fromJson(data['event'] as Map<String, dynamic>);
+          // Add to list if not already present
+          if (!_events.any((e) => e.id == event.id)) {
+            _events.add(event);
+            notifyListeners();
+          }
+        } catch (e) {
+          debugPrint('❌ Error parsing event-created: $e');
+        }
+      }
+    });
+
+    // Listen for event deletions
+    webSocketService!.on('event-deleted', (data) {
+      debugPrint('📡 Event deleted: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId = data['eventId'] as String?;
+        if (eventId != null) {
+          _events.removeWhere((e) => e.id == eventId);
+          if (_currentEvent?.id == eventId) {
+            _currentEvent = null;
+            _currentPlaylistTracks.clear();
+          }
+          notifyListeners();
+        }
+      }
+    });
+
+    // Listen for event updates
+    webSocketService!.on('event-updated', (data) {
+      debugPrint('📡 Event updated: $data');
+      if (data is Map<String, dynamic> && data['event'] != null) {
+        try {
+          final updatedEvent = Event.fromJson(
+            data['event'] as Map<String, dynamic>,
+          );
+          final index = _events.indexWhere((e) => e.id == updatedEvent.id);
+          if (index != -1) {
+            _events[index] = updatedEvent;
+            if (_currentEvent?.id == updatedEvent.id) {
+              _currentEvent = updatedEvent;
+            }
+            notifyListeners();
+          }
+        } catch (e) {
+          debugPrint('❌ Error parsing event-updated: $e');
+        }
+      }
+    });
+
+    // Listen for tracks added
+    webSocketService!.on('track-added', (data) {
+      debugPrint('📡 Track added: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
+        if (eventId != null && _currentEvent?.id == eventId) {
+          try {
+            final trackMap = data['track'] as Map<String, dynamic>?;
+            if (trackMap != null) {
+              // Build a PlaylistTrack from websocket payload
+              final newTrack = PlaylistTrack.fromJson({
+                'id': trackMap['id'],
+                'eventId': eventId,
+                'trackId': trackMap['trackId'] ?? trackMap['id'],
+                'position':
+                    trackMap['position'] ?? _currentPlaylistTracks.length + 1,
+                'votes': 0,
+                'trackTitle': trackMap['title'],
+                'trackArtist': trackMap['artist'],
+                'trackAlbum': trackMap['album'],
+                'coverUrl': trackMap['thumbnailUrl'] ?? trackMap['coverUrl'],
+                'previewUrl': trackMap['previewUrl'],
+                'duration': trackMap['duration'],
+                'createdAt': trackMap['addedAt'] ?? data['timestamp'],
+                'updatedAt': trackMap['addedAt'] ?? data['timestamp'],
+              });
+
+              final exists = _currentPlaylistTracks.any(
+                (t) => t.id == newTrack.id,
+              );
+              if (!exists) {
+                _currentPlaylistTracks.add(newTrack);
+                _currentPlaylistTracks.sort(
+                  (a, b) => a.position.compareTo(b.position),
+                );
+              }
+              notifyListeners();
+              return;
+            }
+          } catch (e) {
+            debugPrint('❌ Error applying websocket track-added: $e');
+          }
+
+          // Fallback: reload minimal data for the playlist
+          loadPlaylistDetails(eventId);
+        }
+      }
+    });
+
+    // Listen for tracks removed
+    webSocketService!.on('track-removed', (data) {
+      debugPrint('📡 Track removed: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
+        final trackId = data['trackId'] as String?;
+        if (eventId != null && _currentEvent?.id == eventId) {
+          if (trackId != null) {
+            _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
+            notifyListeners();
+          }
+        }
+      }
+    });
+
+    // Listen for tracks reordered
+    webSocketService!.on('tracks-reordered', (data) {
+      debugPrint('📡 Tracks reordered: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId =
+            data['eventId'] as String? ?? data['playlistId'] as String?;
+        final trackOrder =
+            data['trackOrder'] as List<dynamic>? ??
+            data['trackIds'] as List<dynamic>?;
+
+        if (eventId != null && _currentEvent?.id == eventId) {
+          if (trackOrder != null && trackOrder.isNotEmpty) {
+            // Reorder tracks in-place without reloading entire page
+            _reorderTracksInPlace(trackOrder.cast<String>());
+          } else {
+            // Fallback to reload if no track order provided
+            loadPlaylistDetails(eventId);
+          }
+        }
+      }
+    });
+
+    // Listen for queue reordered (voting system)
+    webSocketService!.on('queue-reordered', (data) {
+      debugPrint('📡 Queue reordered: $data');
+      if (data is Map<String, dynamic>) {
+        final eventId = data['eventId'] as String?;
+        final trackOrder = data['trackOrder'] as List<dynamic>?;
+        final trackScores = data['trackScores'] as Map<String, dynamic>?;
+
+        if (eventId != null &&
+            _currentEvent?.id == eventId &&
+            trackOrder != null) {
+          // Reorder tracks in-place without reloading entire page
+          _reorderTracksInPlaceByVotes(trackOrder.cast<String>(), trackScores);
+        }
+      }
+    });
+  }
+
+  /// Reorder current playlist tracks based on new order from backend
+  /// This avoids a full page reload
+  void _reorderTracksInPlace(List<String> newOrder) {
+    if (_currentPlaylistTracks.isEmpty) return;
+
+    // Create a map of track ID to track for quick lookup
+    final trackMap = <String, PlaylistTrack>{};
+    for (final track in _currentPlaylistTracks) {
+      trackMap[track.id] = track;
+    }
+
+    // Reorder tracks according to new order
+    final reorderedTracks = <PlaylistTrack>[];
+    for (final trackId in newOrder) {
+      final track = trackMap[trackId];
+      if (track != null) {
+        reorderedTracks.add(track);
+      }
+    }
+
+    // Add any tracks that weren't in the new order (shouldn't happen, but defensive)
+    for (final track in _currentPlaylistTracks) {
+      if (!reorderedTracks.contains(track)) {
+        reorderedTracks.add(track);
+      }
+    }
+
+    _currentPlaylistTracks = reorderedTracks;
+    notifyListeners();
+    debugPrint('✅ Reordered ${_currentPlaylistTracks.length} tracks in-place');
+  }
+
+  /// Reorder tracks based on voting results
+  /// trackOrder contains playlist track IDs in the new order
+  /// trackScores contains trackId -> score mapping
+  void _reorderTracksInPlaceByVotes(
+    List<String> newOrder,
+    Map<String, dynamic>? trackScores,
+  ) {
+    if (_currentPlaylistTracks.isEmpty) return;
+
+    // Create maps for quick lookup
+    final trackMapById =
+        <String, PlaylistTrack>{}; // playlist track id -> track
+    final trackMapByTrackId = <String, PlaylistTrack>{}; // trackId -> track
+
+    for (final track in _currentPlaylistTracks) {
+      trackMapById[track.id] = track;
+      trackMapByTrackId[track.trackId] = track;
+    }
+
+    // Reorder tracks according to new order (using playlist track IDs)
+    final reorderedTracks = <PlaylistTrack>[];
+    int position = 1;
+
+    for (final playlistTrackId in newOrder) {
+      var track = trackMapById[playlistTrackId];
+
+      if (track != null) {
+        // Update the track with new position and vote score
+        final score = trackScores?[track.trackId] as num?;
+        track = PlaylistTrack(
+          id: track.id,
+          playlistId: track.playlistId,
+          trackId: track.trackId,
+          position: position,
+          votes: score?.toInt() ?? track.votes,
+          trackTitle: track.trackTitle,
+          trackArtist: track.trackArtist,
+          trackAlbum: track.trackAlbum,
+          coverUrl: track.coverUrl,
+          previewUrl: track.previewUrl,
+          duration: track.duration,
+          createdAt: track.createdAt,
+          updatedAt: track.updatedAt,
+        );
+        reorderedTracks.add(track);
+        position++;
+      }
+    }
+
+    // Add any tracks that weren't in the new order (shouldn't happen, but defensive)
+    for (final track in _currentPlaylistTracks) {
+      final alreadyAdded = reorderedTracks.any((t) => t.id == track.id);
+      if (!alreadyAdded) {
+        reorderedTracks.add(
+          PlaylistTrack(
+            id: track.id,
+            playlistId: track.playlistId,
+            trackId: track.trackId,
+            position: position,
+            votes: track.votes,
+            trackTitle: track.trackTitle,
+            trackArtist: track.trackArtist,
+            trackAlbum: track.trackAlbum,
+            coverUrl: track.coverUrl,
+            previewUrl: track.previewUrl,
+            duration: track.duration,
+            createdAt: track.createdAt,
+            updatedAt: track.updatedAt,
+          ),
+        );
+        position++;
+      }
+    }
+
+    _currentPlaylistTracks = reorderedTracks;
+    notifyListeners();
+    debugPrint(
+      '✅ Reordered ${_currentPlaylistTracks.length} tracks by votes in-place',
+    );
+  }
+
+  @override
+  void dispose() {
+    // Remove WebSocket listeners
+    if (webSocketService != null) {
+      webSocketService!.off('event-created');
+      webSocketService!.off('event-deleted');
+      webSocketService!.off('event-updated');
+      webSocketService!.off('track-added');
+      webSocketService!.off('track-removed');
+      webSocketService!.off('tracks-reordered');
+      webSocketService!.off('queue-reordered');
+    }
+    super.dispose();
   }
 }

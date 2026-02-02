@@ -67,14 +67,14 @@ export class EventService {
     private readonly eventParticipantRepository: Repository<EventParticipant>,
     @InjectRepository(Vote)
     private readonly voteRepository: Repository<Vote>,
-    @InjectRepository(PlaylistTrack)
-    private readonly playlistTrackRepository: Repository<PlaylistTrack>,
     @InjectRepository(Track)
     private readonly trackRepository: Repository<Track>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Invitation)
     private readonly invitationRepository: Repository<Invitation>,
+    @InjectRepository(PlaylistTrack)
+    private readonly playlistTrackRepository: Repository<PlaylistTrack>,
     private readonly eventParticipantService: EventParticipantService,
     private readonly emailService: EmailService,
     private readonly eventGateway: EventGateway,
@@ -324,7 +324,7 @@ export class EventService {
   async findById(id: string, userId?: string): Promise<EventWithStats> {
     const event = await this.eventRepository.findOne({
       where: { id },
-      relations: ['participants', 'participants.user', 'votes', 'votes.user', 'votes.track'],
+      relations: ['creator', 'participants', 'participants.user', 'votes', 'votes.user', 'votes.track', 'tracks', 'tracks.track'],
     });
 
     if (!event) {
@@ -335,6 +335,24 @@ export class EventService {
     await this.checkEventAccess(event, userId);
 
     return this.addEventStats(event, userId);
+  }
+
+  /**
+   * Retrieve event without performing access checks.
+   * Used by notification code that must inspect visibility/participants
+   * before broadcasting socket events.
+   */
+  async findByIdNoAccess(id: string): Promise<Event> {
+    const event = await this.eventRepository.findOne({
+      where: { id },
+      relations: ['creator', 'participants', 'participants.user'],
+    });
+
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+
+    return event;
   }
 
   async update(id: string, updateEventDto: UpdateEventDto, userId: string): Promise<Event> {
@@ -605,6 +623,11 @@ export class EventService {
 
     const event = await this.findById(eventId, userId);
 
+    // Only events (not playlists) support voting
+    if (event.type === EventType.PLAYLIST) {
+      throw new BadRequestException('Voting is only available for events, not playlists');
+    }
+
     // Check if user can vote
     await this.checkVotingPermissions(event, userId);
 
@@ -617,41 +640,113 @@ export class EventService {
       throw new NotFoundException('Track not found');
     }
 
+    // Verify track is in the event (now tracks are directly on Event)
+    const playlistTrack = event.tracks?.find(pt => pt.trackId === voteDto.trackId);
+    if (!playlistTrack) {
+      throw new BadRequestException('Track is not in the event playlist');
+    }
+
+    // Don't allow voting on the currently playing track (first track)
+    if (event.currentTrackId === voteDto.trackId) {
+      throw new BadRequestException('Cannot vote on the currently playing track');
+    }
+
     // Check if user already voted for this track
     const existingVote = await this.voteRepository.findOne({
       where: { eventId, userId, trackId: voteDto.trackId },
     });
 
+    let vote: Vote;
+    let isNewVote = true;
+
     if (existingVote) {
-      throw new ConflictException('User has already voted for this track');
+      // If same vote type, remove the vote (toggle off)
+      if (existingVote.type === voteDto.type) {
+        await this.voteRepository.remove(existingVote);
+        
+        // Reorder queue after vote removal
+        await this.reorderQueueByVotes(eventId);
+        
+        // Calculate and notify updated vote counts for this track
+        const trackVotes = await this.voteRepository.find({
+          where: { eventId, trackId: voteDto.trackId },
+        });
+        
+        const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+        const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+        const score = upvotes - downvotes;
+        
+        // Notify about track vote change for immediate UI update
+        this.eventGateway.notifyTrackVotesChanged(eventId, voteDto.trackId, upvotes, downvotes, score);
+        
+        this.eventGateway.notifyVoteRemoved(eventId, existingVote);
+        return;
+      }
+      
+      // Different vote type - update the vote
+      existingVote.type = voteDto.type || VoteType.UPVOTE;
+      vote = await this.voteRepository.save(existingVote);
+      isNewVote = false;
+    } else {
+      // Create new vote
+      vote = this.voteRepository.create({
+        eventId,
+        userId,
+        trackId: voteDto.trackId,
+        playlistTrackId: playlistTrack.id,
+        type: voteDto.type || VoteType.UPVOTE,
+        weight: voteDto.weight || 1,
+      });
+      
+      try {
+        await this.voteRepository.save(vote);
+      } catch (error) {
+        // Handle race condition where vote was created between check and insert
+        // (e.g., WebSocket and HTTP API called simultaneously)
+        if (error.code === 'ER_DUP_ENTRY') {
+          // Retry finding the existing vote
+          const retryVote = await this.voteRepository.findOne({
+            where: { eventId, userId, trackId: voteDto.trackId },
+          });
+          
+          if (retryVote) {
+            // Vote exists, update it instead
+            if (retryVote.type === voteDto.type) {
+              // Same type, just return (idempotent)
+              return;
+            } else {
+              // Different type, update it
+              retryVote.type = voteDto.type || VoteType.UPVOTE;
+              vote = await this.voteRepository.save(retryVote);
+              isNewVote = false;
+            }
+          } else {
+            // Unexpected state, re-throw
+            throw error;
+          }
+        } else {
+          // Not a duplicate error, re-throw
+          throw error;
+        }
+      }
     }
 
-    // Verify track is in the event (now tracks are directly on Event)
-    const playlistTrackId = event.tracks?.find(pt => pt.trackId === voteDto.trackId)?.id;
-    if (!playlistTrackId) {
-      throw new BadRequestException('Track is not in the event playlist');
-    }
+    // Reorder queue based on votes
+    await this.reorderQueueByVotes(eventId);
 
-
-    // Create vote
-    const vote = this.voteRepository.create({
-      eventId,
-      userId,
-      trackId: voteDto.trackId,
-      playlistTrackId,
-      type: voteDto.type || VoteType.UPVOTE,
-      weight: voteDto.weight || 1,
+    // Calculate and notify updated vote counts for this track
+    const trackVotes = await this.voteRepository.find({
+      where: { eventId, trackId: voteDto.trackId },
     });
+    
+    const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const score = upvotes - downvotes;
+    
+    // Notify about track vote change for immediate UI update
+    this.eventGateway.notifyTrackVotesChanged(eventId, voteDto.trackId, upvotes, downvotes, score);
 
-    await this.voteRepository.save(vote);
-
-    /* // Get updated voting results
-    const results = await this.getVotingResults(eventId, userId);
-
-    // Reorder playlist tracks based on votes
-    await this.reorderPlaylistByVotes(eventId); */
-
-    // Notify participants
+    // Notify participants about the vote
     this.eventGateway.notifyVoteUpdated(eventId, vote/* , results */);
 
     return;
@@ -675,11 +770,8 @@ export class EventService {
       trackId,
     });
 
-    // Get updated voting results after removal
-    // const results = await this.getVotingResults(eventId);
-
-    // Reorder playlist tracks based on updated votes
-    // await this.reorderPlaylistByVotes(eventId);
+    // Reorder queue after votes removed
+    await this.reorderQueueByVotes(eventId);
 
     // Notify all participants about each removed vote (users regain their vote capacity)
     for (const vote of votesToRemove) {
@@ -695,16 +787,27 @@ export class EventService {
     });
 
     if (!vote) {
-      throw new NotFoundException('Vote not found');
+      // Vote already removed or doesn't exist - this is idempotent, so just return
+      console.warn(`Vote not found for removal: eventId=${eventId}, userId=${userId}, trackId=${trackId}`);
+      return;
     }
 
     await this.voteRepository.remove(vote);
 
-    // Get updated voting results
-    // const results = await this.getVotingResults(eventId);
+    // Reorder queue after vote removed
+    await this.reorderQueueByVotes(eventId);
 
-    // Reorder playlist tracks based on votes
-    // await this.reorderPlaylistByVotes(eventId);
+    // Calculate and notify updated vote counts for this track
+    const trackVotes = await this.voteRepository.find({
+      where: { eventId, trackId },
+    });
+    
+    const upvotes = trackVotes.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const downvotes = trackVotes.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+    const score = upvotes - downvotes;
+    
+    // Notify about track vote change for immediate UI update
+    this.eventGateway.notifyTrackVotesChanged(eventId, trackId, upvotes, downvotes, score);
 
     // Notify participants (without user-specific vote data)
     this.eventGateway.notifyVoteRemoved(eventId, vote);
@@ -713,6 +816,84 @@ export class EventService {
   }
 
   /**
+   * Reorders the queue tracks based on their vote counts (upvotes - downvotes)
+   * Tracks with higher net votes move up in the queue
+   * The currently playing track (position 1) is excluded from reordering
+  */
+  async reorderQueueByVotes(eventId: string): Promise<void> {
+    try {
+      const event = await this.eventRepository.findOne({
+        where: { id: eventId },
+        relations: ['tracks', 'tracks.track'],
+      });
+
+      if (!event?.tracks || event.tracks.length <= 1) {
+        return;
+      }
+
+      // Get all votes for this event
+      const votes = await this.voteRepository.find({
+        where: { eventId },
+      });
+
+      // Calculate net votes for each track (upvotes - downvotes)
+      const trackScores = new Map<string, number>();
+      for (const vote of votes) {
+        const currentScore = trackScores.get(vote.trackId) || 0;
+        const voteValue = vote.type === VoteType.UPVOTE ? vote.weight : -vote.weight;
+        trackScores.set(vote.trackId, currentScore + voteValue);
+      }
+
+      // Sort tracks: keep first track (currently playing) at position 1
+      // Then sort remaining tracks by vote score (descending)
+      const sortedTracks = [...event.tracks].sort((a, b) => a.position - b.position);
+      const currentTrack = sortedTracks[0]; // Keep first track in place
+      const remainingTracks = sortedTracks.slice(1);
+
+      // Sort remaining tracks by vote score (higher score = earlier position)
+      remainingTracks.sort((a, b) => {
+        const scoreA = trackScores.get(a.trackId) || 0;
+        const scoreB = trackScores.get(b.trackId) || 0;
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA; // Higher score first
+        }
+        // If scores are equal, maintain original order
+        return a.position - b.position;
+      });
+
+      // Update positions
+      const tracksToUpdate: PlaylistTrack[] = [];
+
+      // Keep current track at position 1
+      if (currentTrack.position !== 1) {
+        currentTrack.position = 1;
+        tracksToUpdate.push(currentTrack);
+      }
+
+      // Update remaining tracks starting from position 2
+      let position = 2;
+      for (const track of remainingTracks) {
+        if (track.position !== position) {
+          track.position = position;
+          tracksToUpdate.push(track);
+        }
+        position++;
+      }
+
+      if (tracksToUpdate.length > 0) {
+        await this.playlistTrackRepository.save(tracksToUpdate);
+
+        // Notify participants about queue reorder
+        const newOrder = [currentTrack, ...remainingTracks].map(t => t.id);
+        this.eventGateway.notifyQueueReordered(eventId, newOrder, trackScores);
+      }
+    } catch (error) {
+      console.error('Failed to reorder queue by votes:', error);
+    }
+  }
+
+  /**
+   * @deprecated Use reorderQueueByVotes instead
    * Reorders the playlist tracks based on their vote counts
    * Tracks with higher vote counts move up in the playlist
   */
@@ -803,16 +984,27 @@ export class EventService {
     return results;
   } */
 
-  async getVotingResults(eventId: string, userId?: string)/* : Promise<TrackVoteSnapshot[]>  */{
-    const votes = await this.voteRepository
-      .createQueryBuilder('vote')
-      .leftJoinAndSelect('vote.track', 'track')
-      .where('vote.eventId = :eventId', { eventId })
-      .getMany();
+  /**
+   * Get comprehensive voting results for an event
+   * Returns all tracks with their vote counts and user's vote if applicable
+   */
+  async getVotingResults(eventId: string, userId?: string): Promise<any> {
+    // Get event with tracks
+    const event = await this.eventRepository.findOne({
+      where: { id: eventId },
+      relations: ['tracks', 'tracks.track'],
+    });
 
-      return votes;
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
 
-    // Grouper par track
+    // Get all votes for this event
+    const votes = await this.voteRepository.find({
+      where: { eventId },
+    });
+
+    // Group votes by track
     const trackVotes = new Map<string, Vote[]>();
     votes.forEach(vote => {
       if (!trackVotes.has(vote.trackId)) {
@@ -821,25 +1013,43 @@ export class EventService {
       trackVotes.get(vote.trackId)!.push(vote);
     });
 
-    // Créer les snapshots
-    const tracks: TrackVoteSnapshot[] = [];
-    for (const [trackId, voteList] of trackVotes) {
-      const upvotes = voteList.filter(v => v.type === VoteType.UPVOTE).length;
-      const downvotes = voteList.filter(v => v.type === VoteType.DOWNVOTE).length;
+    // Build results for all tracks
+    const results: any[] = [];
+    const sortedTracks = event.tracks?.sort((a, b) => a.position - b.position) || [];
+
+    for (const playlistTrack of sortedTracks) {
+      const trackId = playlistTrack.trackId;
+      const voteList = trackVotes.get(trackId) || [];
       
-      tracks.push({
+      const upvotes = voteList.filter(v => v.type === VoteType.UPVOTE).reduce((sum, v) => sum + v.weight, 0);
+      const downvotes = voteList.filter(v => v.type === VoteType.DOWNVOTE).reduce((sum, v) => sum + v.weight, 0);
+      const score = upvotes - downvotes;
+
+      // Find user's vote if userId provided
+      const userVote = userId ? voteList.find(v => v.userId === userId) : null;
+
+      results.push({
+        playlistTrackId: playlistTrack.id,
         trackId,
+        track: playlistTrack.track,
+        position: playlistTrack.position,
         upvotes,
         downvotes,
-        position: 0 // Sera mis à jour après tri
+        score,
+        isCurrentTrack: event.currentTrackId === trackId,
+        userVote: userVote ? {
+          type: userVote.type,
+          weight: userVote.weight,
+        } : null,
       });
     }
 
-    // Trier et mettre à jour positions
-    tracks.sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes));
-    tracks.forEach((track, index) => track.position = index + 1);
-
-    return tracks;
+    return {
+      eventId,
+      currentTrackId: event.currentTrackId,
+      tracks: results,
+      totalVotes: votes.length,
+    };
   }
 
   // Location-based features
@@ -1527,8 +1737,7 @@ export class EventService {
     }
 
     // Find and remove the track
-    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
-    const playlistTrack = await playlistTrackRepository.findOne({
+    const playlistTrack = await this.playlistTrackRepository.findOne({
       where: { eventId, trackId },
     });
 
@@ -1539,14 +1748,17 @@ export class EventService {
     // Store position before removal
     const removedPosition = playlistTrack.position;
 
+    // Get track duration for updating totalDuration
+    const trackEntity = await this.trackRepository.findOne({ where: { id: trackId } });
+
     // Remove votes for this track
     await this.removeVotesOfTrack(eventId, trackId);
 
     // Delete the track
-    await playlistTrackRepository.remove(playlistTrack);
+    await this.playlistTrackRepository.remove(playlistTrack);
 
     // Recompute positions for tracks after the removed one
-    const tracksToUpdate = await playlistTrackRepository.find({
+    const tracksToUpdate = await this.playlistTrackRepository.find({
       where: { eventId },
       order: { position: 'ASC' },
     });
@@ -1557,11 +1769,13 @@ export class EventService {
         track.position = track.position - 1;
       }
     }
-    await playlistTrackRepository.save(tracksToUpdate);
+    await this.playlistTrackRepository.save(tracksToUpdate);
 
-    // Update track count
-    event.trackCount = Math.max(0, (event.trackCount || 0) - 1);
-    await this.eventRepository.save(event);
+    // Update track count and total duration using atomic decrements
+    await this.eventRepository.decrement({ id: eventId }, 'trackCount', 1);
+    if (trackEntity && trackEntity.duration && trackEntity.duration > 0) {
+      await this.eventRepository.decrement({ id: eventId }, 'totalDuration', trackEntity.duration);
+    }
 
     // Notify participants
     this.eventGateway.notifyTrackRemoved(eventId, trackId, userId);
@@ -1597,11 +1811,10 @@ export class EventService {
     }
 
     // Get current track count to set position
-    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
-    const count = await playlistTrackRepository.count({ where: { eventId } });
+    const count = await this.playlistTrackRepository.count({ where: { eventId } });
 
     // Create playlist track
-    const playlistTrack = playlistTrackRepository.create({
+    const playlistTrack = this.playlistTrackRepository.create({
       eventId,
       trackId: track.id,
       position: dto.position || count + 1,
@@ -1609,31 +1822,39 @@ export class EventService {
       addedAt: new Date(),
     });
 
-    const saved = await playlistTrackRepository.save(playlistTrack);
+    const saved = await this.playlistTrackRepository.save(playlistTrack);
 
-    // Update event track count and duration
-    event.trackCount = (event.trackCount || 0) + 1;
-    event.totalDuration = (event.totalDuration || 0) + (track.duration || 0);
-    await this.eventRepository.save(event);
+    // Fetch saved playlist track with relations so we can emit full details
+    const savedWithDetails = await this.playlistTrackRepository.findOne({
+      where: { id: saved.id },
+      relations: ['track', 'addedBy'],
+    });
 
-    // Notify participants
-    this.eventGateway.notifyTrackAdded(eventId, saved, userId);
+    // Update event track count and duration using atomic increments
+    await this.eventRepository.increment({ id: eventId }, 'trackCount', 1);
+    if (track.duration && track.duration > 0) {
+      await this.eventRepository.increment({ id: eventId }, 'totalDuration', track.duration);
+    }
 
-    // Return formatted response matching Flutter model expectations
+    // Notify participants with the full playlistTrack details
+    this.eventGateway.notifyTrackAdded(eventId, savedWithDetails || saved, userId);
+
+    // Return formatted response matching Flutter model expectations (use details when available)
+    const respSource = savedWithDetails || saved;
     return {
-      id: saved.id,
-      eventId: saved.eventId,
-      trackId: saved.trackId,
-      position: saved.position,
+      id: respSource.id,
+      eventId: respSource.eventId,
+      trackId: respSource.trackId,
+      position: respSource.position,
       votes: 0,
-      trackTitle: track.title,
-      trackArtist: track.artist,
-      trackAlbum: track.album,
-      coverUrl: track.albumCoverUrl,
-      previewUrl: track.previewUrl,
-      duration: track.duration,
-      createdAt: saved.createdAt,
-      updatedAt: saved.addedAt || saved.createdAt,
+      trackTitle: respSource.track?.title || track.title,
+      trackArtist: respSource.track?.artist || track.artist,
+      trackAlbum: respSource.track?.album || track.album,
+      coverUrl: respSource.track?.albumCoverUrl || track.albumCoverUrl,
+      previewUrl: respSource.track?.previewUrl || track.previewUrl,
+      duration: respSource.track?.duration || track.duration,
+      createdAt: respSource.createdAt,
+      updatedAt: respSource.addedAt || respSource.createdAt,
     };
   }
 
@@ -1651,8 +1872,7 @@ export class EventService {
       throw new ForbiddenException('Only the creator or admins can reorder tracks');
     }
 
-    const playlistTrackRepository = this.eventRepository.manager.getRepository('PlaylistTrack');
-    const existingTracks = await playlistTrackRepository.find({ where: { eventId: playlistId } });
+    const existingTracks = await this.playlistTrackRepository.find({ where: { eventId: playlistId } });
 
     if (!existingTracks || existingTracks.length === 0) {
       throw new NotFoundException('No tracks found for this playlist');
@@ -1677,7 +1897,7 @@ export class EventService {
       toSave.push(pt);
     }
 
-    await playlistTrackRepository.save(toSave);
+    await this.playlistTrackRepository.save(toSave);
 
     // Notify participants via gateway
     this.eventGateway.notifyTracksReordered(playlistId, trackIds, userId);

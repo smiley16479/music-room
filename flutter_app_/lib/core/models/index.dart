@@ -6,3 +6,4 @@ export 'invitation.dart';
 export 'event.dart';
 export 'device.dart';
 export 'event_participant.dart';
+export 'vote.dart';
