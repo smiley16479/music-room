@@ -12,7 +12,7 @@ class VotingProvider extends ChangeNotifier {
   String? _currentEventId;
 
   // Voting results cache
-  Map<String, TrackVoteInfo> _trackVotes = {};
+  final Map<String, TrackVoteInfo> _trackVotes = {};
 
   // Loading and error state
   bool _isLoading = false;

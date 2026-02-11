@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/audio_player_provider.dart';
+import '../../../core/providers/event_provider.dart';
+import '../../../core/providers/auth_provider.dart';
+import '../../../core/models/event.dart';
 
 /// Mini Player Widget - displays at the bottom of the screen when music is playing
 class MiniPlayerWidget extends StatelessWidget {
@@ -9,8 +12,8 @@ class MiniPlayerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AudioPlayerProvider>(
-      builder: (context, audioProvider, _) {
+    return Consumer3<AudioPlayerProvider, EventProvider?, AuthProvider?>(
+      builder: (context, audioProvider, eventProvider, authProvider, _) {
         // Only show if there's a current track
         if (!audioProvider.hasCurrentTrack) {
           return const SizedBox.shrink();
@@ -19,6 +22,15 @@ class MiniPlayerWidget extends StatelessWidget {
         final track = audioProvider.currentTrack!;
         final isPlaying = audioProvider.isPlaying;
         final isLoading = audioProvider.isLoading;
+        
+        // Check if the current playlist is an event and if user is admin/owner
+        final currentPlaylist = eventProvider?.currentPlaylist;
+        final currentUser = authProvider?.currentUser;
+        final isEventPlaylist = currentPlaylist?.type == EventType.event;
+        final isOwner = currentUser?.id == currentPlaylist?.creatorId;
+        
+        // Disable play/pause for non-admin users in event playlists
+        final canControlPlayback = !isEventPlaylist || isOwner;
 
         return Container(
           decoration: BoxDecoration(
@@ -108,25 +120,26 @@ class MiniPlayerWidget extends StatelessWidget {
                     // Volume control
                     _VolumeControl(audioProvider: audioProvider),
                     const SizedBox(width: 8),
-                    // Play/Pause button
-                    IconButton(
-                      icon: isLoading
-                          ? SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Theme.of(context).colorScheme.primary,
+                    // Play/Pause button (hidden for non-admin users in event playlists)
+                    if (canControlPlayback)
+                      IconButton(
+                        icon: isLoading
+                            ? SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              )
+                            : Icon(
+                                isPlaying ? Icons.pause : Icons.play_arrow,
+                                size: 32,
                               ),
-                            )
-                          : Icon(
-                              isPlaying ? Icons.pause : Icons.play_arrow,
-                              size: 32,
-                            ),
-                      onPressed: isLoading
-                          ? null
-                          : () => audioProvider.togglePlayPause(),
-                    ),
+                        onPressed: isLoading
+                            ? null
+                            : () => audioProvider.togglePlayPause(),
+                      ),
                     // Close button
                     IconButton(
                       icon: const Icon(Icons.close, size: 20),
@@ -199,13 +212,22 @@ class ExpandedPlayerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AudioPlayerProvider>(
-      builder: (context, audioProvider, _) {
+    return Consumer3<AudioPlayerProvider, EventProvider?, AuthProvider?>(
+      builder: (context, audioProvider, eventProvider, authProvider, _) {
         if (!audioProvider.hasCurrentTrack) {
           return const SizedBox.shrink();
         }
 
         final track = audioProvider.currentTrack!;
+        
+        // Check if the current playlist is an event and if user is admin/owner
+        final currentPlaylist = eventProvider?.currentPlaylist;
+        final currentUser = authProvider?.currentUser;
+        final isEventPlaylist = currentPlaylist?.type == EventType.event;
+        final isOwner = currentUser?.id == currentPlaylist?.creatorId;
+        
+        // Disable play/pause for non-admin users in event playlists
+        final canControlPlayback = !isEventPlaylist || isOwner;
 
         return Scaffold(
           appBar: AppBar(
@@ -330,24 +352,26 @@ class ExpandedPlayerWidget extends StatelessWidget {
                       onPressed: () => audioProvider.skipPrevious(),
                     ),
                     const SizedBox(width: 24),
-                    IconButton(
-                      icon: audioProvider.isLoading
-                          ? const SizedBox(
-                              width: 48,
-                              height: 48,
-                              child: CircularProgressIndicator(strokeWidth: 3),
-                            )
-                          : Icon(
-                              audioProvider.isPlaying
-                                  ? Icons.pause_circle_filled
-                                  : Icons.play_circle_filled,
-                            ),
-                      iconSize: 72,
-                      color: Theme.of(context).colorScheme.primary,
-                      onPressed: audioProvider.isLoading
-                          ? null
-                          : () => audioProvider.togglePlayPause(),
-                    ),
+                    // Play/Pause button (hidden for non-admin users in event playlists)
+                    if (canControlPlayback)
+                      IconButton(
+                        icon: audioProvider.isLoading
+                            ? const SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: CircularProgressIndicator(strokeWidth: 3),
+                              )
+                            : Icon(
+                                audioProvider.isPlaying
+                                    ? Icons.pause_circle_filled
+                                    : Icons.play_circle_filled,
+                              ),
+                        iconSize: 72,
+                        color: Theme.of(context).colorScheme.primary,
+                        onPressed: audioProvider.isLoading
+                            ? null
+                            : () => audioProvider.togglePlayPause(),
+                      ),
                     const SizedBox(width: 24),
                     IconButton(
                       icon: const Icon(Icons.skip_next),

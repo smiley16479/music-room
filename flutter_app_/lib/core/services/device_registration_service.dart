@@ -232,7 +232,7 @@ class DeviceRegistrationService {
 
       try {
         final androidInfo = await deviceInfo.androidInfo;
-        return '${androidInfo.model}'; // e.g., "Pixel 6"
+        return androidInfo.model; // e.g., "Pixel 6"
       } catch (_) {}
 
       return 'My Device';

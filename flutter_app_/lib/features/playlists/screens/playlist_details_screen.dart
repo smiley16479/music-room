@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
+import '../../../core/services/index.dart';
+import '../../../core/navigation/route_observer.dart';
 import '../widgets/music_search_dialog.dart';
 import '../widgets/collaborator_dialog.dart';
 import '../widgets/mini_player_scaffold.dart';
@@ -19,8 +21,26 @@ class PlaylistDetailsScreen extends StatefulWidget {
 }
 
 // MARK: - PlaylistDetailsScreen
-class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
+class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
+    with RouteAware {
+  ModalRoute<dynamic>? _modalRoute;
+  WebSocketService? _wsService;
   bool _isEditMode = false;
+  bool _hasJoinedRoom = false;
+  bool _hasLoadedPlaylist = false;
+  // Seek UI state for admin-controlled seeking
+  double _seekValue = 0.0;
+  bool _isSeeking = false;
+  // Current user id – cached so socket handlers can skip own events via controlledBy
+  String? _currentUserId;
+  // Track play/pause state changes from the audio player to emit socket events
+  bool? _lastKnownPlayingState;
+  AudioPlayerProvider? _audioProvider;
+  bool _isListeningToAudio = false;
+  // Flag to suppress socket emit when audio state change came from a socket handler
+  bool _handlingSocketEvent = false;
+  // Timestamp of last emitted event to prevent processing own events
+  DateTime? _lastEmittedEventTime;
 
   // Text Controllers
   late TextEditingController _nameController;
@@ -34,7 +54,15 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
   void initState() {
     super.initState();
     _initControllers();
-    _loadPlaylist();
+
+    // Load playlist and join room after the first frame to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_hasLoadedPlaylist) {
+        _hasLoadedPlaylist = true;
+        _loadPlaylist();
+        _joinEventPlaylistRoom();
+      }
+    });
   }
 
   void _initControllers() {
@@ -44,11 +72,508 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
     _votingInvitedOnly = false;
   }
 
+  /// Listener for AudioPlayerProvider state changes.
+  /// When the admin toggles play/pause (e.g. via mini player), emit socket events.
+  void _onAudioStateChanged() {
+    if (!mounted || _handlingSocketEvent) return;
+
+    final audioProvider = _audioProvider;
+    if (audioProvider == null) return;
+
+    // Check if user is admin/owner of an event playlist
+    try {
+      final eventProvider = context.read<EventProvider>();
+      final authProvider = context.read<AuthProvider>();
+      final playlist = eventProvider.currentPlaylist;
+      if (playlist == null || playlist.type != EventType.event) return;
+      final isOwner = authProvider.currentUser?.id == playlist.creatorId;
+      if (!isOwner) return;
+    } catch (_) {
+      return;
+    }
+
+    final isPlaying = audioProvider.isPlaying;
+    final trackId = audioProvider.currentTrack?.trackId;
+
+    // Only emit when the state actually transitions
+    if (_lastKnownPlayingState != null &&
+        _lastKnownPlayingState != isPlaying &&
+        trackId != null) {
+      final ws = _wsService;
+      if (ws != null) {
+        // Mark that we just emitted an event to prevent processing it when it comes back
+        _lastEmittedEventTime = DateTime.now();
+
+        if (isPlaying) {
+          final position = audioProvider.position.inSeconds.toDouble();
+          ws.playTrack(
+            widget.playlistId,
+            trackId: trackId,
+            startTime: position,
+          );
+          debugPrint(
+            '📤 Admin play emitted via listener (track: $trackId, pos: $position)',
+          );
+        } else {
+          final position = audioProvider.position.inSeconds.toDouble();
+          ws.pauseTrack(widget.playlistId, currentTime: position);
+          debugPrint('📤 Admin pause emitted via listener (pos: $position)');
+        }
+      }
+    }
+    _lastKnownPlayingState = isPlaying;
+  }
+
+  void _joinEventPlaylistRoom() {
+    if (_hasJoinedRoom) return;
+
+    try {
+      final ws = _wsService ?? context.read<WebSocketService>();
+      _wsService ??= ws;
+      ws.joinEventPlaylist(widget.playlistId);
+      _hasJoinedRoom = true;
+
+      // Start listening to audio player state changes for admin sync
+      if (!_isListeningToAudio) {
+        _audioProvider = context.read<AudioPlayerProvider>();
+        _lastKnownPlayingState = _audioProvider!.isPlaying;
+        _audioProvider!.addListener(_onAudioStateChanged);
+        _isListeningToAudio = true;
+      }
+
+      // Cache current user id for filtering own socket events
+      try {
+        _currentUserId ??= context.read<AuthProvider>().currentUser?.id;
+      } catch (_) {}
+
+      // Listen for users joining/leaving the playlist room
+      ws.on('user-joined-playlist', (data) {
+        if (mounted) {
+          debugPrint('🎵 User joined playlist: ${data['displayName']}');
+        }
+      });
+
+      ws.on('user-left-playlist', (data) {
+        if (mounted) {
+          debugPrint('🎵 User left playlist: ${data['displayName']}');
+        }
+      });
+
+      // Playlist event listeners
+      ws.on('track-added', (data) {});
+
+      ws.on('track-removed', (data) {});
+
+      ws.on('vote-updated', (data) {
+        if (mounted) {
+          debugPrint('🗳️ Vote updated: $data');
+          // VotingProvider has its own global listener, just refresh UI
+          if (mounted) setState(() {});
+        }
+      });
+
+      ws.on('queue-reordered', (data) {});
+
+      ws.on('music-play', (data) async {
+        if (!mounted) return;
+
+        // Skip if this event was triggered by the current user's own action
+        final controlledBy = data['controlledBy'];
+        debugPrint(
+          '📥 Received music-play event: controlledBy=$controlledBy, currentUserId=$_currentUserId',
+        );
+
+        // Check 1: Skip if controlledBy matches current user
+        if (_currentUserId != null &&
+            controlledBy != null &&
+            controlledBy == _currentUserId) {
+          debugPrint('▶️ Skipping own music-play event (controlledBy match)');
+          return;
+        }
+
+        // Check 2: Skip if we just emitted an event (within last 500ms)
+        // This catches cases where backend doesn't send controlledBy correctly
+        if (_lastEmittedEventTime != null) {
+          final timeSinceEmit = DateTime.now()
+              .difference(_lastEmittedEventTime!)
+              .inMilliseconds;
+          if (timeSinceEmit < 500) {
+            debugPrint(
+              '▶️ Skipping music-play event - too soon after emit ($timeSinceEmit ms)',
+            );
+            return;
+          }
+        }
+
+        try {
+          final trackId = data['trackId'];
+          final startTime = data['startTime'];
+
+          final audioProvider = context.read<AudioPlayerProvider>();
+          final eventProvider = context.read<EventProvider>();
+
+          _handlingSocketEvent = true;
+
+          // Check if we need to load a different track
+          final needsTrackLoad =
+              trackId != null &&
+              trackId.toString().isNotEmpty &&
+              (audioProvider.currentTrack == null ||
+                  audioProvider.currentTrack!.trackId != trackId);
+
+          debugPrint(
+            '▶️ Processing music-play: trackId=$trackId, startTime=$startTime, needsTrackLoad=$needsTrackLoad',
+          );
+
+          if (needsTrackLoad) {
+            final tracks = eventProvider.currentPlaylistTracks;
+            if (tracks.isNotEmpty) {
+              final index = tracks.indexWhere((t) => t.trackId == trackId);
+              final startIndex = index >= 0 ? index : 0;
+              await audioProvider.playPlaylist(
+                tracks,
+                startIndex: startIndex,
+                autoPlay: false,
+              );
+              // Wait for track to be ready before seeking
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
+          }
+
+          // Always seek to the admin's position before resuming to stay in sync
+          if (startTime != null && audioProvider.currentTrack != null) {
+            final int targetSeconds = (startTime is double)
+                ? startTime.round()
+                : (startTime as num).toInt();
+            final currentSeconds = audioProvider.position.inSeconds;
+            final positionDiff = (targetSeconds - currentSeconds).abs();
+
+            debugPrint(
+              '▶️ Position check: target=$targetSeconds, current=$currentSeconds, diff=$positionDiff',
+            );
+
+            // Seek if positions differ by >= 1 second or if we just loaded a new track
+            if (needsTrackLoad || positionDiff >= 1) {
+              debugPrint('▶️ Seeking to $targetSeconds seconds');
+              await audioProvider.seek(Duration(seconds: targetSeconds));
+              if (mounted) {
+                setState(() {
+                  _seekValue = targetSeconds.toDouble();
+                });
+              }
+              await Future.delayed(const Duration(milliseconds: 100));
+            } else {
+              debugPrint('▶️ Skipping seek - positions are close enough');
+            }
+          }
+
+          // Resume playback to sync with admin
+          if (audioProvider.currentTrack != null && !audioProvider.isPlaying) {
+            debugPrint('▶️ Resuming playback');
+            await audioProvider.resume();
+          }
+
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = audioProvider.isPlaying;
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling music-play: $e');
+        }
+      });
+
+      ws.on('music-pause', (data) async {
+        if (!mounted) return;
+
+        // Skip if this event was triggered by the current user's own action
+        final controlledBy = data['controlledBy'];
+        debugPrint(
+          '📥 Received music-pause event: controlledBy=$controlledBy, currentUserId=$_currentUserId',
+        );
+
+        // Check 1: Skip if controlledBy matches current user
+        if (_currentUserId != null &&
+            controlledBy != null &&
+            controlledBy == _currentUserId) {
+          debugPrint('⏸️ Skipping own music-pause event (controlledBy match)');
+          return;
+        }
+
+        // Check 2: Skip if we just emitted an event (within last 500ms)
+        if (_lastEmittedEventTime != null) {
+          final timeSinceEmit = DateTime.now()
+              .difference(_lastEmittedEventTime!)
+              .inMilliseconds;
+          if (timeSinceEmit < 500) {
+            debugPrint(
+              '⏸️ Skipping music-pause event - too soon after emit ($timeSinceEmit ms)',
+            );
+            return;
+          }
+        }
+
+        try {
+          final trackId = data['trackId'];
+          final currentTime = data['currentTime'];
+
+          final audioProvider = context.read<AudioPlayerProvider>();
+          final eventProvider = context.read<EventProvider>();
+
+          _handlingSocketEvent = true;
+
+          // Check if we need to load a different track
+          final needsTrackLoad =
+              trackId != null &&
+              trackId.toString().isNotEmpty &&
+              (audioProvider.currentTrack == null ||
+                  audioProvider.currentTrack!.trackId != trackId);
+
+          debugPrint(
+            '⏸️ Processing music-pause: trackId=$trackId, currentTime=$currentTime, needsTrackLoad=$needsTrackLoad',
+          );
+
+          if (needsTrackLoad) {
+            final tracks = eventProvider.currentPlaylistTracks;
+            if (tracks.isNotEmpty) {
+              final index = tracks.indexWhere((t) => t.trackId == trackId);
+              final startIndex = index >= 0 ? index : 0;
+              await audioProvider.playPlaylist(
+                tracks,
+                startIndex: startIndex,
+                autoPlay: false,
+              );
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
+          }
+
+          // Seek to the admin's paused position to stay in sync
+          if (currentTime != null && audioProvider.currentTrack != null) {
+            final int targetSeconds = (currentTime is double)
+                ? currentTime.round()
+                : (currentTime as num).toInt();
+            final currentSeconds = audioProvider.position.inSeconds;
+            final positionDiff = (targetSeconds - currentSeconds).abs();
+
+            debugPrint(
+              '⏸️ Position check: target=$targetSeconds, current=$currentSeconds, diff=$positionDiff',
+            );
+
+            // Seek if positions differ by >= 1 second or if we just loaded a new track
+            if (needsTrackLoad || positionDiff >= 1) {
+              debugPrint('⏸️ Seeking to $targetSeconds seconds');
+              await audioProvider.seek(Duration(seconds: targetSeconds));
+              if (mounted) {
+                setState(() {
+                  _seekValue = targetSeconds.toDouble();
+                });
+              }
+              await Future.delayed(const Duration(milliseconds: 100));
+            } else {
+              debugPrint('⏸️ Skipping seek - positions are close enough');
+            }
+          }
+
+          // Pause playback to sync with admin
+          if (audioProvider.currentTrack != null && audioProvider.isPlaying) {
+            debugPrint('⏸️ Pausing playback');
+            await audioProvider.pause();
+          }
+
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = audioProvider.isPlaying;
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling music-pause: $e');
+        }
+      });
+
+      // Listen for admin seek events and update local player position
+      ws.on('music-seek', (data) async {
+        if (!mounted) return;
+
+        // Skip if this event was triggered by the current user's own action
+        final controlledBy = data['controlledBy'];
+        if (_currentUserId != null && controlledBy == _currentUserId) {
+          debugPrint('⏩ Skipping own music-seek event');
+          return;
+        }
+
+        try {
+          final seekTime = data['seekTime'];
+          final trackId = data['trackId'];
+          final isPlaying = data['isPlaying'] == true;
+
+          final audioProvider = context.read<AudioPlayerProvider>();
+          final eventProvider = context.read<EventProvider>();
+
+          _handlingSocketEvent = true;
+
+          // Check if we need to load a track (no track loaded or different track)
+          final needsTrackLoad =
+              trackId != null &&
+              trackId.isNotEmpty &&
+              (audioProvider.currentTrack == null ||
+                  audioProvider.currentTrack!.trackId != trackId);
+
+          if (needsTrackLoad) {
+            // Load the specified track
+            final tracks = eventProvider.currentPlaylistTracks;
+            if (tracks.isNotEmpty) {
+              final index = tracks.indexWhere((t) => t.trackId == trackId);
+              final startIndex = index >= 0 ? index : 0;
+
+              // Load the track, seek to position, then set play state
+              await audioProvider.playPlaylist(
+                tracks,
+                startIndex: startIndex,
+                autoPlay: false,
+              );
+
+              // Wait for track to be ready before seeking
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
+          }
+
+          // Seek to the admin's position
+          if (seekTime != null && audioProvider.currentTrack != null) {
+            final int seconds = (seekTime is double)
+                ? seekTime.round()
+                : (seekTime as num).toInt();
+
+            await audioProvider.seek(Duration(seconds: seconds));
+            setState(() {
+              _seekValue = seconds.toDouble();
+            });
+
+            // Give seek operation time to complete
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+
+          // Sync play/pause state with admin
+          if (audioProvider.currentTrack != null) {
+            if (isPlaying && !audioProvider.isPlaying) {
+              // Admin is playing - resume playback
+              await audioProvider.resume();
+            } else if (!isPlaying && audioProvider.isPlaying) {
+              // Admin is paused - pause playback
+              await audioProvider.pause();
+            }
+          }
+
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = audioProvider.isPlaying;
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling music-seek: $e');
+        }
+      });
+
+      ws.on('track-skipped', (data) {});
+    } catch (e) {
+      debugPrint('Error joining event playlist room: $e');
+    }
+  }
+
+  void _leaveEventPlaylistRoom() {
+    try {
+      // Stop listening to audio player state changes
+      if (_isListeningToAudio && _audioProvider != null) {
+        _audioProvider!.removeListener(_onAudioStateChanged);
+        _isListeningToAudio = false;
+      }
+
+      final ws = _wsService ?? context.read<WebSocketService>();
+      ws.leaveEventPlaylist(widget.playlistId);
+
+      // Clean up listeners
+      ws.off('user-joined-playlist');
+      ws.off('user-left-playlist');
+      ws.off('track-added');
+      ws.off('track-removed');
+      ws.off('vote-updated');
+      ws.off('queue-reordered');
+      ws.off('music-play');
+      ws.off('music-pause');
+      ws.off('music-seek');
+      ws.off('track-skipped');
+      _hasJoinedRoom = false;
+    } catch (e) {
+      debugPrint('Error leaving event playlist room: $e');
+    }
+  }
+
   @override
   void dispose() {
+    // Stop listening to audio player state changes
+    if (_isListeningToAudio && _audioProvider != null) {
+      _audioProvider!.removeListener(_onAudioStateChanged);
+      _isListeningToAudio = false;
+    }
+
+    // Safely leave room using cached websocket service (avoid context in dispose)
+    try {
+      if (_wsService != null) {
+        _wsService!.leaveEventPlaylist(widget.playlistId);
+        _wsService!.off('user-joined-playlist');
+        _wsService!.off('user-left-playlist');
+        _wsService!.off('track-added');
+        _wsService!.off('track-removed');
+        _wsService!.off('vote-updated');
+        _wsService!.off('queue-reordered');
+        _wsService!.off('music-play');
+        _wsService!.off('music-pause');
+        _wsService!.off('music-seek');
+        _wsService!.off('track-skipped');
+        _hasJoinedRoom = false;
+      }
+    } catch (e) {
+      debugPrint('Error leaving event playlist room from dispose: $e');
+    }
+
+    // Unsubscribe from route observer using stored reference (safe in dispose)
+    try {
+      if (_modalRoute != null) {
+        routeObserver.unsubscribe(this);
+      }
+    } catch (_) {}
     _nameController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route changes so we can leave the socket room when the
+    // screen is no longer visible (covered or popped)
+    _modalRoute = ModalRoute.of(context);
+    if (_modalRoute != null) {
+      routeObserver.subscribe(this, _modalRoute!);
+    }
+    // Cache websocket service to avoid using context in dispose
+    try {
+      _wsService ??= context.read<WebSocketService>();
+    } catch (_) {}
+  }
+
+  @override
+  void didPush() {
+    // Screen was just pushed — ensure we're joined
+    _joinEventPlaylistRoom();
+  }
+
+  @override
+  void didPopNext() {
+    // Returned to this screen — re-join room if needed
+    _joinEventPlaylistRoom();
+  }
+
+  @override
+  void didPushNext() {
+    // Another route was pushed on top (e.g., dialog or another screen)
+    // We don't leave the room here because:
+    // 1. Dialogs should keep the user in the room
+    // 2. If it's a real navigation, dispose() will handle cleanup
+    debugPrint('🎵 Route pushed on top, staying in playlist room');
   }
 
   Future<void> _loadPlaylist() async {
@@ -306,6 +831,124 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                         ),
+                      const SizedBox(height: 12),
+
+                      // Seek bar for admins (only for events)
+                      Consumer2<AuthProvider, AudioPlayerProvider>(
+                        builder: (context, authProvider, audioProvider, _) {
+                          final currentUser = authProvider.currentUser;
+                          final isOwner = currentUser?.id == playlist.creatorId;
+                          if (playlist.type != EventType.event) {
+                            return const SizedBox.shrink();
+                          }
+                          // Only show seek control to admins/owners
+                          if (!isOwner) return const SizedBox.shrink();
+
+                          final durationSeconds =
+                              audioProvider.duration.inSeconds > 0
+                              ? audioProvider.duration.inSeconds.toDouble()
+                              : 1.0;
+                          final positionSeconds = audioProvider
+                              .position
+                              .inSeconds
+                              .toDouble();
+
+                          final displayedValue = _isSeeking
+                              ? _seekValue
+                              : positionSeconds.clamp(0.0, durationSeconds);
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Slider(
+                                value: displayedValue.clamp(
+                                  0.0,
+                                  durationSeconds,
+                                ),
+                                min: 0.0,
+                                max: durationSeconds > 0
+                                    ? durationSeconds
+                                    : 1.0,
+                                activeColor: Colors.white,
+                                inactiveColor: Colors.white38,
+                                onChangeStart: isOwner
+                                    ? (v) {
+                                        setState(() {
+                                          _isSeeking = true;
+                                          _seekValue = v;
+                                        });
+                                      }
+                                    : null,
+                                onChanged: isOwner
+                                    ? (v) {
+                                        setState(() {
+                                          _seekValue = v;
+                                        });
+                                      }
+                                    : null,
+                                onChangeEnd: isOwner
+                                    ? (v) async {
+                                        setState(() {
+                                          _isSeeking = false;
+                                          _seekValue = v;
+                                        });
+
+                                        try {
+                                          // Seek locally first
+                                          await audioProvider.seek(
+                                            Duration(seconds: v.toInt()),
+                                          );
+                                        } catch (_) {}
+
+                                        try {
+                                          final ws =
+                                              _wsService ??
+                                              context.read<WebSocketService>();
+                                          final currentTrackId = audioProvider
+                                              .currentTrack
+                                              ?.trackId;
+                                          final isPlaying =
+                                              audioProvider.isPlaying;
+                                          ws.seekTrack(
+                                            widget.playlistId,
+                                            v,
+                                            currentTrackId,
+                                            isPlaying,
+                                          );
+                                        } catch (_) {}
+                                      }
+                                    : null,
+                              ),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    audioProvider.formatDuration(
+                                      Duration(seconds: displayedValue.toInt()),
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  Text(
+                                    audioProvider.formatDuration(
+                                      Duration(
+                                        seconds: durationSeconds.toInt(),
+                                      ),
+                                    ),
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -387,75 +1030,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.grey.shade300),
                     ),
-                    child: ReorderableListView.builder(
-                      buildDefaultDragHandles: false,
+                    child: ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: eventProvider.currentPlaylistTracks.length,
-                      // Add animation for reordering
-                      proxyDecorator: (child, index, animation) {
-                        return AnimatedBuilder(
-                          animation: animation,
-                          builder: (context, child) {
-                            final double elevation = Tween<double>(
-                              begin: 0,
-                              end: 6,
-                            ).evaluate(animation);
-                            final double scale = Tween<double>(
-                              begin: 1.0,
-                              end: 1.02,
-                            ).evaluate(animation);
-                            return Transform.scale(
-                              scale: scale,
-                              child: Material(
-                                elevation: elevation,
-                                borderRadius: BorderRadius.circular(8),
-                                color: Colors.transparent,
-                                child: child,
-                              ),
-                            );
-                          },
-                          child: child,
-                        );
-                      },
-                      onReorder: (oldIndex, newIndex) async {
-                        // Reorder locally first
-                        eventProvider.reorderTrack(oldIndex, newIndex);
-
-                        // Build the new order as a list of playlist-track IDs
-                        final newOrder = eventProvider.currentPlaylistTracks
-                            .map((t) => t.id)
-                            .toList();
-
-                        // Persist the order to backend
-                        final success = await eventProvider.persistReorder(
-                          playlist.id,
-                          newOrder,
-                        );
-
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                success
-                                    ? '✅ Tracks reordered'
-                                    : '❌ Failed to save track order',
-                              ),
-                              backgroundColor: success
-                                  ? Colors.green
-                                  : Colors.red,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-
-                          if (!success) {
-                            // On failure, reload playlist to restore server state
-                            await eventProvider.loadPlaylistDetails(
-                              widget.playlistId,
-                            );
-                          }
-                        }
-                      },
                       itemBuilder: (context, index) {
                         final track =
                             eventProvider.currentPlaylistTracks[index];
@@ -486,9 +1064,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                   final trackContent = AnimatedContainer(
                                     duration: const Duration(milliseconds: 300),
                                     curve: Curves.easeInOut,
-                                    margin: isFirstTrack
-                                        ? const EdgeInsets.only(bottom: 16)
-                                        : EdgeInsets.zero,
                                     decoration: isFirstTrack
                                         ? BoxDecoration(
                                             color: Colors.purple.shade50,
@@ -502,9 +1077,12 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                           )
                                         : null,
                                     child: GestureDetector(
-                                      onTap: () {
-                                        // Play this track and set the playlist
-                                        audioProvider.playPlaylist(
+                                      onTap: () async {
+                                        // Play this track and set the playlist.
+                                        // The _onAudioStateChanged listener will
+                                        // automatically emit the play-track socket
+                                        // event when it detects the state transition.
+                                        await audioProvider.playPlaylist(
                                           eventProvider.currentPlaylistTracks,
                                           startIndex: index,
                                         );
@@ -520,20 +1098,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                         ),
                                         child: Row(
                                           children: [
-                                            // Drag Handle (Owner only) - hidden on mobile and for first track
-                                            if (isOwner &&
-                                                !isMobile &&
-                                                !isFirstTrack)
-                                              Padding(
-                                                padding: const EdgeInsets.only(
-                                                  right: 8,
-                                                ),
-                                                child: Icon(
-                                                  Icons.drag_handle,
-                                                  color: Colors.grey.shade400,
-                                                  size: 24,
-                                                ),
-                                              ),
+                                            // (Drag handle removed - drag reorder disabled)
 
                                             // Track Cover Image
                                             Container(
@@ -826,24 +1391,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen> {
                                     ),
                                   );
 
-                                  // Wrap entire container with appropriate reorder listener for owners
-                                  if (isOwner && !isFirstTrack) {
-                                    if (isMobile) {
-                                      // On mobile, require long-press to start reordering
-                                      return ReorderableDelayedDragStartListener(
-                                        index: index,
-                                        child: trackContent,
-                                      );
-                                    } else {
-                                      // Desktop/tablet: immediate drag handle
-                                      return ReorderableDragStartListener(
-                                        index: index,
-                                        child: trackContent,
-                                      );
-                                    }
-                                  } else {
-                                    return trackContent;
-                                  }
+                                  return trackContent;
                                 },
                               );
                             },

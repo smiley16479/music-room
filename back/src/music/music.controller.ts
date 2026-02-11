@@ -8,9 +8,10 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
   Res,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 
 import { MusicService } from './music.service';
 import { DeezerService } from './deezer.service';
@@ -338,7 +339,7 @@ export class MusicController {
     description: 'The ID of the track',
     required: true
   })
-  async proxyTrackAudio(@Param('id') id: string, @Res() res: Response) {
+  async proxyTrackAudio(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     try {
       const track = await this.musicService.getTrackById(id);
       
@@ -351,7 +352,7 @@ export class MusicController {
 
       // If track has a YouTube URL stored, use it to proxy audio
       if (track.previewUrl?.includes('youtube.com') || track.previewUrl?.includes('youtu.be')) {
-        return this.youtubeService.proxyAudioStream(track.previewUrl, res);
+        return this.youtubeService.proxyAudioStream(track.previewUrl, res, req);
       }
 
       // Fallback: search YouTube for the track and proxy audio
@@ -361,7 +362,7 @@ export class MusicController {
       );
 
       if (youtubeUrl) {
-        return this.youtubeService.proxyAudioStream(youtubeUrl, res);
+        return this.youtubeService.proxyAudioStream(youtubeUrl, res, req);
       }
 
       // Fallback: proxy Deezer preview (30s)

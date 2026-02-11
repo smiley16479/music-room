@@ -121,6 +121,48 @@ class WebSocketService {
       _notifyCallbacks('left-event', data);
     });
 
+    // Event detail room events
+    _socket!.on('joined-event-detail', (data) {
+      debugPrint('📋 Joined event detail: $data');
+      _notifyCallbacks('joined-event-detail', data);
+    });
+
+    _socket!.on('left-event-detail', (data) {
+      debugPrint('📋 Left event detail: $data');
+      _notifyCallbacks('left-event-detail', data);
+    });
+
+    _socket!.on('user-joined-detail', (data) {
+      debugPrint('👤 User joined detail: $data');
+      _notifyCallbacks('user-joined-detail', data);
+    });
+
+    _socket!.on('user-left-detail', (data) {
+      debugPrint('👤 User left detail: $data');
+      _notifyCallbacks('user-left-detail', data);
+    });
+
+    // Event playlist room events
+    _socket!.on('joined-event-playlist', (data) {
+      debugPrint('🎵 Joined event playlist: $data');
+      _notifyCallbacks('joined-event-playlist', data);
+    });
+
+    _socket!.on('left-event-playlist', (data) {
+      debugPrint('🎵 Left event playlist: $data');
+      _notifyCallbacks('left-event-playlist', data);
+    });
+
+    _socket!.on('user-joined-playlist', (data) {
+      debugPrint('👤 User joined playlist: $data');
+      _notifyCallbacks('user-joined-playlist', data);
+    });
+
+    _socket!.on('user-left-playlist', (data) {
+      debugPrint('👤 User left playlist: $data');
+      _notifyCallbacks('user-left-playlist', data);
+    });
+
     // User events
     _socket!.on('user-joined', (data) {
       debugPrint('👤 User joined: $data');
@@ -380,6 +422,44 @@ class WebSocketService {
     }
   }
 
+  /// Join event detail room (for event details screen)
+  void joinEventDetail(String eventId) {
+    if (!_isConnected) {
+      debugPrint('⚠️ Cannot join event detail: not connected');
+      return;
+    }
+    _socket!.emit('join-event-detail', {'eventId': eventId});
+    debugPrint('📋 Joining event-detail room: $eventId');
+  }
+
+  /// Leave event detail room
+  void leaveEventDetail(String eventId) {
+    if (!_isConnected) {
+      return;
+    }
+    _socket!.emit('leave-event-detail', {'eventId': eventId});
+    debugPrint('📋 Leaving event-detail room: $eventId');
+  }
+
+  /// Join event playlist room (for playlist details screen)
+  void joinEventPlaylist(String eventId) {
+    if (!_isConnected) {
+      debugPrint('⚠️ Cannot join event playlist: not connected');
+      return;
+    }
+    _socket!.emit('join-event-playlist', {'eventId': eventId});
+    debugPrint('🎵 Joining event-playlist room: $eventId');
+  }
+
+  /// Leave event playlist room
+  void leaveEventPlaylist(String eventId) {
+    if (!_isConnected) {
+      return;
+    }
+    _socket!.emit('leave-event-playlist', {'eventId': eventId});
+    debugPrint('🎵 Leaving event-playlist room: $eventId');
+  }
+
   /// Suggest a track
   void suggestTrack(
     String eventId,
@@ -424,10 +504,19 @@ class WebSocketService {
   }
 
   /// Seek in track
-  void seekTrack(String eventId, double seekTime) {
+  /// Optional `trackId` can be provided so the server and other clients
+  /// know which track the seek applies to (useful if server state is out-of-date).
+  /// Optional `isPlaying` ensures the database reflects the admin's actual playback state.
+  void seekTrack(String eventId, double seekTime, [String? trackId, bool? isPlaying]) {
     if (!_isConnected) return;
-    _socket!.emit('seek-track', {'eventId': eventId, 'seekTime': seekTime});
-    debugPrint('📤 Seek to ${seekTime}s');
+    final payload = {
+      'eventId': eventId,
+      'seekTime': seekTime,
+      if (trackId != null) 'trackId': trackId,
+      if (isPlaying != null) 'isPlaying': isPlaying,
+    };
+    _socket!.emit('seek-track', payload);
+    debugPrint('📤 Seek to ${seekTime}s (isPlaying: $isPlaying)');
   }
 
   /// Change track

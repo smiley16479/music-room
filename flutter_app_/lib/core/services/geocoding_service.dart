@@ -36,11 +36,6 @@ class GeocodingService {
 
       debugPrint('✅ Found location: $lat, $lon');
 
-      if (lat == null || lon == null) {
-        debugPrint('⚠️ Invalid coordinates: lat=$lat, lon=$lon');
-        return null;
-      }
-
       return {'latitude': lat, 'longitude': lon};
     } catch (e) {
       debugPrint('❌ Geocoding error: $e (${e.runtimeType})');

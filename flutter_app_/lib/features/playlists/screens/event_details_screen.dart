@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../../../core/services/index.dart';
+import '../../../core/navigation/route_observer.dart';
 import '../widgets/invite_friends_dialog.dart';
 import 'playlist_details_screen.dart';
 import '../widgets/mini_player_scaffold.dart';
@@ -18,9 +19,13 @@ class EventDetailsScreen extends StatefulWidget {
   State<EventDetailsScreen> createState() => _EventDetailsScreenState();
 }
 
-class _EventDetailsScreenState extends State<EventDetailsScreen> {
+class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware {
+  ModalRoute<dynamic>? _modalRoute;
+  WebSocketService? _wsService;
   bool _isEditMode = false;
   Event? _localEvent; // Local copy to avoid provider being overwritten
+  bool _hasJoinedRoom = false;
+  bool _hasLoadedEvent = false;
 
   // Text Controllers
   late TextEditingController _nameController;
@@ -51,16 +56,15 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   void initState() {
     super.initState();
     _initControllers();
-    _loadEvent();
-  }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Reload event when returning from navigation
-    if (_localEvent == null) {
-      _loadEvent();
-    }
+    // Load event and join room after the first frame to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_hasLoadedEvent) {
+        _hasLoadedEvent = true;
+        _loadEvent();
+        _joinEventDetailRoom();
+      }
+    });
   }
 
   void _initControllers() {
@@ -84,8 +88,66 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _selectedPlaylistId = null;
   }
 
+  void _joinEventDetailRoom() {
+    if (_hasJoinedRoom) return;
+
+    try {
+      final ws = _wsService ?? context.read<WebSocketService>();
+      _wsService ??= ws;
+      ws.joinEventDetail(widget.eventId);
+      _hasJoinedRoom = true;
+
+      // Listen for users joining/leaving the detail room
+      ws.on('user-joined-detail', (data) {
+        if (mounted) {
+          debugPrint('📋 User joined event detail: ${data['displayName']}');
+        }
+      });
+
+      ws.on('user-left-detail', (data) {
+        if (mounted) {
+          debugPrint('📋 User left event detail: ${data['displayName']}');
+        }
+      });
+    } catch (e) {
+      debugPrint('Error joining event detail room: $e');
+    }
+  }
+
+  void _leaveEventDetailRoom() {
+    try {
+      final ws = _wsService ?? context.read<WebSocketService>();
+      ws.leaveEventDetail(widget.eventId);
+
+      // Clean up listeners
+      ws.off('user-joined-detail');
+      ws.off('user-left-detail');
+      _hasJoinedRoom = false;
+    } catch (e) {
+      debugPrint('Error leaving event detail room: $e');
+    }
+  }
+
   @override
   void dispose() {
+    // Safely leave room using cached websocket service (avoid context in dispose)
+    try {
+      if (_wsService != null) {
+        _wsService!.leaveEventDetail(widget.eventId);
+        _wsService!.off('user-joined-detail');
+        _wsService!.off('user-left-detail');
+        _hasJoinedRoom = false;
+      }
+    } catch (e) {
+      debugPrint('Error leaving event detail room from dispose: $e');
+    }
+
+    // Unsubscribe from route observer using stored reference (safe in dispose)
+    try {
+      if (_modalRoute != null) {
+        routeObserver.unsubscribe(this);
+      }
+    } catch (_) {}
     _nameController.dispose();
     _descriptionController.dispose();
     _locationNameController.dispose();
@@ -94,6 +156,40 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
     _latitudeController.dispose();
     _longitudeController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Subscribe to route changes so we can leave the socket room when the
+    // screen is no longer visible (covered or popped)
+    _modalRoute = ModalRoute.of(context);
+    if (_modalRoute != null) {
+      routeObserver.subscribe(this, _modalRoute!);
+    }
+    // Cache websocket service to avoid using context in dispose
+    try {
+      _wsService ??= context.read<WebSocketService>();
+    } catch (_) {}
+  }
+
+  @override
+  void didPush() {
+    // Screen was just pushed — ensure we're joined
+    _joinEventDetailRoom();
+  }
+
+  @override
+  void didPopNext() {
+    // Returned to this screen — re-join room if needed
+    _joinEventDetailRoom();
+  }
+
+  @override
+  void didPushNext() {
+    // Another route was pushed on top (e.g., dialog or playlist details)
+    // Don't leave here - let dispose handle cleanup when truly navigating away
+    debugPrint('📋 Route pushed on top, staying in detail room');
   }
 
   Future<void> _loadEvent() async {

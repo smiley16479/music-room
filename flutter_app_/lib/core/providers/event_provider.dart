@@ -281,6 +281,7 @@ class EventProvider extends ChangeNotifier {
       // Leave previous event room if any
       final previousEventId = _currentEvent?.id;
       if (previousEventId != null &&
+          previousEventId != eventId &&
           webSocketService != null &&
           webSocketService!.currentEventId != null) {
         try {
@@ -292,12 +293,8 @@ class EventProvider extends ChangeNotifier {
       // Load tracks for both playlists and events (events have associated playlists)
       _currentPlaylistTracks = await eventService.getPlaylistTracks(eventId);
 
-      // Join the specific event room to receive track updates
-      if (webSocketService != null) {
-        try {
-          webSocketService!.joinEvent(eventId);
-        } catch (_) {}
-      }
+      // Note: Socket room joining is now handled by individual screens
+      // (event-detail room or event-playlist room) for better separation
     } catch (e) {
       _error = e.toString();
     }
@@ -390,11 +387,6 @@ class EventProvider extends ChangeNotifier {
         duration: duration,
       );
 
-      if (newTrack == null) {
-        _error = 'Empty response from server';
-        return false;
-      }
-
       final exists = _currentPlaylistTracks.any((t) => t.id == newTrack.id);
       if (!exists) {
         _currentPlaylistTracks.add(newTrack);
@@ -434,8 +426,9 @@ class EventProvider extends ChangeNotifier {
   void reorderTrack(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _currentPlaylistTracks.length) return;
     if (newIndex < 0) newIndex = 0;
-    if (newIndex > _currentPlaylistTracks.length)
+    if (newIndex > _currentPlaylistTracks.length) {
       newIndex = _currentPlaylistTracks.length;
+    }
 
     final track = _currentPlaylistTracks.removeAt(oldIndex);
     final insertIndex = newIndex > oldIndex ? newIndex - 1 : newIndex;

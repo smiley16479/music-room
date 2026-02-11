@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/providers/audio_player_provider.dart';
+import '../../../core/providers/event_provider.dart';
+import '../../../core/providers/auth_provider.dart';
+import '../../../core/models/event.dart';
 
 /// A wrapper that adds the mini player to any screen
 /// This ensures the music player is visible across all screens when playing
@@ -21,19 +24,30 @@ class MiniPlayerScaffold extends StatelessWidget {
       return child;
     }
 
-    return Consumer<AudioPlayerProvider>(
-      builder: (context, audioProvider, _) {
-        // If no track is playing, just show the child
-        if (!audioProvider.hasCurrentTrack) {
+    return Consumer3<AudioPlayerProvider?, EventProvider?, AuthProvider?>(
+      builder: (context, audioProvider, eventProvider, authProvider, _) {
+        // Defensive: provider may be null in some widget trees (e.g. during hot-reload)
+        if (audioProvider == null || audioProvider.hasCurrentTrack == false) {
           return child;
         }
 
         final track = audioProvider.currentTrack!;
         final isPlaying = audioProvider.isPlaying;
         final isLoading = audioProvider.isLoading;
+        
+        // Check if the current playlist is an event and if user is admin/owner
+        final currentPlaylist = eventProvider?.currentPlaylist;
+        final currentUser = authProvider?.currentUser;
+        final isEventPlaylist = currentPlaylist?.type == EventType.event;
+        final isOwner = currentUser?.id == currentPlaylist?.creatorId;
+        
+        // Disable play/pause for non-admin users in event playlists
+        final canControlPlayback = !isEventPlaylist || isOwner;
 
         return Column(
+          
           children: [
+            
             Expanded(child: child),
             // Mini player
             Container(
@@ -131,25 +145,26 @@ class MiniPlayerScaffold extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // Play/Pause button
-                          IconButton(
-                            icon: isLoading
-                                ? SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Theme.of(context).colorScheme.primary,
+                          // Play/Pause button (hidden for non-admin users in event playlists)
+                          if (canControlPlayback)
+                            IconButton(
+                              icon: isLoading
+                                  ? SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Theme.of(context).colorScheme.primary,
+                                      ),
+                                    )
+                                  : Icon(
+                                      isPlaying ? Icons.pause : Icons.play_arrow,
+                                      size: 32,
                                     ),
-                                  )
-                                : Icon(
-                                    isPlaying ? Icons.pause : Icons.play_arrow,
-                                    size: 32,
-                                  ),
-                            onPressed: isLoading
-                                ? null
-                                : () => audioProvider.togglePlayPause(),
-                          ),
+                              onPressed: isLoading
+                                  ? null
+                                  : () => audioProvider.togglePlayPause(),
+                            ),
                           // Close button
                           IconButton(
                             icon: const Icon(Icons.close, size: 20),
