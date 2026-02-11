@@ -31,16 +31,33 @@ class AudioPlayerService {
   /// Check if audio is playing
   bool get isPlaying => _audioPlayer.playing;
 
-  /// Play audio from URL
-  Future<void> playFromUrl(String url) async {
+  /// Load audio from URL and optionally start playback.
+  /// If [startAt] is provided, seek to that position after loading.
+  /// Avoids stopping/resetting position before setting the URL to prevent
+  /// unwanted restarts when a client intends to immediately seek after loading.
+  Future<void> playFromUrl(String url, {Duration? startAt, bool autoPlay = true}) async {
     try {
-      // Stop any currently playing audio first
-      await _audioPlayer.stop();
-      // Reset position to start
-      await _audioPlayer.seek(Duration.zero);
-      // Set new URL and play
+      debugPrint('🔊 playFromUrl: url=$url startAt=$startAt autoPlay=$autoPlay');
+      // Set the new URL (just_audio completes when the source is ready)
       await _audioPlayer.setUrl(url);
-      await _audioPlayer.play();
+
+      // Wait until the player reports it's ready (or buffering/completed) before seeking
+      await _audioPlayer.playerStateStream.firstWhere((state) {
+        final ps = state.processingState;
+        return ps == ProcessingState.ready || ps == ProcessingState.buffering || ps == ProcessingState.completed;
+      });
+
+      // If a start position was provided, seek to it after the source is ready
+      if (startAt != null) {
+        await _audioPlayer.seek(startAt);
+      }
+
+      // Start playback only if requested
+      if (autoPlay) {
+        debugPrint('🔊 calling play() after setUrl');
+        await _audioPlayer.play();
+        debugPrint('🔊 position after play: ${_audioPlayer.position}');
+      }
     } catch (e) {
       debugPrint('❌ Error playing audio: $e');
       rethrow;
@@ -49,22 +66,34 @@ class AudioPlayerService {
 
   /// Play
   Future<void> play() async {
+    debugPrint('🔊 play(): current position=${_audioPlayer.position}');
     await _audioPlayer.play();
   }
 
   /// Pause
   Future<void> pause() async {
+    debugPrint('🔊 pause(): current position=${_audioPlayer.position}');
     await _audioPlayer.pause();
   }
 
   /// Stop
   Future<void> stop() async {
+    debugPrint('🔊 stop(): current position=${_audioPlayer.position}');
     await _audioPlayer.stop();
   }
 
   /// Seek to position
   Future<void> seek(Duration position) async {
+    debugPrint('🔊 seek(): from=${_audioPlayer.position} to=$position');
     await _audioPlayer.seek(position);
+  }
+
+  /// Seek to position and then play (ensures seek completes before playing)
+  Future<void> seekAndPlay(Duration position) async {
+    debugPrint('🔊 seekAndPlay(): seeking from=${_audioPlayer.position} to=$position');
+    await _audioPlayer.seek(position);
+    debugPrint('🔊 seekAndPlay(): seek complete, now playing from=${_audioPlayer.position}');
+    await _audioPlayer.play();
   }
 
   /// Set volume (0.0 to 1.0)

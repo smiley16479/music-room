@@ -1,5 +1,7 @@
 export const SOCKET_ROOMS = {
   EVENT: (eventId: string) => `event:${eventId}`,
+  EVENT_DETAIL: (eventId: string) => `event-detail:${eventId}`,
+  EVENT_PLAYLIST: (eventId: string) => `event-playlist:${eventId}`,
   EVENTS: 'events',
   PLAYLIST: (playlistId: string) => `playlist:${playlistId}`,
   PLAYLISTS: 'playlists',

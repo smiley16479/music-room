@@ -126,6 +126,20 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
             displayName: client.user?.displayName || 'Unknown User',
             timestamp: new Date().toISOString(),
           });
+        } else if (room.startsWith('event-detail:')) {
+          this.logger.log(`📋 Notifying room ${room} that user ${client.userId} left detail view`);
+          this.server.to(room).emit('user-left-detail', {
+            userId: client.userId,
+            displayName: client.user?.displayName || 'Unknown User',
+            timestamp: new Date().toISOString(),
+          });
+        } else if (room.startsWith('event-playlist:')) {
+          this.logger.log(`🎵 Notifying room ${room} that user ${client.userId} left playlist view`);
+          this.server.to(room).emit('user-left-playlist', {
+            userId: client.userId,
+            displayName: client.user?.displayName || 'Unknown User',
+            timestamp: new Date().toISOString(),
+          });
         }
       });
     }
@@ -319,6 +333,160 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       this.logger.log(`User ${client.userId} left event ${eventId} - notified other participants`);
     } catch (error) {
       client.emit('error', { message: 'Failed to leave event', details: error.message });
+    }
+  }
+
+  // ========== EVENT DETAIL ROOM HANDLERS ==========
+
+  @SubscribeMessage('join-event-detail')
+  async handleJoinEventDetail(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      const room = SOCKET_ROOMS.EVENT_DETAIL(eventId);
+      await client.join(room);
+
+      // Get user display name with fallback
+      const userDisplayName = client.user?.displayName || 
+                              client.user?.email?.split('@')[0] || 
+                              `User-${client.userId.substring(0, 8)}` || 
+                              'Unknown User';
+
+      // Log user joining event detail room
+      this.logger.log(`📋 User ${client.userId} (${userDisplayName}) joined event-detail room: ${eventId}`);
+
+      // Broadcast to others in the room
+      this.server.to(room).emit('user-joined-detail', {
+        userId: client.userId,
+        socketId: client.id,
+        displayName: userDisplayName,
+        avatarUrl: client.user?.avatarUrl || null,
+        email: client.user?.email || '',
+        timestamp: new Date().toISOString(),
+      });
+
+      // Confirm to the client that they joined
+      client.emit('joined-event-detail', { eventId, room });
+    } catch (error) {
+      this.logger.error(`Error joining event detail room: ${error.message}`);
+      client.emit('error', { message: 'Failed to join event detail', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('leave-event-detail')
+  async handleLeaveEventDetail(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      this.logger.debug(`User ${client.userId} is leaving event-detail room ${eventId}`);
+      const room = SOCKET_ROOMS.EVENT_DETAIL(eventId);
+      await client.leave(room);
+
+      if (!client.userId)
+        client.userId = `User-${client.id.substring(0, 8)}`;
+      // Get user display name with fallback
+      const userDisplayName = client.user?.displayName || 
+                              client.user?.email?.split('@')[0] || 
+                              `User-${client.userId.substring(0, 8)}` || 
+                              'Unknown User';
+      // Log user leaving event detail room
+      this.logger.log(`📋 User ${client.userId} (${userDisplayName}) left event-detail room: ${eventId}`);
+
+      // Notify other participants that user left
+      this.server.to(room).emit('user-left-detail', {
+        userId: client.userId,
+        displayName: userDisplayName,
+        timestamp: new Date().toISOString(),
+      });
+
+      client.emit('left-event-detail', { eventId });
+    } catch (error) {
+      client.emit('error', { message: 'Failed to leave event detail', details: error.message });
+    }
+  }
+
+  // ========== EVENT PLAYLIST ROOM HANDLERS ==========
+
+  @SubscribeMessage('join-event-playlist')
+  async handleJoinEventPlaylist(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      const room = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+      await client.join(room);
+
+      // Get user display name with fallback
+      const userDisplayName = client.user?.displayName || 
+                              client.user?.email?.split('@')[0] || 
+                              `User-${client.userId.substring(0, 8)}` || 
+                              'Unknown User';
+
+      // Log user joining event playlist room
+      this.logger.log(`🎵 User ${client.userId} (${userDisplayName}) joined event-playlist room: ${eventId}`);
+
+      // Broadcast to others in the room
+      this.server.to(room).emit('user-joined-playlist', {
+        userId: client.userId,
+        socketId: client.id,
+        displayName: userDisplayName,
+        avatarUrl: client.user?.avatarUrl || null,
+        email: client.user?.email || '',
+        timestamp: new Date().toISOString(),
+      });
+
+      // Confirm to the client that they joined
+      client.emit('joined-event-playlist', { eventId, room });
+    } catch (error) {
+      this.logger.error(`Error joining event playlist room: ${error.message}`);
+      client.emit('error', { message: 'Failed to join event playlist', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('leave-event-playlist')
+  async handleLeaveEventPlaylist(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { eventId }: { eventId: string },
+  ) {
+    try {
+      this.logger.debug(`User ${client.userId} is leaving event-playlist room ${eventId}`);
+      const room = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+      await client.leave(room);
+
+      if (!client.userId)
+        client.userId = `User-${client.id.substring(0, 8)}`;
+
+      // Get user display name with fallback
+      const userDisplayName = client.user?.displayName || 
+                              client.user?.email?.split('@')[0] || 
+                              `User-${client.userId.substring(0, 8)}` || 
+                              'Unknown User';
+
+      // Log user leaving event playlist room
+      this.logger.log(`🎵 User ${client.userId} (${userDisplayName}) left event-playlist room: ${eventId}`);
+
+      // Notify other participants that user left
+      this.server.to(room).emit('user-left-playlist', {
+        userId: client.userId,
+        displayName: userDisplayName,
+        timestamp: new Date().toISOString(),
+      });
+
+      client.emit('left-event-playlist', { eventId });
+    } catch (error) {
+      client.emit('error', { message: 'Failed to leave event playlist', details: error.message });
     }
   }
 
@@ -728,8 +896,10 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
   notifyVoteUpdated(eventId: string, vote: Vote/* , tracks: TrackVoteSnapshot[] */) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
     this.logger.debug(`Notifying vote update in event ${eventId} for track ${vote.trackId} by user ${vote.userId}`);
-    this.server.to(room).emit('vote-updated', {
+
+    const payload = {
       eventId,
       vote: {
         trackId: vote.trackId,
@@ -739,12 +909,18 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       },
       // results: tracks.slice(0, 10), // Top 10 tracks only
       // timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Emit to all relevant rooms
+    this.server.to(room).emit('vote-updated', payload);
+    this.server.to(playlistRoom).emit('vote-updated', payload);
   }
 
   notifyVoteRemoved(eventId: string, vote: Vote/* , tracks: TrackVoteSnapshot[]*/) {
     const room = SOCKET_ROOMS.EVENT(eventId);
-    this.server.to(room).emit('vote-removed', {
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+
+    const payload = {
       eventId,
       vote: {
         trackId: vote.trackId,
@@ -754,7 +930,10 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       },
       // results: tracks.slice(0, 10),
       // timestamp: new Date().toISOString(),
-    });
+    };
+
+    this.server.to(room).emit('vote-removed', payload);
+    this.server.to(playlistRoom).emit('vote-removed', payload);
   }
 
   /**
@@ -762,6 +941,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
    */
   notifyQueueReordered(eventId: string, trackOrder: string[], trackScores: Map<string, number>) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
     
     // Convert Map to object for JSON serialization
     const scoresObject: Record<string, number> = {};
@@ -769,12 +949,42 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       scoresObject[trackId] = score;
     });
 
-    this.server.to(room).emit('queue-reordered', {
+    const payload = {
       eventId,
       trackOrder,
       trackScores: scoresObject,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    this.server.to(room).emit('queue-reordered', payload);
+    // Also notify event playlist viewers (not generic playlists)
+    try {
+      this.server.to(playlistRoom).emit('queue-reordered', payload);
+    } catch (e) {
+      this.logger.debug(`Failed to emit queue-reordered to event-playlist room for ${eventId}: ${e?.message || e}`);
+    }
+    // Also emit legacy reorder events so clients listening to those get updates
+    try {
+      const reorderPayload = {
+        eventId,
+        playlistId: eventId,
+        trackOrder,
+        trackIds: trackOrder,
+        reorderedBy: 'voting-system',
+        timestamp: new Date().toISOString(),
+      };
+
+      this.server.to(room).emit('tracks-reordered', reorderPayload);
+      this.server.to(playlistRoom).emit('tracks-reordered', reorderPayload);
+
+      // Also notify global events room about playlist reorder
+      this.server.to(SOCKET_ROOMS.EVENTS).emit('playlist-tracks-reordered', {
+        playlistId: eventId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.debug(`Failed to emit tracks-reordered to playlist rooms for ${eventId}: ${e?.message || e}`);
+    }
     
     this.logger.log(`Queue reordered for event ${eventId} based on votes`);
   }
@@ -784,14 +994,21 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
    */
   notifyTrackVotesChanged(eventId: string, trackId: string, upvotes: number, downvotes: number, score: number) {
     const room = SOCKET_ROOMS.EVENT(eventId);
-    this.server.to(room).emit('track-votes-changed', {
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+    const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
+
+    const payload = {
       eventId,
       trackId,
       upvotes,
       downvotes,
       score,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    this.server.to(room).emit('track-votes-changed', payload);
+    this.server.to(playlistRoom).emit('track-votes-changed', payload);
+    this.server.to(genericPlaylistRoom).emit('track-votes-changed', payload);
   }
 
   notifyNowPlaying(eventId: string, trackId: string) {
@@ -814,6 +1031,8 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   // Track Management (for events that use playlists)
   notifyTrackAdded(eventId: string, track: any, addedBy: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+    const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
     
     // Handle both Track and PlaylistTrackWithDetails
     const trackData = track.track ? {
@@ -846,6 +1065,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       addedBy,
     };
 
+    // Emit to event room
     this.server.to(room).emit('track-added', {
       eventId,
       playlistId: eventId, // Support both
@@ -853,10 +1073,35 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       addedBy,
       timestamp: new Date().toISOString(),
     });
+
+    // Also emit to clients viewing the event playlist and generic playlist room
+    try {
+      this.server.to(playlistRoom).emit('track-added', {
+        eventId,
+        playlistId: eventId,
+        track: trackData,
+        addedBy,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(genericPlaylistRoom).emit('track-added', {
+        eventId,
+        playlistId: eventId,
+        track: trackData,
+        addedBy,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.debug(`Failed to emit track-added to playlist rooms for ${eventId}: ${e?.message || e}`);
+    }
   }
 
   notifyTrackRemoved(eventId: string, trackId: string, removedBy: string, updatedTrackCount?: number) {
     const room = SOCKET_ROOMS.EVENT(eventId);
+    const playlistRoom = SOCKET_ROOMS.EVENT_PLAYLIST(eventId);
+    const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
+
+    // Emit to event room
     this.server.to(room).emit('track-removed', {
       eventId,
       playlistId: eventId, // Support both
@@ -864,6 +1109,27 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       removedBy,
       timestamp: new Date().toISOString(),
     });
+
+    // Also emit to clients viewing the event playlist and generic playlist room
+    try {
+      this.server.to(playlistRoom).emit('track-removed', {
+        eventId,
+        playlistId: eventId,
+        trackId,
+        removedBy,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(genericPlaylistRoom).emit('track-removed', {
+        eventId,
+        playlistId: eventId,
+        trackId,
+        removedBy,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (e) {
+      this.logger.debug(`Failed to emit track-removed to playlist rooms for ${eventId}: ${e?.message || e}`);
+    }
   }
 
   notifyTracksReordered(eventId: string, trackOrder: string[], reorderedBy: string) {
@@ -1002,23 +1268,40 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       // Get current playback position if startTime is not provided (resuming after pause)
       let currentStartTime = startTime;
+      let effectiveTrackId = trackId;
         if (currentStartTime === undefined || currentStartTime === null) {
         try {
           const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
           currentStartTime = currentState.position;
+          // Also resolve trackId from DB if not provided by client
+          if (!effectiveTrackId) {
+            effectiveTrackId = currentState.trackId ?? undefined;
+          }
         } catch (error) {
           this.logger.warn(`Failed to get current position, defaulting to 0: ${error.message}`);
           currentStartTime = 0;
         }
-      }      // Update playback state in database first
+      }
+
+      // If we still don't have a trackId, try to get it from the DB
+      if (!effectiveTrackId) {
+        try {
+          const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+          effectiveTrackId = currentState.trackId ?? undefined;
+        } catch (error) {
+          this.logger.warn(`Failed to resolve trackId: ${error.message}`);
+        }
+      }
+
+      // Update playback state in database first
       await this.eventService.updatePlaybackState(eventId, true, currentStartTime);
       
-      if (trackId) {
+      if (effectiveTrackId) {
         try {
           const currentEvent = await this.eventService.findById(eventId);
           
-          if (currentEvent.currentTrackId !== trackId) {
-            await this.eventService.updateCurrentTrack(eventId, trackId);
+          if (currentEvent.currentTrackId !== effectiveTrackId) {
+            await this.eventService.updateCurrentTrack(eventId, effectiveTrackId);
           }
         } catch (dbError) {
           this.logger.warn(`Failed to update current track in database: ${dbError.message}`);
@@ -1029,16 +1312,21 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       const playbackState = {
         eventId,
-        ...(trackId && { trackId }),
+        trackId: effectiveTrackId || null,
         startTime: currentStartTime,
+        isPlaying: true,
         controlledBy: client.userId,
         timestamp: new Date().toISOString(),
         syncType: 'admin-play'
       };
       
+      // Emit to event rooms and generic playlist room for synchronized playback
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-play', playbackState);
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('music-play', playbackState);
+      this.server.to(genericPlaylistRoom).emit('music-play', playbackState);
       
-      this.logger.log(`User ${client.userId} played track ${trackId} in event ${eventId}`);
+      this.logger.log(`User ${client.userId} played track ${effectiveTrackId} in event ${eventId} - synced to all rooms`);
     } catch (error) {
       this.logger.error(`Play track error: ${error.message}`);
       client.emit('error', { message: 'Failed to play track', details: error.message });
@@ -1063,22 +1351,49 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      const pausePosition = currentTime || 0;
+      let pausePosition: number;
+      if (currentTime !== undefined && currentTime !== null) {
+        pausePosition = currentTime;
+      } else {
+        try {
+          const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+          pausePosition = currentState.position ?? 0;
+        } catch (posErr) {
+          this.logger.warn(`Failed to resolve pause position, defaulting to 0: ${posErr.message}`);
+          pausePosition = 0;
+        }
+      }
+
       await this.eventService.updatePlaybackState(eventId, false, pausePosition);
 
       this.stopTimeSyncForEvent(eventId);
 
+      // Resolve current trackId from database so clients know which track is paused
+      let currentTrackId: string | null = null;
+      try {
+        const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+        currentTrackId = currentState.trackId;
+      } catch (error) {
+        this.logger.warn(`Failed to resolve trackId for pause: ${error.message}`);
+      }
+
       const pauseState = {
         eventId,
+        trackId: currentTrackId,
         controlledBy: client.userId,
         currentTime: pausePosition,
+        isPlaying: false,
         timestamp: new Date().toISOString(),
         syncType: 'admin-pause'
       };
       
+      // Emit to event rooms and generic playlist room for synchronized playback
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-pause', pauseState);
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('music-pause', pauseState);
+      this.server.to(genericPlaylistRoom).emit('music-pause', pauseState);
       
-      this.logger.log(`User ${client.userId} paused playback in event ${eventId}`);
+      this.logger.log(`User ${client.userId} paused playback in event ${eventId} - synced to all rooms`);
     } catch (error) {
       this.logger.error(`Pause track error: ${error.message}`);
       client.emit('error', { message: 'Failed to pause track', details: error.message });
@@ -1088,7 +1403,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   @SubscribeMessage('seek-track')
   async handleSeekTrack(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId, seekTime }: { eventId: string; seekTime: number }
+    @MessageBody() { eventId, seekTime, trackId, isPlaying }: { eventId: string; seekTime: number; trackId?: string; isPlaying?: boolean }
   ) {
     try {
       if (!client.userId) {
@@ -1103,21 +1418,44 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
-      const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+      // Use isPlaying from client if provided (admin's actual state), otherwise get from database
+      let effectiveIsPlaying: boolean;
+      let effectiveTrackId: string | null;
       
-      await this.eventService.updatePlaybackState(eventId, currentState.isPlaying, seekTime);
+      if (isPlaying !== undefined && isPlaying !== null) {
+        // Admin explicitly provided their playback state - trust it
+        effectiveIsPlaying = isPlaying;
+        const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+        effectiveTrackId = trackId ?? currentState.trackId;
+      } else {
+        // Fall back to database state
+        const currentState = await this.eventService.getCurrentPlaybackPosition(eventId);
+        effectiveIsPlaying = currentState.isPlaying;
+        effectiveTrackId = trackId ?? currentState.trackId;
+      }
+
+      // Update playback state with the effective playing state
+      await this.eventService.updatePlaybackState(eventId, effectiveIsPlaying, seekTime);
 
       const seekState = {
         eventId,
         seekTime,
+        // Provide trackId and playing state so clients can ensure the right source is loaded
+        trackId: effectiveTrackId,
+        isPlaying: effectiveIsPlaying,
+        shouldPlay: effectiveIsPlaying, // Explicit flag for clients loading track for first time
         controlledBy: client.userId,
         timestamp: new Date().toISOString(),
         syncType: 'admin-seek'
       };
       
+      // Emit to event rooms and generic playlist room for synchronized seeking
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-seek', seekState);
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('music-seek', seekState);
+      this.server.to(genericPlaylistRoom).emit('music-seek', seekState);
       
-      this.logger.log(`User ${client.userId} seeked to ${seekTime}s in event ${eventId}`);
+      this.logger.log(`User ${client.userId} seeked to ${seekTime}s in event ${eventId} - synced to all rooms (shouldPlay: ${effectiveIsPlaying})`);
     } catch (error) {
       this.logger.error(`Seek track error: ${error.message}`);
       client.emit('error', { message: 'Failed to seek track', details: error.message });
@@ -1142,7 +1480,24 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-track-changed', {
+        eventId,
+        trackId,
+        trackIndex,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('music-track-changed', {
+        eventId,
+        trackId,
+        trackIndex,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(genericPlaylistRoom).emit('music-track-changed', {
         eventId,
         trackId,
         trackIndex,
@@ -1181,7 +1536,22 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('music-volume', {
+        eventId,
+        volume: Math.max(0, Math.min(100, volume)),
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('music-volume', {
+        eventId,
+        volume: Math.max(0, Math.min(100, volume)),
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(genericPlaylistRoom).emit('music-volume', {
         eventId,
         volume: Math.max(0, Math.min(100, volume)),
         controlledBy: client.userId,
@@ -1213,7 +1583,20 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
         return;
       }
 
+      const genericPlaylistRoom = SOCKET_ROOMS.PLAYLIST(eventId);
       this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('track-skipped', {
+        eventId,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('track-skipped', {
+        eventId,
+        controlledBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.server.to(genericPlaylistRoom).emit('track-skipped', {
         eventId,
         controlledBy: client.userId,
         timestamp: new Date().toISOString(),

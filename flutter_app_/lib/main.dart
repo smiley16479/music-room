@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:provider/provider.dart';
 
 import 'config/app_config.dart';
+import 'core/navigation/route_observer.dart';
 import 'core/providers/index.dart';
 import 'core/services/index.dart';
 import 'features/authentication/screens/login_screen.dart';
@@ -129,6 +130,7 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
+      navigatorObservers: [routeObserver],
       routes: {
         '/': (context) => const _InitialScreen(),
         '/home': (context) => const HomeScreen(),

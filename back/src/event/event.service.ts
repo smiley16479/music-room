@@ -843,48 +843,33 @@ export class EventService {
         const voteValue = vote.type === VoteType.UPVOTE ? vote.weight : -vote.weight;
         trackScores.set(vote.trackId, currentScore + voteValue);
       }
-
-      // Sort tracks: keep first track (currently playing) at position 1
-      // Then sort remaining tracks by vote score (descending)
+      // Sort all tracks by score descending (highest-voted first).
+      // Tie-breaker: keep original position order.
       const sortedTracks = [...event.tracks].sort((a, b) => a.position - b.position);
-      const currentTrack = sortedTracks[0]; // Keep first track in place
-      const remainingTracks = sortedTracks.slice(1);
 
-      // Sort remaining tracks by vote score (higher score = earlier position)
-      remainingTracks.sort((a, b) => {
+      sortedTracks.sort((a, b) => {
         const scoreA = trackScores.get(a.trackId) || 0;
         const scoreB = trackScores.get(b.trackId) || 0;
-        if (scoreB !== scoreA) {
-          return scoreB - scoreA; // Higher score first
-        }
-        // If scores are equal, maintain original order
-        return a.position - b.position;
+        if (scoreA !== scoreB) return scoreB - scoreA; // higher score first
+        return a.position - b.position; // stable fallback
       });
 
-      // Update positions
+      // Assign new positions starting at 1
       const tracksToUpdate: PlaylistTrack[] = [];
-
-      // Keep current track at position 1
-      if (currentTrack.position !== 1) {
-        currentTrack.position = 1;
-        tracksToUpdate.push(currentTrack);
-      }
-
-      // Update remaining tracks starting from position 2
-      let position = 2;
-      for (const track of remainingTracks) {
-        if (track.position !== position) {
-          track.position = position;
-          tracksToUpdate.push(track);
+      for (let i = 0; i < sortedTracks.length; i++) {
+        const expectedPos = i + 1;
+        const t = sortedTracks[i];
+        if (t.position !== expectedPos) {
+          t.position = expectedPos;
+          tracksToUpdate.push(t);
         }
-        position++;
       }
 
       if (tracksToUpdate.length > 0) {
         await this.playlistTrackRepository.save(tracksToUpdate);
 
-        // Notify participants about queue reorder
-        const newOrder = [currentTrack, ...remainingTracks].map(t => t.id);
+        // Notify participants about queue reorder with score map
+        const newOrder = sortedTracks.map(t => t.id);
         this.eventGateway.notifyQueueReordered(eventId, newOrder, trackScores);
       }
     } catch (error) {
@@ -1285,6 +1270,8 @@ export class EventService {
       throw new NotFoundException('Event not found');
     }
 
+    // Debug logs removed
+
     // Update playback state with precise timing
     event.isPlaying = isPlaying;
     event.currentPosition = currentPosition;
@@ -1296,6 +1283,8 @@ export class EventService {
     }
     
     await this.eventRepository.save(event);
+
+    // Debug logs removed
   }
 
   // Calculate current playback position accounting for paused state
@@ -1307,8 +1296,10 @@ export class EventService {
 
     if (!event.isPlaying) {
       // If paused, return the stored position
+      const pos = parseFloat(event.currentPosition?.toString() || '0');
+      // silent when paused
       return { 
-        position: parseFloat(event.currentPosition?.toString() || '0'), 
+        position: pos, 
         isPlaying: false, 
         trackId: event.currentTrackId 
       };
@@ -1316,13 +1307,15 @@ export class EventService {
 
     // If playing, calculate current position = stored position + elapsed time since resumed
     const storedPosition = parseFloat(event.currentPosition?.toString() || '0');
-    const elapsedTime = event.lastPositionUpdate ? 
-      Math.floor((Date.now() - event.lastPositionUpdate.getTime()) / 1000) : 0;
-    
+    const elapsedMs = event.lastPositionUpdate ? (Date.now() - event.lastPositionUpdate.getTime()) : 0;
+    const elapsedTime = elapsedMs / 1000; // fractional seconds
+
     const currentPosition = storedPosition + elapsedTime;
-    
+    const rounded = parseFloat(currentPosition.toFixed(3));
+    // silent when playing
+
     return { 
-      position: currentPosition, 
+      position: rounded, 
       isPlaying: true, 
       trackId: event.currentTrackId 
     };

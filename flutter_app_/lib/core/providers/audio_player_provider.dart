@@ -23,7 +23,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   String? _error;
 
   AudioPlayerProvider({required AudioPlayerService audioService})
-      : _audioService = audioService {
+    : _audioService = audioService {
     _initListeners();
   }
 
@@ -43,7 +43,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   void _initListeners() {
     _audioService.playerStateStream.listen((state) {
       _isPlaying = state.playing;
-      _isLoading = state.processingState == ProcessingState.loading ||
+      _isLoading =
+          state.processingState == ProcessingState.loading ||
           state.processingState == ProcessingState.buffering;
 
       // Auto-play next track when current one completes
@@ -66,7 +67,7 @@ class AudioPlayerProvider extends ChangeNotifier {
   }
 
   /// Play a single track
-  Future<void> playTrack(PlaylistTrack track) async {
+  Future<void> playTrack(PlaylistTrack track, {bool autoPlay = true}) async {
     _error = null;
     _isLoading = true;
     notifyListeners();
@@ -74,13 +75,15 @@ class AudioPlayerProvider extends ChangeNotifier {
     try {
       // First, try to get full audio stream from YouTube via backend
       String? audioUrl = await _getFullAudioStreamUrl(track.trackId);
-      
+
       // Fallback to stored preview URL if YouTube stream fails
       if (audioUrl == null || audioUrl.isEmpty) {
         audioUrl = _getPreviewUrl(track);
         debugPrint('⚠️ Using Deezer preview (30s) for ${track.trackTitle}');
       } else {
-        debugPrint('🎵 Playing full track from YouTube for ${track.trackTitle}');
+        debugPrint(
+          '🎵 Playing full track from YouTube for ${track.trackTitle}',
+        );
       }
 
       if (audioUrl == null || audioUrl.isEmpty) {
@@ -91,8 +94,10 @@ class AudioPlayerProvider extends ChangeNotifier {
       }
 
       _currentTrack = track;
-      await _audioService.playFromUrl(audioUrl);
-      _isPlaying = true;
+      await _audioService.playFromUrl(audioUrl, autoPlay: autoPlay);
+      // Use the underlying player's actual state to reflect real playback
+      // (avoids race where playerStateStream updates slightly later).
+      _isPlaying = _audioService.isPlaying;
       _isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -107,10 +112,11 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<String?> _getFullAudioStreamUrl(String trackId) async {
     try {
       // Use the audio proxy endpoint - it streams YouTube audio via yt-dlp
-      final audioProxyUrl = '${AppConfig.baseUrl}/music/track/$trackId/audio-proxy';
-      
+      final audioProxyUrl =
+          '${AppConfig.baseUrl}/music/track/$trackId/audio-proxy';
+
       debugPrint('🎵 Using YouTube audio proxy: $audioProxyUrl');
-      
+
       // Return the proxy URL directly - just_audio will handle streaming from it
       return audioProxyUrl;
     } catch (e) {
@@ -118,15 +124,20 @@ class AudioPlayerProvider extends ChangeNotifier {
       return null;
     }
   }
+
   /// Play a playlist starting from a specific track
-  Future<void> playPlaylist(List<PlaylistTrack> tracks, {int startIndex = 0}) async {
+  Future<void> playPlaylist(
+    List<PlaylistTrack> tracks, {
+    int startIndex = 0,
+    bool autoPlay = true,
+  }) async {
     if (tracks.isEmpty) return;
 
     _playlist = List.from(tracks);
     _currentIndex = startIndex.clamp(0, tracks.length - 1);
     // Clear current track to ensure proper initialization when switching tracks
     _currentTrack = null;
-    await playTrack(_playlist[_currentIndex]);
+    await playTrack(_playlist[_currentIndex], autoPlay: autoPlay);
   }
 
   /// Get preview URL for a track (Deezer preview)
@@ -135,7 +146,7 @@ class AudioPlayerProvider extends ChangeNotifier {
     if (track.previewUrl != null && track.previewUrl!.isNotEmpty) {
       return track.previewUrl;
     }
-    
+
     // Fallback: construct Deezer preview URL from track ID
     // This is a backup in case the previewUrl wasn't stored
     return 'https://cdns-preview-d.dzcdn.net/stream/c-${track.trackId}';
@@ -148,6 +159,10 @@ class AudioPlayerProvider extends ChangeNotifier {
     } else {
       await _audioService.play();
     }
+    // Sync state immediately after the operation
+    await Future.delayed(const Duration(milliseconds: 50));
+    _isPlaying = _audioService.isPlaying;
+    notifyListeners();
   }
 
   /// Pause playback
@@ -157,7 +172,31 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   /// Resume playback
   Future<void> resume() async {
+    // Wait until the player reports it's ready/buffering/completed before trying to play
+    try {
+      await _audioService.player.playerStateStream.firstWhere((state) {
+        final ps = state.processingState;
+        return ps == ProcessingState.ready ||
+            ps == ProcessingState.buffering ||
+            ps == ProcessingState.completed;
+      });
+    } catch (_) {
+      // ignore and try to play anyway
+    }
+
     await _audioService.play();
+  }
+
+  /// Force play using the underlying player API as a last-resort fallback.
+  /// This bypasses any readiness waiting logic and directly instructs the
+  /// `just_audio` player to start. Use sparingly when higher-level resume
+  /// didn't start playback.
+  Future<void> forcePlay() async {
+    try {
+      await _audioService.player.play();
+    } catch (e) {
+      debugPrint('Force play failed: $e');
+    }
   }
 
   /// Stop playback
