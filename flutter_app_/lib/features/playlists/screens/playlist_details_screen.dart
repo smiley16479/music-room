@@ -39,8 +39,15 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
   bool _isListeningToAudio = false;
   // Flag to suppress socket emit when audio state change came from a socket handler
   bool _handlingSocketEvent = false;
-  // Timestamp of last emitted event to prevent processing own events
-  DateTime? _lastEmittedEventTime;
+
+  // --- Server-driven stream state ---
+  // These hold the latest server time-sync data for the admin seek bar.
+  // The admin seek bar reflects the *server* position (not local player).
+  double _serverPosition = 0.0;
+  double _serverDuration = 0.0;
+  bool _serverIsPlaying = false;
+  String? _serverTrackId;
+  DateTime? _lastTimeSyncReceived;
 
   // Text Controllers
   late TextEditingController _nameController;
@@ -54,7 +61,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
   void initState() {
     super.initState();
     _initControllers();
-
+0
     // Load playlist and join room after the first frame to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_hasLoadedPlaylist) {
@@ -73,53 +80,61 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
   }
 
   /// Listener for AudioPlayerProvider state changes.
-  /// When the admin toggles play/pause (e.g. via mini player), emit socket events.
+  /// In the new server-driven model:
+  /// - Admin: does NOT emit socket events here. Admin controls use dedicated buttons.
+  /// - Non-admin: when pressing play after a local pause, request sync from server.
   void _onAudioStateChanged() {
     if (!mounted || _handlingSocketEvent) return;
 
     final audioProvider = _audioProvider;
     if (audioProvider == null) return;
 
-    // Check if user is admin/owner of an event playlist
+    // Only act for event playlists
+    bool isOwner = false;
     try {
       final eventProvider = context.read<EventProvider>();
       final authProvider = context.read<AuthProvider>();
       final playlist = eventProvider.currentPlaylist;
       if (playlist == null || playlist.type != EventType.event) return;
-      final isOwner = authProvider.currentUser?.id == playlist.creatorId;
-      if (!isOwner) return;
+      isOwner = authProvider.currentUser?.id == playlist.creatorId;
     } catch (_) {
       return;
     }
 
     final isPlaying = audioProvider.isPlaying;
-    final trackId = audioProvider.currentTrack?.trackId;
 
-    // Only emit when the state actually transitions
-    if (_lastKnownPlayingState != null &&
-        _lastKnownPlayingState != isPlaying &&
-        trackId != null) {
-      final ws = _wsService;
-      if (ws != null) {
-        // Mark that we just emitted an event to prevent processing it when it comes back
-        _lastEmittedEventTime = DateTime.now();
+    // Only act when the state actually transitions
+    if (_lastKnownPlayingState == null || _lastKnownPlayingState == isPlaying) {
+      _lastKnownPlayingState = isPlaying;
+      return;
+    }
 
-        if (isPlaying) {
-          final position = audioProvider.position.inSeconds.toDouble();
-          ws.playTrack(
-            widget.playlistId,
-            trackId: trackId,
-            startTime: position,
-          );
-          debugPrint(
-            '📤 Admin play emitted via listener (track: $trackId, pos: $position)',
-          );
-        } else {
-          final position = audioProvider.position.inSeconds.toDouble();
-          ws.pauseTrack(widget.playlistId, currentTime: position);
-          debugPrint('📤 Admin pause emitted via listener (pos: $position)');
+    if (isOwner) {
+      // Admin: pressing play/pause on the local audio player should NOT
+      // change local state independently. Instead, revert the action and
+      // let the server drive via the dedicated admin buttons.
+      if (isPlaying && !_serverIsPlaying) {
+        // Admin pressed play locally but server is paused → pause back locally
+        debugPrint('🚫 Admin local play blocked: server is paused, reverting');
+        _handlingSocketEvent = true;
+        _audioProvider?.pause();
+        _handlingSocketEvent = false;
+        // Don't update _lastKnownPlayingState since we reverted
+        return;
+      } else if (!isPlaying && _serverIsPlaying) {
+        // Admin paused locally but server is playing → this is fine (local pause)
+        // No action needed, local pause is allowed
+      }
+    } else {
+      // Non-admin: when pressing play after local pause, request sync from server
+      if (isPlaying) {
+        final ws = _wsService;
+        if (ws != null) {
+          debugPrint('🔄 Non-admin play: requesting playback sync from server');
+          ws.requestPlaybackSync(widget.playlistId);
         }
       }
+      // Non-admin pause: do nothing (local only)
     }
     _lastKnownPlayingState = isPlaying;
   }
@@ -141,6 +156,23 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         _isListeningToAudio = true;
       }
 
+      // Set up track completion callback for event playlists.
+      // Server-driven: no client should auto-advance or emit track-ended.
+      // The server's EventStreamService handles track progression autonomously.
+      try {
+        final eventProvider = context.read<EventProvider>();
+        final playlist = eventProvider.currentPlaylist;
+        if (playlist != null && playlist.type == EventType.event) {
+          // Both admin and non-admin: do nothing on track complete.
+          // Server drives progression.
+          _audioProvider!.onTrackCompleted = (_) {
+            debugPrint('🏁 Track completed locally: server drives progression');
+          };
+          // Disable auto-advance for event playlists to prevent desync
+          _audioProvider!.disableAutoAdvance();
+        }
+      } catch (_) {}
+
       // Cache current user id for filtering own socket events
       try {
         _currentUserId ??= context.read<AuthProvider>().currentUser?.id;
@@ -159,10 +191,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         }
       });
 
-      // Playlist event listeners
-      ws.on('track-added', (data) {});
-
-      ws.on('track-removed', (data) {});
+      // NOTE: track-added, track-removed, and queue-reordered are handled
+      // by EventProvider's global listeners. Do NOT register handlers here
+      // because off() in cleanup would destroy EventProvider's listeners too.
 
       ws.on('vote-updated', (data) {
         if (mounted) {
@@ -172,42 +203,29 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         }
       });
 
-      ws.on('queue-reordered', (data) {});
-
       ws.on('music-play', (data) async {
         if (!mounted) return;
 
-        // Skip if this event was triggered by the current user's own action
         final controlledBy = data['controlledBy'];
-        debugPrint(
-          '📥 Received music-play event: controlledBy=$controlledBy, currentUserId=$_currentUserId',
-        );
-
-        // Check 1: Skip if controlledBy matches current user
-        if (_currentUserId != null &&
-            controlledBy != null &&
-            controlledBy == _currentUserId) {
-          debugPrint('▶️ Skipping own music-play event (controlledBy match)');
-          return;
-        }
-
-        // Check 2: Skip if we just emitted an event (within last 500ms)
-        // This catches cases where backend doesn't send controlledBy correctly
-        if (_lastEmittedEventTime != null) {
-          final timeSinceEmit = DateTime.now()
-              .difference(_lastEmittedEventTime!)
-              .inMilliseconds;
-          if (timeSinceEmit < 500) {
-            debugPrint(
-              '▶️ Skipping music-play event - too soon after emit ($timeSinceEmit ms)',
-            );
-            return;
-          }
-        }
+        debugPrint('📥 Received music-play event: controlledBy=$controlledBy');
 
         try {
           final trackId = data['trackId'];
           final startTime = data['startTime'];
+
+          // Update server state immediately so admin buttons reflect correct state
+          if (mounted) {
+            setState(() {
+              _serverIsPlaying = true;
+              if (trackId != null) _serverTrackId = trackId as String;
+              if (startTime != null) {
+                _serverPosition = (startTime is double)
+                    ? startTime
+                    : (startTime as num).toDouble();
+              }
+              _lastTimeSyncReceived = DateTime.now();
+            });
+          }
 
           final audioProvider = context.read<AudioPlayerProvider>();
           final eventProvider = context.read<EventProvider>();
@@ -234,40 +252,25 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                 tracks,
                 startIndex: startIndex,
                 autoPlay: false,
+                sourceType: eventProvider.currentPlaylist?.type,
               );
               // Wait for track to be ready before seeking
               await Future.delayed(const Duration(milliseconds: 200));
             }
           }
 
-          // Always seek to the admin's position before resuming to stay in sync
+          // Always seek to the server's position before resuming to stay in sync
           if (startTime != null && audioProvider.currentTrack != null) {
             final int targetSeconds = (startTime is double)
                 ? startTime.round()
                 : (startTime as num).toInt();
-            final currentSeconds = audioProvider.position.inSeconds;
-            final positionDiff = (targetSeconds - currentSeconds).abs();
 
-            debugPrint(
-              '▶️ Position check: target=$targetSeconds, current=$currentSeconds, diff=$positionDiff',
-            );
-
-            // Seek if positions differ by >= 1 second or if we just loaded a new track
-            if (needsTrackLoad || positionDiff >= 1) {
-              debugPrint('▶️ Seeking to $targetSeconds seconds');
-              await audioProvider.seek(Duration(seconds: targetSeconds));
-              if (mounted) {
-                setState(() {
-                  _seekValue = targetSeconds.toDouble();
-                });
-              }
-              await Future.delayed(const Duration(milliseconds: 100));
-            } else {
-              debugPrint('▶️ Skipping seek - positions are close enough');
-            }
+            debugPrint('▶️ Seeking to $targetSeconds seconds');
+            await audioProvider.seek(Duration(seconds: targetSeconds));
+            await Future.delayed(const Duration(milliseconds: 100));
           }
 
-          // Resume playback to sync with admin
+          // Resume playback to sync with server
           if (audioProvider.currentTrack != null && !audioProvider.isPlaying) {
             debugPrint('▶️ Resuming playback');
             await audioProvider.resume();
@@ -284,36 +287,40 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       ws.on('music-pause', (data) async {
         if (!mounted) return;
 
-        // Skip if this event was triggered by the current user's own action
         final controlledBy = data['controlledBy'];
+        final trackId = data['trackId'];
+        final reason = data['reason'] as String?;
         debugPrint(
-          '📥 Received music-pause event: controlledBy=$controlledBy, currentUserId=$_currentUserId',
+          '📥 Received music-pause event: controlledBy=$controlledBy, trackId=$trackId, reason=$reason',
         );
 
-        // Check 1: Skip if controlledBy matches current user
-        if (_currentUserId != null &&
-            controlledBy != null &&
-            controlledBy == _currentUserId) {
-          debugPrint('⏸️ Skipping own music-pause event (controlledBy match)');
+        // If no trackId or reason is no_more_tracks, treat as stop/clear
+        if (trackId == null || reason == 'no_more_tracks') {
+          debugPrint('⏹️ Stopping playback (no trackId or no more tracks)');
+          final audioProvider = context.read<AudioPlayerProvider>();
+          await audioProvider.stop();
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = false;
+          if (mounted) setState(() {});
           return;
         }
 
-        // Check 2: Skip if we just emitted an event (within last 500ms)
-        if (_lastEmittedEventTime != null) {
-          final timeSinceEmit = DateTime.now()
-              .difference(_lastEmittedEventTime!)
-              .inMilliseconds;
-          if (timeSinceEmit < 500) {
-            debugPrint(
-              '⏸️ Skipping music-pause event - too soon after emit ($timeSinceEmit ms)',
-            );
-            return;
-          }
-        }
-
         try {
-          final trackId = data['trackId'];
           final currentTime = data['currentTime'];
+
+          // Update server state immediately so admin buttons reflect correct state
+          if (mounted) {
+            setState(() {
+              _serverIsPlaying = false;
+              if (trackId != null) _serverTrackId = trackId as String;
+              if (currentTime != null) {
+                _serverPosition = (currentTime is double)
+                    ? currentTime
+                    : (currentTime as num).toDouble();
+              }
+              _lastTimeSyncReceived = DateTime.now();
+            });
+          }
 
           final audioProvider = context.read<AudioPlayerProvider>();
           final eventProvider = context.read<EventProvider>();
@@ -322,7 +329,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
 
           // Check if we need to load a different track
           final needsTrackLoad =
-              trackId != null &&
               trackId.toString().isNotEmpty &&
               (audioProvider.currentTrack == null ||
                   audioProvider.currentTrack!.trackId != trackId);
@@ -340,39 +346,22 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                 tracks,
                 startIndex: startIndex,
                 autoPlay: false,
+                sourceType: eventProvider.currentPlaylist?.type,
               );
               await Future.delayed(const Duration(milliseconds: 200));
             }
           }
 
-          // Seek to the admin's paused position to stay in sync
+          // Seek to the server's paused position
           if (currentTime != null && audioProvider.currentTrack != null) {
             final int targetSeconds = (currentTime is double)
                 ? currentTime.round()
                 : (currentTime as num).toInt();
-            final currentSeconds = audioProvider.position.inSeconds;
-            final positionDiff = (targetSeconds - currentSeconds).abs();
-
-            debugPrint(
-              '⏸️ Position check: target=$targetSeconds, current=$currentSeconds, diff=$positionDiff',
-            );
-
-            // Seek if positions differ by >= 1 second or if we just loaded a new track
-            if (needsTrackLoad || positionDiff >= 1) {
-              debugPrint('⏸️ Seeking to $targetSeconds seconds');
-              await audioProvider.seek(Duration(seconds: targetSeconds));
-              if (mounted) {
-                setState(() {
-                  _seekValue = targetSeconds.toDouble();
-                });
-              }
-              await Future.delayed(const Duration(milliseconds: 100));
-            } else {
-              debugPrint('⏸️ Skipping seek - positions are close enough');
-            }
+            await audioProvider.seek(Duration(seconds: targetSeconds));
+            await Future.delayed(const Duration(milliseconds: 100));
           }
 
-          // Pause playback to sync with admin
+          // Pause playback to sync with server
           if (audioProvider.currentTrack != null && audioProvider.isPlaying) {
             debugPrint('⏸️ Pausing playback');
             await audioProvider.pause();
@@ -386,28 +375,37 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         }
       });
 
-      // Listen for admin seek events and update local player position
+      // Listen for server seek events and update local player position
       ws.on('music-seek', (data) async {
         if (!mounted) return;
 
-        // Skip if this event was triggered by the current user's own action
-        final controlledBy = data['controlledBy'];
-        if (_currentUserId != null && controlledBy == _currentUserId) {
-          debugPrint('⏩ Skipping own music-seek event');
-          return;
-        }
+        debugPrint('⏩ Received music-seek event: $data');
 
         try {
           final seekTime = data['seekTime'];
           final trackId = data['trackId'];
           final isPlaying = data['isPlaying'] == true;
 
+          // Update server state immediately
+          if (mounted) {
+            setState(() {
+              _serverIsPlaying = isPlaying;
+              if (trackId != null) _serverTrackId = trackId as String;
+              if (seekTime != null) {
+                _serverPosition = (seekTime is double)
+                    ? seekTime
+                    : (seekTime as num).toDouble();
+              }
+              _lastTimeSyncReceived = DateTime.now();
+            });
+          }
+
           final audioProvider = context.read<AudioPlayerProvider>();
           final eventProvider = context.read<EventProvider>();
 
           _handlingSocketEvent = true;
 
-          // Check if we need to load a track (no track loaded or different track)
+          // Check if we need to load a track
           final needsTrackLoad =
               trackId != null &&
               trackId.isNotEmpty &&
@@ -415,46 +413,34 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                   audioProvider.currentTrack!.trackId != trackId);
 
           if (needsTrackLoad) {
-            // Load the specified track
             final tracks = eventProvider.currentPlaylistTracks;
             if (tracks.isNotEmpty) {
               final index = tracks.indexWhere((t) => t.trackId == trackId);
               final startIndex = index >= 0 ? index : 0;
-
-              // Load the track, seek to position, then set play state
               await audioProvider.playPlaylist(
                 tracks,
                 startIndex: startIndex,
                 autoPlay: false,
+                sourceType: eventProvider.currentPlaylist?.type,
               );
-
-              // Wait for track to be ready before seeking
               await Future.delayed(const Duration(milliseconds: 200));
             }
           }
 
-          // Seek to the admin's position
+          // Seek to the server's position
           if (seekTime != null && audioProvider.currentTrack != null) {
             final int seconds = (seekTime is double)
                 ? seekTime.round()
                 : (seekTime as num).toInt();
-
             await audioProvider.seek(Duration(seconds: seconds));
-            setState(() {
-              _seekValue = seconds.toDouble();
-            });
-
-            // Give seek operation time to complete
             await Future.delayed(const Duration(milliseconds: 100));
           }
 
-          // Sync play/pause state with admin
+          // Sync play/pause state with server
           if (audioProvider.currentTrack != null) {
             if (isPlaying && !audioProvider.isPlaying) {
-              // Admin is playing - resume playback
               await audioProvider.resume();
             } else if (!isPlaying && audioProvider.isPlaying) {
-              // Admin is paused - pause playback
               await audioProvider.pause();
             }
           }
@@ -468,6 +454,214 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       });
 
       ws.on('track-skipped', (data) {});
+
+      // Handle music-stop: clear playback completely
+      ws.on('music-stop', (data) async {
+        if (!mounted) return;
+        debugPrint('⏹️ Music stopped in playlist: $data');
+        try {
+          final audioProvider = context.read<AudioPlayerProvider>();
+          _handlingSocketEvent = true;
+          await audioProvider.stop();
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = false;
+          if (mounted) {
+            setState(() {
+              _serverTrackId = null;
+              _serverIsPlaying = false;
+              _serverPosition = 0;
+              _serverDuration = 0;
+              _lastTimeSyncReceived = null;
+            });
+          }
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling music-stop: $e');
+        }
+      });
+
+      // Handle track-ended: remove the ended track, advance to next
+      ws.on('track-ended', (data) async {
+        if (!mounted) return;
+        debugPrint('⏹️ Track ended in playlist: $data');
+        try {
+          final eventProvider = context.read<EventProvider>();
+          final trackId = data['trackId'] as String?;
+          if (trackId != null &&
+              eventProvider.currentPlaylist?.id == widget.playlistId) {
+            // Remove the ended track from local list
+            eventProvider.removeTrackLocally(trackId);
+            if (mounted) setState(() {});
+          }
+        } catch (e) {
+          debugPrint('Error handling track-ended: $e');
+        }
+      });
+
+      // Handle music-track-changed: load and play the new track
+      ws.on('music-track-changed', (data) async {
+        if (!mounted) return;
+        debugPrint('🔄 Track changed in playlist: $data');
+        try {
+          final trackId = data['trackId'] as String?;
+          final continuePlaying = data['continuePlaying'] == true;
+          final trackDuration = data['trackDuration'];
+
+          if (trackId == null) return;
+
+          // Update server state
+          setState(() {
+            _serverTrackId = trackId;
+            _serverPosition = 0;
+            _serverIsPlaying = continuePlaying;
+            if (trackDuration != null) {
+              _serverDuration = (trackDuration is double)
+                  ? trackDuration
+                  : (trackDuration as num).toDouble();
+            }
+            _lastTimeSyncReceived = DateTime.now();
+          });
+
+          final audioProvider = context.read<AudioPlayerProvider>();
+          final eventProvider = context.read<EventProvider>();
+
+          _handlingSocketEvent = true;
+
+          final tracks = eventProvider.currentPlaylistTracks;
+          if (tracks.isEmpty) {
+            await audioProvider.stop();
+            _handlingSocketEvent = false;
+            _lastKnownPlayingState = false;
+            if (mounted) setState(() {});
+            return;
+          }
+
+          final index = tracks.indexWhere((t) => t.trackId == trackId);
+          final startIndex = index >= 0 ? index : 0;
+
+          await audioProvider.playPlaylist(
+            tracks,
+            startIndex: startIndex,
+            autoPlay: continuePlaying,
+            sourceType: eventProvider.currentPlaylist?.type,
+          );
+
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = continuePlaying;
+          if (mounted) setState(() {});
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling music-track-changed: $e');
+        }
+      });
+
+      // Handle playback-sync: sync state when joining the room or after local play
+      ws.on('playback-sync', (data) async {
+        if (!mounted) return;
+        debugPrint('🔄 Playback sync received: $data');
+        try {
+          final trackId = data['currentTrackId'] as String?;
+          final startTime = data['startTime'];
+          final isPlaying = data['isPlaying'] == true;
+
+          if (trackId == null) return;
+
+          final audioProvider = context.read<AudioPlayerProvider>();
+          final eventProvider = context.read<EventProvider>();
+
+          _handlingSocketEvent = true;
+
+          // Update server state for admin seek bar
+          if (mounted) {
+            setState(() {
+              _serverTrackId = trackId;
+              _serverIsPlaying = isPlaying;
+              if (startTime != null) {
+                _serverPosition = (startTime is double)
+                    ? startTime
+                    : (startTime as num).toDouble();
+              }
+              _lastTimeSyncReceived = DateTime.now();
+            });
+          }
+
+          // Check if we need to load this track
+          final needsTrackLoad =
+              audioProvider.currentTrack == null ||
+              audioProvider.currentTrack!.trackId != trackId;
+
+          if (needsTrackLoad) {
+            final tracks = eventProvider.currentPlaylistTracks;
+            if (tracks.isNotEmpty) {
+              final index = tracks.indexWhere((t) => t.trackId == trackId);
+              final startIndex = index >= 0 ? index : 0;
+              await audioProvider.playPlaylist(
+                tracks,
+                startIndex: startIndex,
+                autoPlay: false,
+                sourceType: eventProvider.currentPlaylist?.type,
+              );
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
+          }
+
+          // Seek to current position
+          if (startTime != null && audioProvider.currentTrack != null) {
+            final int targetSeconds = (startTime is double)
+                ? startTime.round()
+                : (startTime as num).toInt();
+            await audioProvider.seek(Duration(seconds: targetSeconds));
+            await Future.delayed(const Duration(milliseconds: 100));
+          }
+
+          // Sync play/pause state
+          if (audioProvider.currentTrack != null) {
+            if (isPlaying && !audioProvider.isPlaying) {
+              await audioProvider.resume();
+            } else if (!isPlaying && audioProvider.isPlaying) {
+              await audioProvider.pause();
+            }
+          }
+
+          _handlingSocketEvent = false;
+          _lastKnownPlayingState = isPlaying;
+        } catch (e) {
+          _handlingSocketEvent = false;
+          debugPrint('Error handling playback-sync: $e');
+        }
+      });
+
+      // Handle time-sync: periodic server position updates for admin seek bar
+      ws.on('time-sync', (data) {
+        if (!mounted) return;
+        try {
+          final trackId = data['trackId'] as String?;
+          final position = data['currentTime']; // server sends as 'currentTime'
+          final duration =
+              data['trackDuration']; // server sends as 'trackDuration'
+          final isPlaying = data['isPlaying'] == true;
+
+          if (trackId == null) return;
+
+          setState(() {
+            _serverTrackId = trackId;
+            _serverIsPlaying = isPlaying;
+            if (position != null) {
+              _serverPosition = (position is double)
+                  ? position
+                  : (position as num).toDouble();
+            }
+            if (duration != null) {
+              _serverDuration = (duration is double)
+                  ? duration
+                  : (duration as num).toDouble();
+            }
+            _lastTimeSyncReceived = DateTime.now();
+          });
+        } catch (e) {
+          debugPrint('Error handling time-sync: $e');
+        }
+      });
     } catch (e) {
       debugPrint('Error joining event playlist room: $e');
     }
@@ -478,23 +672,27 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       // Stop listening to audio player state changes
       if (_isListeningToAudio && _audioProvider != null) {
         _audioProvider!.removeListener(_onAudioStateChanged);
+        _audioProvider!.onTrackCompleted = null;
         _isListeningToAudio = false;
       }
 
       final ws = _wsService ?? context.read<WebSocketService>();
       ws.leaveEventPlaylist(widget.playlistId);
 
-      // Clean up listeners
+      // Clean up listeners (do NOT off track-added/track-removed/queue-reordered
+      // as they are managed by EventProvider)
       ws.off('user-joined-playlist');
       ws.off('user-left-playlist');
-      ws.off('track-added');
-      ws.off('track-removed');
       ws.off('vote-updated');
-      ws.off('queue-reordered');
       ws.off('music-play');
       ws.off('music-pause');
+      ws.off('music-stop');
       ws.off('music-seek');
       ws.off('track-skipped');
+      ws.off('track-ended');
+      ws.off('music-track-changed');
+      ws.off('playback-sync');
+      ws.off('time-sync');
       _hasJoinedRoom = false;
     } catch (e) {
       debugPrint('Error leaving event playlist room: $e');
@@ -506,6 +704,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
     // Stop listening to audio player state changes
     if (_isListeningToAudio && _audioProvider != null) {
       _audioProvider!.removeListener(_onAudioStateChanged);
+      _audioProvider!.onTrackCompleted = null;
       _isListeningToAudio = false;
     }
 
@@ -515,14 +714,16 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         _wsService!.leaveEventPlaylist(widget.playlistId);
         _wsService!.off('user-joined-playlist');
         _wsService!.off('user-left-playlist');
-        _wsService!.off('track-added');
-        _wsService!.off('track-removed');
         _wsService!.off('vote-updated');
-        _wsService!.off('queue-reordered');
         _wsService!.off('music-play');
         _wsService!.off('music-pause');
+        _wsService!.off('music-stop');
         _wsService!.off('music-seek');
         _wsService!.off('track-skipped');
+        _wsService!.off('track-ended');
+        _wsService!.off('music-track-changed');
+        _wsService!.off('playback-sync');
+        _wsService!.off('time-sync');
         _hasJoinedRoom = false;
       }
     } catch (e) {
@@ -585,6 +786,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
     if (playlist != null && playlist.type == EventType.event) {
       final votingProvider = context.read<VotingProvider>();
       await votingProvider.setCurrentEvent(widget.playlistId);
+
+      // Set up track completion callback: server drives progression
+      if (_audioProvider != null) {
+        _audioProvider!.onTrackCompleted = (_) {
+          debugPrint('🏁 Track completed locally: server drives progression');
+        };
+      }
     }
   }
 
@@ -684,10 +892,24 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         ),
         floatingActionButton: _isEditMode
             ? null
-            : FloatingActionButton(
-                onPressed: _showAddTrackDialog,
-                tooltip: 'Add Track',
-                child: const Icon(Icons.add),
+            : Consumer2<EventProvider, AuthProvider>(
+                builder: (context, eventProvider, authProvider, _) {
+                  final playlist = eventProvider.currentPlaylist;
+                  final isEvent = playlist?.type == EventType.event;
+                  final isOwner =
+                      authProvider.currentUser?.id == playlist?.creatorId;
+
+                  // Hide FAB for non-admin users on event playlists
+                  if (isEvent == true && isOwner != true) {
+                    return const SizedBox.shrink();
+                  }
+
+                  return FloatingActionButton(
+                    onPressed: _showAddTrackDialog,
+                    tooltip: 'Add Track',
+                    child: const Icon(Icons.add),
+                  );
+                },
               ),
       ),
     );
@@ -833,16 +1055,138 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                         ),
                       const SizedBox(height: 12),
 
-                      // Seek bar for admins (only for events)
+                      // Seek bar — visible for:
+                      //  • Event playlists: admin/owner only (reflects server position via time-sync)
+                      //  • Standard playlists: all users (local-only seek)
                       Consumer2<AuthProvider, AudioPlayerProvider>(
                         builder: (context, authProvider, audioProvider, _) {
                           final currentUser = authProvider.currentUser;
                           final isOwner = currentUser?.id == playlist.creatorId;
-                          if (playlist.type != EventType.event) {
+                          final isEvent = playlist.type == EventType.event;
+
+                          if (isEvent) {
+                            // For events: admin-only seek bar driven by server time-sync
+                            if (!isOwner) return const SizedBox.shrink();
+
+                            // Show when we have server state
+                            if (_serverTrackId == null &&
+                                !audioProvider.hasCurrentTrack) {
+                              return const SizedBox.shrink();
+                            }
+
+                            final durationSeconds = _serverDuration > 0
+                                ? _serverDuration
+                                : (audioProvider.duration.inSeconds > 0
+                                      ? audioProvider.duration.inSeconds
+                                            .toDouble()
+                                      : 1.0);
+
+                            // Compute interpolated position:
+                            // server sends position every ~1s, so interpolate between syncs
+                            double currentPos = _serverPosition;
+                            if (_serverIsPlaying &&
+                                _lastTimeSyncReceived != null) {
+                              final elapsed =
+                                  DateTime.now()
+                                      .difference(_lastTimeSyncReceived!)
+                                      .inMilliseconds /
+                                  1000.0;
+                              currentPos = (_serverPosition + elapsed).clamp(
+                                0.0,
+                                durationSeconds,
+                              );
+                            }
+
+                            final displayedValue = _isSeeking
+                                ? _seekValue
+                                : currentPos.clamp(0.0, durationSeconds);
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Slider(
+                                  value: displayedValue.clamp(
+                                    0.0,
+                                    durationSeconds,
+                                  ),
+                                  min: 0.0,
+                                  max: durationSeconds > 0
+                                      ? durationSeconds
+                                      : 1.0,
+                                  activeColor: Colors.white,
+                                  inactiveColor: Colors.white38,
+                                  onChangeStart: (v) {
+                                    setState(() {
+                                      _isSeeking = true;
+                                      _seekValue = v;
+                                    });
+                                  },
+                                  onChanged: (v) {
+                                    setState(() {
+                                      _seekValue = v;
+                                    });
+                                  },
+                                  onChangeEnd: (v) async {
+                                    setState(() {
+                                      _isSeeking = false;
+                                      _seekValue = v;
+                                    });
+
+                                    // Emit server seek command (admin only)
+                                    try {
+                                      final ws =
+                                          _wsService ??
+                                          context.read<WebSocketService>();
+                                      ws.seekTrack(
+                                        widget.playlistId,
+                                        v,
+                                        _serverTrackId ??
+                                            audioProvider.currentTrack?.trackId,
+                                        _serverIsPlaying,
+                                      );
+                                    } catch (_) {}
+                                  },
+                                ),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      audioProvider.formatDuration(
+                                        Duration(
+                                          seconds: displayedValue.toInt(),
+                                        ),
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      audioProvider.formatDuration(
+                                        Duration(
+                                          seconds: durationSeconds.toInt(),
+                                        ),
+                                      ),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            );
+                          }
+
+                          // Standard playlist: local seek bar for all users
+                          if (!audioProvider.hasCurrentTrack) {
                             return const SizedBox.shrink();
                           }
-                          // Only show seek control to admins/owners
-                          if (!isOwner) return const SizedBox.shrink();
+                          if (audioProvider.sourcePlaylistId !=
+                              widget.playlistId) {
+                            return const SizedBox.shrink();
+                          }
 
                           final durationSeconds =
                               audioProvider.duration.inSeconds > 0
@@ -871,53 +1215,28 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                     : 1.0,
                                 activeColor: Colors.white,
                                 inactiveColor: Colors.white38,
-                                onChangeStart: isOwner
-                                    ? (v) {
-                                        setState(() {
-                                          _isSeeking = true;
-                                          _seekValue = v;
-                                        });
-                                      }
-                                    : null,
-                                onChanged: isOwner
-                                    ? (v) {
-                                        setState(() {
-                                          _seekValue = v;
-                                        });
-                                      }
-                                    : null,
-                                onChangeEnd: isOwner
-                                    ? (v) async {
-                                        setState(() {
-                                          _isSeeking = false;
-                                          _seekValue = v;
-                                        });
-
-                                        try {
-                                          // Seek locally first
-                                          await audioProvider.seek(
-                                            Duration(seconds: v.toInt()),
-                                          );
-                                        } catch (_) {}
-
-                                        try {
-                                          final ws =
-                                              _wsService ??
-                                              context.read<WebSocketService>();
-                                          final currentTrackId = audioProvider
-                                              .currentTrack
-                                              ?.trackId;
-                                          final isPlaying =
-                                              audioProvider.isPlaying;
-                                          ws.seekTrack(
-                                            widget.playlistId,
-                                            v,
-                                            currentTrackId,
-                                            isPlaying,
-                                          );
-                                        } catch (_) {}
-                                      }
-                                    : null,
+                                onChangeStart: (v) {
+                                  setState(() {
+                                    _isSeeking = true;
+                                    _seekValue = v;
+                                  });
+                                },
+                                onChanged: (v) {
+                                  setState(() {
+                                    _seekValue = v;
+                                  });
+                                },
+                                onChangeEnd: (v) async {
+                                  setState(() {
+                                    _isSeeking = false;
+                                    _seekValue = v;
+                                  });
+                                  try {
+                                    await audioProvider.seek(
+                                      Duration(seconds: v.toInt()),
+                                    );
+                                  } catch (_) {}
+                                },
                               ),
                               Row(
                                 mainAxisAlignment:
@@ -946,6 +1265,160 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                 ],
                               ),
                             ],
+                          );
+                        },
+                      ),
+
+                      // Admin playback controls (play/pause/skip/stop) for event playlists
+                      // These only send commands to the server. Local playback is driven
+                      // by server events (music-play, music-pause, etc.)
+                      Consumer2<AuthProvider, AudioPlayerProvider>(
+                        builder: (context, authProvider, audioProvider, _) {
+                          final currentUser = authProvider.currentUser;
+                          final isOwner = currentUser?.id == playlist.creatorId;
+                          final isEvent = playlist.type == EventType.event;
+
+                          // Only show for admin/owner of event playlists
+                          if (!isEvent || !isOwner) {
+                            return const SizedBox.shrink();
+                          }
+
+                          // Use server state for button icons
+                          final serverPlaying = _serverIsPlaying;
+                          final hasServerTrack = _serverTrackId != null;
+                          final hasTracks =
+                              eventProvider.currentPlaylistTracks.isNotEmpty;
+
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                // Skip button (only when server has a track playing)
+                                if (hasServerTrack)
+                                  Material(
+                                    color: Colors.white.withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(24),
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(24),
+                                      onTap: () {
+                                        // Emit skip command to server
+                                        final ws = _wsService;
+                                        if (ws != null) {
+                                          ws.skipTrack(widget.playlistId);
+                                          debugPrint('📤 Admin skip emitted');
+                                        }
+                                      },
+                                      child: Container(
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
+                                        ),
+                                        child: const Icon(
+                                          Icons.skip_next,
+                                          color: Colors.white,
+                                          size: 28,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (hasServerTrack) const SizedBox(width: 12),
+                                // Play/Pause button — sends server command
+                                Material(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(24),
+                                    onTap: () {
+                                      final ws = _wsService;
+                                      if (ws == null) return;
+
+                                      if (hasServerTrack && serverPlaying) {
+                                        // Pause the server stream
+                                        ws.pauseTrack(
+                                          widget.playlistId,
+                                          currentTime: _serverPosition,
+                                        );
+                                        debugPrint('📤 Admin pause emitted');
+                                      } else if (hasServerTrack &&
+                                          !serverPlaying) {
+                                        // Resume the server stream
+                                        ws.playTrack(
+                                          widget.playlistId,
+                                          trackId: _serverTrackId,
+                                          startTime: _serverPosition,
+                                        );
+                                        debugPrint('📤 Admin resume emitted');
+                                      } else if (hasTracks) {
+                                        // Start playing from the first track
+                                        final firstTrack = eventProvider
+                                            .currentPlaylistTracks
+                                            .first;
+                                        ws.playTrack(
+                                          widget.playlistId,
+                                          trackId: firstTrack.trackId,
+                                          startTime: 0,
+                                        );
+                                        debugPrint(
+                                          '📤 Admin start emitted (first track)',
+                                        );
+                                      }
+                                    },
+                                    child: Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                      child: Icon(
+                                        (serverPlaying && hasServerTrack)
+                                            ? Icons.pause
+                                            : Icons.play_arrow,
+                                        color: Colors.white,
+                                        size: 28,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                // Stop button — sends server stop command
+                                Material(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(24),
+                                    onTap: hasServerTrack
+                                        ? () {
+                                            final ws = _wsService;
+                                            if (ws != null) {
+                                              ws.stopStream(widget.playlistId);
+                                              debugPrint(
+                                                '📤 Admin stop emitted',
+                                              );
+                                            }
+                                          }
+                                        : null,
+                                    child: Container(
+                                      width: 44,
+                                      height: 44,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                      child: Icon(
+                                        Icons.stop,
+                                        color: hasServerTrack
+                                            ? Colors.white
+                                            : Colors.white38,
+                                        size: 28,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
                         },
                       ),
@@ -1037,8 +1510,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                       itemBuilder: (context, index) {
                         final track =
                             eventProvider.currentPlaylistTracks[index];
-                        // First track (index 0) is the current/next track and should not be votable
-                        final isFirstTrack = index == 0;
+                        final isEventPlaylist =
+                            playlist.type == EventType.event;
+                        // First track is "current" only in event playlists
+                        final isFirstTrack = isEventPlaylist && index == 0;
 
                         return AnimatedSize(
                           key: Key('track_${track.id}'),
@@ -1048,9 +1523,20 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                             builder: (context, audioProvider, _) {
                               final isCurrentlyPlaying =
                                   audioProvider.currentTrack?.id == track.id;
-                              // Consider a track as "current" if it's playing OR if it's the first in queue
-                              final isCurrentTrack =
-                                  isCurrentlyPlaying || isFirstTrack;
+                              // Check if playback is active for this playlist
+                              final isSourcePlaylist =
+                                  audioProvider.sourcePlaylistId ==
+                                  widget.playlistId;
+                              final isPlaybackActive =
+                                  isSourcePlaylist &&
+                                  audioProvider.currentTrack != null;
+                              // In event playlists: first track is "current" only when playback is active
+                              // When not playing, first track is unlocked (treated like any other track)
+                              // In standard playlists: only the actually playing track is "current"
+                              final isCurrentTrack = isEventPlaylist
+                                  ? (isCurrentlyPlaying ||
+                                        (isFirstTrack && isPlaybackActive))
+                                  : isCurrentlyPlaying;
 
                               return Consumer<AuthProvider>(
                                 builder: (context, authProvider, _) {
@@ -1064,7 +1550,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                   final trackContent = AnimatedContainer(
                                     duration: const Duration(milliseconds: 300),
                                     curve: Curves.easeInOut,
-                                    decoration: isFirstTrack
+                                    decoration:
+                                        (isFirstTrack && isPlaybackActive)
                                         ? BoxDecoration(
                                             color: Colors.purple.shade50,
                                             borderRadius: BorderRadius.circular(
@@ -1078,14 +1565,46 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                         : null,
                                     child: GestureDetector(
                                       onTap: () async {
-                                        // Play this track and set the playlist.
-                                        // The _onAudioStateChanged listener will
-                                        // automatically emit the play-track socket
-                                        // event when it detects the state transition.
-                                        await audioProvider.playPlaylist(
-                                          eventProvider.currentPlaylistTracks,
-                                          startIndex: index,
-                                        );
+                                        // In event playlists, only admin/owner can
+                                        // manually pick a track. Other users rely
+                                        // on votes to decide the next track.
+                                        if (isEventPlaylist && !isOwner) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Only the admin can control playback. Use votes to influence the next track!',
+                                              ),
+                                              duration: Duration(seconds: 2),
+                                            ),
+                                          );
+                                          return;
+                                        }
+
+                                        if (isEventPlaylist && isOwner) {
+                                          // Admin: send change-track command to server.
+                                          // Server will broadcast music-track-changed
+                                          // which drives local playback for all users.
+                                          final ws = _wsService;
+                                          if (ws != null) {
+                                            ws.playTrack(
+                                              widget.playlistId,
+                                              trackId: track.trackId,
+                                              startTime: 0,
+                                            );
+                                            debugPrint(
+                                              '📤 Admin change-track emitted (track: ${track.trackId})',
+                                            );
+                                          }
+                                        } else {
+                                          // Standard playlist: play directly.
+                                          await audioProvider.playPlaylist(
+                                            eventProvider.currentPlaylistTracks,
+                                            startIndex: index,
+                                            sourceType: playlist.type,
+                                          );
+                                        }
                                       },
                                       child: Container(
                                         key: Key('track_container_${track.id}'),
@@ -1211,45 +1730,138 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                               ),
                                             ),
 
-                                            // For first track: Show "NOW PLAYING" badge instead of voting
+                                            // For first track: Show playing/paused badge when playback is active
+                                            // When not playing, first track is unlocked and shows voting like other tracks
                                             if (isFirstTrack &&
                                                 playlist.type ==
                                                     EventType.event)
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 6,
-                                                    ),
-                                                decoration: BoxDecoration(
-                                                  color: Theme.of(
-                                                    context,
-                                                  ).colorScheme.primary,
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.play_circle_filled,
-                                                      color: Colors.white,
-                                                      size: 16,
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Text(
-                                                      'NOW PLAYING',
-                                                      style: TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 11,
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                        letterSpacing: 0.5,
+                                              Builder(
+                                                builder: (context) {
+                                                  final isSourcePlaylist =
+                                                      audioProvider
+                                                          .sourcePlaylistId ==
+                                                      widget.playlistId;
+                                                  final isActuallyPlaying =
+                                                      isSourcePlaylist &&
+                                                      audioProvider.isPlaying;
+                                                  final isPaused =
+                                                      isSourcePlaylist &&
+                                                      !audioProvider
+                                                          .isPlaying &&
+                                                      audioProvider
+                                                              .currentTrack !=
+                                                          null;
+
+                                                  // Only show badge when track is playing or paused
+                                                  // When not playing at all, show voting widget (unlocked first track)
+                                                  if (isActuallyPlaying ||
+                                                      isPaused) {
+                                                    final String badgeText;
+                                                    final IconData badgeIcon;
+                                                    final Color badgeColor;
+
+                                                    if (isActuallyPlaying) {
+                                                      badgeText = 'PLAYING';
+                                                      badgeIcon = Icons
+                                                          .play_circle_filled;
+                                                      badgeColor = Theme.of(
+                                                        context,
+                                                      ).colorScheme.primary;
+                                                    } else {
+                                                      badgeText = 'PAUSED';
+                                                      badgeIcon = Icons
+                                                          .pause_circle_filled;
+                                                      badgeColor = Colors
+                                                          .orange
+                                                          .shade700;
+                                                    }
+
+                                                    return Container(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            horizontal: 12,
+                                                            vertical: 6,
+                                                          ),
+                                                      decoration: BoxDecoration(
+                                                        color: badgeColor,
+                                                        borderRadius:
+                                                            BorderRadius.circular(
+                                                              16,
+                                                            ),
                                                       ),
-                                                    ),
-                                                  ],
-                                                ),
+                                                      child: Row(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            badgeIcon,
+                                                            color: Colors.white,
+                                                            size: 16,
+                                                          ),
+                                                          const SizedBox(
+                                                            width: 6,
+                                                          ),
+                                                          Text(
+                                                            badgeText,
+                                                            style: TextStyle(
+                                                              color:
+                                                                  Colors.white,
+                                                              fontSize: 11,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              letterSpacing:
+                                                                  0.5,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    );
+                                                  }
+
+                                                  // Not playing: show voting widget (first track is unlocked)
+                                                  return Consumer<
+                                                    VotingProvider
+                                                  >(
+                                                    builder: (context, votingProvider, _) {
+                                                      final voteInfo =
+                                                          votingProvider
+                                                              .getTrackVoteInfo(
+                                                                track.trackId,
+                                                              );
+                                                      final userVote =
+                                                          votingProvider
+                                                              .getUserVote(
+                                                                track.trackId,
+                                                              );
+
+                                                      return CompactTrackVotingWidget(
+                                                        score:
+                                                            voteInfo?.score ??
+                                                            0,
+                                                        userVote: userVote,
+                                                        isCurrentTrack:
+                                                            isCurrentTrack,
+                                                        isEnabled:
+                                                            playlist
+                                                                .votingEnabled ??
+                                                            true,
+                                                        onVote: (voteType) {
+                                                          votingProvider.vote(
+                                                            track.trackId,
+                                                            voteType,
+                                                          );
+                                                        },
+                                                        onRemoveVote: () {
+                                                          votingProvider
+                                                              .removeVote(
+                                                                track.trackId,
+                                                              );
+                                                        },
+                                                      );
+                                                    },
+                                                  );
+                                                },
                                               )
                                             // Voting Widget (Events only, not playlists, not first track)
                                             else if (playlist.type ==

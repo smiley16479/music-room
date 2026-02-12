@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../config/app_config.dart';
+import '../models/event.dart';
 import '../models/playlist_track.dart';
 import '../services/audio_player_service.dart';
 
@@ -13,6 +14,14 @@ class AudioPlayerProvider extends ChangeNotifier {
   PlaylistTrack? _currentTrack;
   List<PlaylistTrack> _playlist = [];
   int _currentIndex = -1;
+
+  // The playlist/event ID the current track was started from.
+  // Used by the mini player to navigate back to the correct screen.
+  String? _sourcePlaylistId;
+
+  // The type (event vs playlist) of the source.
+  // Used by the mini player to build the correct navigation stack.
+  EventType? _sourcePlaylistType;
 
   // Player state
   bool _isPlaying = false;
@@ -38,6 +47,26 @@ class AudioPlayerProvider extends ChangeNotifier {
   double get volume => _volume;
   String? get error => _error;
   bool get hasCurrentTrack => _currentTrack != null;
+  String? get sourcePlaylistId => _sourcePlaylistId;
+  EventType? get sourcePlaylistType => _sourcePlaylistType;
+
+  // Callback invoked when a track completes. If set, auto-advance is skipped
+  // and the callback is responsible for handling track progression.
+  // Used by event playlists where the server manages track order.
+  void Function(PlaylistTrack track)? onTrackCompleted;
+
+  // Flag to disable auto-advance completely (for event playlists)
+  bool _autoAdvanceDisabled = false;
+
+  /// Disable auto-advance for event playlists where server controls progression
+  void disableAutoAdvance() {
+    _autoAdvanceDisabled = true;
+  }
+
+  /// Re-enable auto-advance for regular playlists
+  void enableAutoAdvance() {
+    _autoAdvanceDisabled = false;
+  }
 
   /// Initialize stream listeners
   void _initListeners() {
@@ -49,7 +78,14 @@ class AudioPlayerProvider extends ChangeNotifier {
 
       // Auto-play next track when current one completes
       if (state.processingState == ProcessingState.completed) {
-        _playNext();
+        if (onTrackCompleted != null && _currentTrack != null) {
+          // Let the caller (event playlist screen) handle track completion
+          onTrackCompleted!(_currentTrack!);
+        } else if (!_autoAdvanceDisabled) {
+          // Auto-advance only if not disabled
+          _playNext();
+        }
+        // If auto-advance is disabled and no callback, do nothing (wait for server)
       }
 
       notifyListeners();
@@ -73,6 +109,15 @@ class AudioPlayerProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Stop current playback and clear track to prevent replaying old audio
+      await _audioService.stop();
+      _currentTrack = null;
+      _position = Duration.zero;
+      notifyListeners();
+      
+      // Small delay to ensure player state is clean
+      await Future.delayed(const Duration(milliseconds: 50));
+      
       // First, try to get full audio stream from YouTube via backend
       String? audioUrl = await _getFullAudioStreamUrl(track.trackId);
 
@@ -130,11 +175,15 @@ class AudioPlayerProvider extends ChangeNotifier {
     List<PlaylistTrack> tracks, {
     int startIndex = 0,
     bool autoPlay = true,
+    EventType? sourceType,
   }) async {
     if (tracks.isEmpty) return;
 
     _playlist = List.from(tracks);
     _currentIndex = startIndex.clamp(0, tracks.length - 1);
+    // Remember which playlist/event these tracks came from
+    _sourcePlaylistId = tracks.first.playlistId;
+    _sourcePlaylistType = sourceType;
     // Clear current track to ensure proper initialization when switching tracks
     _currentTrack = null;
     await playTrack(_playlist[_currentIndex], autoPlay: autoPlay);
@@ -203,6 +252,8 @@ class AudioPlayerProvider extends ChangeNotifier {
   Future<void> stop() async {
     await _audioService.stop();
     _currentTrack = null;
+    _sourcePlaylistId = null;
+    _sourcePlaylistType = null;
     _isPlaying = false;
     _position = Duration.zero;
     _duration = Duration.zero;
