@@ -458,6 +458,14 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remove a track from the local playlist list (no API call).
+  /// Used when a track-ended event comes from the server and
+  /// the track has already been removed on the backend.
+  void removeTrackLocally(String trackId) {
+    _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
+    notifyListeners();
+  }
+
   /// Remove a track from the playlist (calls API and updates local list)
   Future<bool> removeTrackFromPlaylist(
     String playlistId,

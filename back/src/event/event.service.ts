@@ -843,16 +843,36 @@ export class EventService {
         const voteValue = vote.type === VoteType.UPVOTE ? vote.weight : -vote.weight;
         trackScores.set(vote.trackId, currentScore + voteValue);
       }
-      // Sort all tracks by score descending (highest-voted first).
-      // Tie-breaker: keep original position order.
-      const sortedTracks = [...event.tracks].sort((a, b) => a.position - b.position);
 
-      sortedTracks.sort((a, b) => {
+      // Separate the currently playing track (keep at position 1) from the rest
+      const allTracks = [...event.tracks].sort((a, b) => a.position - b.position);
+      const currentTrackId = event.currentTrackId;
+      let currentTrack: PlaylistTrack | null = null;
+      const otherTracks: PlaylistTrack[] = [];
+
+      for (const t of allTracks) {
+        if (currentTrackId && t.trackId === currentTrackId) {
+          currentTrack = t;
+        } else {
+          otherTracks.push(t);
+        }
+      }
+
+      // Sort only the non-playing tracks by score descending.
+      // Tie-breaker: keep original position order.
+      otherTracks.sort((a, b) => {
         const scoreA = trackScores.get(a.trackId) || 0;
         const scoreB = trackScores.get(b.trackId) || 0;
         if (scoreA !== scoreB) return scoreB - scoreA; // higher score first
         return a.position - b.position; // stable fallback
       });
+
+      // Build final order: current track first, then sorted others
+      const sortedTracks: PlaylistTrack[] = [];
+      if (currentTrack) {
+        sortedTracks.push(currentTrack);
+      }
+      sortedTracks.push(...otherTracks);
 
       // Assign new positions starting at 1
       const tracksToUpdate: PlaylistTrack[] = [];
@@ -1239,6 +1259,20 @@ export class EventService {
       console.error('ERROR:', error);
       
     }
+  }
+
+  // Clear current track when no tracks are left in the event
+  async clearCurrentTrack(eventId: string): Promise<void> {
+    const event = await this.eventRepository.findOne({ where: { id: eventId } });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    event.currentTrackId = null as any;
+    event.currentTrackStartedAt = null as any;
+    event.currentPosition = 0;
+    event.isPlaying = false;
+    event.lastPositionUpdate = new Date();
+    await this.eventRepository.save(event);
   }
 
   // Update current track for an event (for music synchronization)
@@ -1780,12 +1814,17 @@ export class EventService {
   async addTrack(eventId: string, userId: string, dto: AddTrackToPlaylistDto): Promise<any> {
     const event = await this.findById(eventId, userId);
 
-    // Only creator or admin can add tracks
     const isCreator = event.creatorId === userId;
     const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
 
+    // For events, only creator or admins can add tracks (non-admin users cannot)
+    // For playlists, same restriction applies
     if (!isCreator && !isAdmin) {
-      throw new ForbiddenException('Only the creator or admins can add tracks');
+      throw new ForbiddenException(
+        event.type === EventType.EVENT
+          ? 'Only the creator or admins can add tracks to events'
+          : 'Only the creator or admins can add tracks',
+      );
     }
 
     // Get or create track from Deezer ID

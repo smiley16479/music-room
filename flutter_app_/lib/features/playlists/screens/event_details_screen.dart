@@ -27,6 +27,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   bool _hasJoinedRoom = false;
   bool _hasLoadedEvent = false;
 
+  // Connected users currently in the event detail / playlist rooms
+  List<Map<String, dynamic>> _connectedUsers = [];
+
   // Text Controllers
   late TextEditingController _nameController;
   late TextEditingController _descriptionController;
@@ -97,16 +100,41 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       ws.joinEventDetail(widget.eventId);
       _hasJoinedRoom = true;
 
+      // Receive the full list of currently connected users when joining
+      ws.on('current-participants-detail', (data) {
+        if (mounted) {
+          final participants = data['participants'] as List<dynamic>? ?? [];
+          setState(() {
+            _connectedUsers = participants
+                .map((p) => Map<String, dynamic>.from(p as Map))
+                .toList();
+          });
+          debugPrint('📋 Received ${_connectedUsers.length} current detail participants');
+        }
+      });
+
       // Listen for users joining/leaving the detail room
       ws.on('user-joined-detail', (data) {
         if (mounted) {
+          final userId = data['userId'] as String?;
+          if (userId == null) return;
           debugPrint('📋 User joined event detail: ${data['displayName']}');
+          setState(() {
+            // Avoid duplicates
+            _connectedUsers.removeWhere((u) => u['userId'] == userId);
+            _connectedUsers.add(Map<String, dynamic>.from(data as Map));
+          });
         }
       });
 
       ws.on('user-left-detail', (data) {
         if (mounted) {
+          final userId = data['userId'] as String?;
+          if (userId == null) return;
           debugPrint('📋 User left event detail: ${data['displayName']}');
+          setState(() {
+            _connectedUsers.removeWhere((u) => u['userId'] == userId);
+          });
         }
       });
     } catch (e) {
@@ -122,6 +150,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       // Clean up listeners
       ws.off('user-joined-detail');
       ws.off('user-left-detail');
+      ws.off('current-participants-detail');
       _hasJoinedRoom = false;
     } catch (e) {
       debugPrint('Error leaving event detail room: $e');
@@ -136,6 +165,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
         _wsService!.leaveEventDetail(widget.eventId);
         _wsService!.off('user-joined-detail');
         _wsService!.off('user-left-detail');
+        _wsService!.off('current-participants-detail');
         _hasJoinedRoom = false;
       }
     } catch (e) {
@@ -893,10 +923,11 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   ) {
     // Get cover image from event or first track
     final String? eventCover =
-        event.coverImageUrl ??
-        (eventProvider.currentPlaylistTracks.isNotEmpty
-            ? eventProvider.currentPlaylistTracks.first.coverUrl
-            : null);
+      event.coverImageUrl ??
+      ((eventProvider.currentPlaylistTracks != null &&
+          eventProvider.currentPlaylistTracks.isNotEmpty)
+        ? eventProvider.currentPlaylistTracks.first.coverUrl
+        : null);
 
     return SingleChildScrollView(
       child: Center(
@@ -1216,17 +1247,16 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
 
                     const SizedBox(height: 24),
 
-                    // Participants Section
+                    // Connected Users Section (live from WebSocket rooms)
                     Text(
-                      'Participants (${event.participants?.length ?? 0})',
+                      'Connected Users (${_connectedUsers.length})',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 12),
 
-                    if (event.participants != null &&
-                        event.participants!.isNotEmpty)
+                    if (_connectedUsers.isNotEmpty)
                       Container(
                         decoration: BoxDecoration(
                           border: Border.all(color: Colors.grey.shade300),
@@ -1235,22 +1265,23 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                         child: ListView.separated(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          itemCount: event.participants!.length,
+                          itemCount: _connectedUsers.length,
                           separatorBuilder: (context, index) =>
                               const Divider(height: 1),
                           itemBuilder: (context, index) {
-                            final participant = event.participants![index];
-                            final user = participant.user;
-                            final name = user?.displayName ?? 'Unknown User';
-                            final isCreator = user?.id == event.creatorId;
+                            final user = _connectedUsers[index];
+                            final name = user['displayName'] as String? ?? 'Unknown User';
+                            final avatarUrl = user['avatarUrl'] as String?;
+                            final userId = user['userId'] as String?;
+                            final isCreator = userId == event.creatorId;
 
                             return ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: Colors.blue.shade100,
-                                child: user?.avatarUrl != null
+                                backgroundColor: Colors.green.shade100,
+                                child: avatarUrl != null && avatarUrl.isNotEmpty
                                     ? ClipOval(
                                         child: Image.network(
-                                          user!.avatarUrl!,
+                                          avatarUrl,
                                           width: 40,
                                           height: 40,
                                           fit: BoxFit.cover,
@@ -1258,13 +1289,13 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                                               (context, error, stackTrace) =>
                                                   Icon(
                                                     Icons.person,
-                                                    color: Colors.blue.shade700,
+                                                    color: Colors.green.shade700,
                                                   ),
                                         ),
                                       )
                                     : Icon(
                                         Icons.person,
-                                        color: Colors.blue.shade700,
+                                        color: Colors.green.shade700,
                                       ),
                               ),
                               title: Text(
@@ -1274,14 +1305,20 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                                 ),
                               ),
                               subtitle: Text(
-                                isCreator
-                                    ? 'Creator'
-                                    : _getEnumLabel(participant.role),
+                                isCreator ? 'Creator' : 'Online',
                                 style: TextStyle(
                                   color: isCreator
                                       ? Colors.blue.shade700
-                                      : Colors.grey.shade600,
+                                      : Colors.green.shade600,
                                   fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              trailing: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
                                 ),
                               ),
                             );
@@ -1301,7 +1338,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'No participants yet',
+                                'No one else connected',
                                 style: TextStyle(color: Colors.grey.shade600),
                               ),
                             ],

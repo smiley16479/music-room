@@ -154,12 +154,10 @@ class WebSocketService {
     });
 
     _socket!.on('user-joined-playlist', (data) {
-      debugPrint('👤 User joined playlist: $data');
       _notifyCallbacks('user-joined-playlist', data);
     });
 
     _socket!.on('user-left-playlist', (data) {
-      debugPrint('👤 User left playlist: $data');
       _notifyCallbacks('user-left-playlist', data);
     });
 
@@ -177,6 +175,11 @@ class WebSocketService {
     _socket!.on('current-participants', (data) {
       debugPrint('👥 Current participants: $data');
       _notifyCallbacks('current-participants', data);
+    });
+
+    _socket!.on('current-participants-detail', (data) {
+      debugPrint('👥 Current detail participants: $data');
+      _notifyCallbacks('current-participants-detail', data);
     });
 
     // Event updates
@@ -259,17 +262,22 @@ class WebSocketService {
       _notifyCallbacks('music-pause', data);
     });
 
+    _socket!.on('music-stop', (data) {
+      debugPrint('⏹️ Music stop: $data');
+      _notifyCallbacks('music-stop', data);
+    });
+
     _socket!.on('music-seek', (data) {
       debugPrint('⏩ Music seek: $data');
       _notifyCallbacks('music-seek', data);
     });
 
     _socket!.on('music-track-changed', (data) {
-      debugPrint('🔄 Track changed: $data');
+      debugPrint('🔄 Music track changed: $data');
       _notifyCallbacks('music-track-changed', data);
     });
 
-    _socket!.on('music-volume', (data) {
+    _socket!.on('playback-sync', (data) {
       debugPrint('🔊 Volume changed: $data');
       _notifyCallbacks('music-volume', data);
     });
@@ -503,6 +511,13 @@ class WebSocketService {
     debugPrint('📤 Pause track at ${currentTime}s');
   }
 
+  /// Stop stream (clear playback state completely)
+  void stopStream(String eventId) {
+    if (!_isConnected) return;
+    _socket!.emit('stop-stream', {'eventId': eventId});
+    debugPrint('📤 Stop stream');
+  }
+
   /// Seek in track
   /// Optional `trackId` can be provided so the server and other clients
   /// know which track the seek applies to (useful if server state is out-of-date).
@@ -517,6 +532,13 @@ class WebSocketService {
     };
     _socket!.emit('seek-track', payload);
     debugPrint('📤 Seek to ${seekTime}s (isPlaying: $isPlaying)');
+  }
+
+  /// Request playback sync from the server (used by non-admin users to resync)
+  void requestPlaybackSync(String eventId) {
+    if (!_isConnected) return;
+    _socket!.emit('request-playback-sync', {'eventId': eventId});
+    debugPrint('📤 Requesting playback sync for event: $eventId');
   }
 
   /// Change track
