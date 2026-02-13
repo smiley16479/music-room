@@ -21,18 +21,6 @@ Event _$EventFromJson(Map<String, dynamic> json) => Event(
   collaboratorCount: (json['collaboratorCount'] as num?)?.toInt(),
   coverImageUrl: json['coverImageUrl'] as String?,
   playlistName: json['playlistName'] as String?,
-  eventDate: json['eventDate'] == null
-      ? null
-      : DateTime.parse(json['eventDate'] as String),
-  eventEndDate: json['eventEndDate'] == null
-      ? null
-      : DateTime.parse(json['eventEndDate'] as String),
-  startDate: json['startDate'] == null
-      ? null
-      : DateTime.parse(json['startDate'] as String),
-  endDate: json['endDate'] == null
-      ? null
-      : DateTime.parse(json['endDate'] as String),
   locationName: json['locationName'] as String?,
   latitude: (json['latitude'] as num?)?.toDouble(),
   longitude: (json['longitude'] as num?)?.toDouble(),
@@ -67,10 +55,6 @@ Map<String, dynamic> _$EventToJson(Event instance) => <String, dynamic>{
   'collaboratorCount': instance.collaboratorCount,
   'coverImageUrl': instance.coverImageUrl,
   'playlistName': instance.playlistName,
-  'eventDate': instance.eventDate?.toIso8601String(),
-  'eventEndDate': instance.eventEndDate?.toIso8601String(),
-  'startDate': instance.startDate?.toIso8601String(),
-  'endDate': instance.endDate?.toIso8601String(),
   'locationName': instance.locationName,
   'latitude': instance.latitude,
   'longitude': instance.longitude,

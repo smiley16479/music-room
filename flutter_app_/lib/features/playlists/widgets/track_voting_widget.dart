@@ -53,7 +53,7 @@ class TrackVotingWidget extends StatelessWidget {
         
         // Score display
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
             score >= 0 ? '+$score' : '$score',
             style: theme.textTheme.titleMedium?.copyWith(
@@ -132,7 +132,7 @@ class _VoteButton extends StatelessWidget {
       onTap: isEnabled ? onTap : null,
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(4.0),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -189,7 +189,7 @@ class CompactTrackVotingWidget extends StatelessWidget {
         IconButton(
           icon: Icon(
             userVote == VoteType.upvote ? Icons.arrow_upward : Icons.arrow_upward_outlined,
-            size: 18,
+            size: 16,
           ),
           color: userVote == VoteType.upvote ? Colors.green : null,
           onPressed: canVote ? () {
@@ -197,16 +197,17 @@ class CompactTrackVotingWidget extends StatelessWidget {
             onVote?.call(VoteType.upvote);
           } : null,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          iconSize: 16,
         ),
         
         // Score
         SizedBox(
-          width: 30,
+          width: 24,
           child: Text(
             '$score',
             textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            style: theme.textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.bold,
               color: score > 0 
                   ? Colors.green 
@@ -221,7 +222,7 @@ class CompactTrackVotingWidget extends StatelessWidget {
         IconButton(
           icon: Icon(
             userVote == VoteType.downvote ? Icons.arrow_downward : Icons.arrow_downward_outlined,
-            size: 18,
+            size: 16,
           ),
           color: userVote == VoteType.downvote ? Colors.red : null,
           onPressed: canVote ? () {
@@ -229,7 +230,8 @@ class CompactTrackVotingWidget extends StatelessWidget {
             onVote?.call(VoteType.downvote);
           } : null,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          iconSize: 16,
         ),
       ],
     );
