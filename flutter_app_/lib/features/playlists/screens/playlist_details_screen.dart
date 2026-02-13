@@ -61,7 +61,6 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
   void initState() {
     super.initState();
     _initControllers();
-0
     // Load playlist and join room after the first frame to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_hasLoadedPlaylist) {
@@ -940,10 +939,10 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
               children: [
                 // Cover Image
                 Container(
-                  width: 120,
-                  height: 120,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.3),
+                    color: Colors.white.withOpacity(0.3),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: headerCover != null && headerCover.isNotEmpty
@@ -952,13 +951,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                           child: Image.network(
                             headerCover,
                             fit: BoxFit.cover,
-                            width: 120,
-                            height: 120,
+                            width: 80,
+                            height: 80,
                             errorBuilder: (context, error, stackTrace) =>
                                 const Center(
                                   child: Icon(
                                     Icons.music_note,
-                                    size: 60,
+                                    size: 40,
                                     color: Colors.white,
                                   ),
                                 ),
@@ -966,11 +965,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                         )
                       : const Icon(
                           Icons.music_note,
-                          size: 60,
+                          size: 40,
                           color: Colors.white,
                         ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
 
                 // Playlist Info
                 Expanded(
@@ -978,68 +977,16 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Playlist name with admin badge
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              playlist.name ?? 'Untitled Playlist',
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                      // Playlist name
+                      Text(
+                        playlist.name ?? 'Untitled Playlist',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
                             ),
-                          ),
-                          Consumer<AuthProvider>(
-                            builder: (context, authProvider, _) {
-                              final currentUser = authProvider.currentUser;
-                              final isOwner =
-                                  currentUser?.id == playlist.creatorId;
-                              if (isOwner) {
-                                return Container(
-                                  margin: const EdgeInsets.only(left: 8),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.25),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.4,
-                                      ),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.admin_panel_settings,
-                                        color: Colors.white,
-                                        size: 14,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Admin',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }
-                              return const SizedBox.shrink();
-                            },
-                          ),
-                        ],
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 8),
 
@@ -1297,7 +1244,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                 // Skip button (only when server has a track playing)
                                 if (hasServerTrack)
                                   Material(
-                                    color: Colors.white.withValues(alpha: 0.25),
+                                    color: Colors.white.withOpacity(0.25),
                                     borderRadius: BorderRadius.circular(24),
                                     child: InkWell(
                                       borderRadius: BorderRadius.circular(24),
@@ -1309,26 +1256,26 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                           debugPrint('📤 Admin skip emitted');
                                         }
                                       },
-                                      child: Container(
-                                        width: 44,
-                                        height: 44,
+                                        child: Container(
+                                        width: 40,
+                                        height: 40,
                                         decoration: BoxDecoration(
                                           borderRadius: BorderRadius.circular(
-                                            24,
+                                            20,
                                           ),
                                         ),
                                         child: const Icon(
                                           Icons.skip_next,
                                           color: Colors.white,
-                                          size: 28,
+                                          size: 24,
                                         ),
                                       ),
                                     ),
                                   ),
-                                if (hasServerTrack) const SizedBox(width: 12),
+                                if (hasServerTrack) const SizedBox(width: 8),
                                 // Play/Pause button — sends server command
                                 Material(
-                                  color: Colors.white.withValues(alpha: 0.25),
+                                  color: Colors.white.withOpacity(0.25),
                                   borderRadius: BorderRadius.circular(24),
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(24),
@@ -1368,25 +1315,25 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                       }
                                     },
                                     child: Container(
-                                      width: 44,
-                                      height: 44,
+                                      width: 40,
+                                      height: 40,
                                       decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(24),
+                                        borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Icon(
                                         (serverPlaying && hasServerTrack)
                                             ? Icons.pause
                                             : Icons.play_arrow,
                                         color: Colors.white,
-                                        size: 28,
+                                        size: 24,
                                       ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 12),
+                                const SizedBox(width: 8),
                                 // Stop button — sends server stop command
                                 Material(
-                                  color: Colors.white.withValues(alpha: 0.25),
+                                  color: Colors.white.withOpacity(0.25),
                                   borderRadius: BorderRadius.circular(24),
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(24),
@@ -1402,17 +1349,17 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                           }
                                         : null,
                                     child: Container(
-                                      width: 44,
-                                      height: 44,
+                                      width: 40,
+                                      height: 40,
                                       decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(24),
+                                        borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Icon(
                                         Icons.stop,
                                         color: hasServerTrack
                                             ? Colors.white
                                             : Colors.white38,
-                                        size: 28,
+                                        size: 24,
                                       ),
                                     ),
                                   ),
@@ -1434,23 +1381,26 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                     final isOwner = currentUser?.id == playlist.creatorId;
 
                     if (isOwner) {
-                      return Material(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
-                        child: InkWell(
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 4),
+                        child: Material(
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(24),
-                          onTap: () =>
-                              _showCollaboratorDialog(context, playlist),
-                          child: Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: Icon(
-                              Icons.people,
-                              color: Colors.purple.shade700,
-                              size: 24,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(24),
+                            onTap: () =>
+                                _showCollaboratorDialog(context, playlist),
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: Icon(
+                                Icons.people,
+                                color: Colors.purple.shade700,
+                                size: 20,
+                              ),
                             ),
                           ),
                         ),

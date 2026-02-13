@@ -369,6 +369,16 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       startDate: _selectedStartDate,
       endDate: _selectedEndDate,
       selectedPlaylistId: _selectedPlaylistId,
+      visibility: _selectedVisibility != null
+        ? (_selectedVisibility == EventVisibility.public ? 'public' : 'private')
+        : null,
+      licenseType: _selectedLicenseType != null
+        ? (_selectedLicenseType == EventLicenseType.invited
+          ? 'invited'
+          : (_selectedLicenseType == EventLicenseType.locationBased
+            ? 'location_based'
+            : 'none'))
+        : null,
       locationRadius: radius,
       latitude: _latitude,
       longitude: _longitude,
@@ -574,7 +584,14 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
             value: _selectedVisibility,
             hint: const Text('Select Visibility'),
             onChanged: (EventVisibility? newValue) {
-              setState(() => _selectedVisibility = newValue);
+              setState(() {
+                _selectedVisibility = newValue;
+                // If visibility is set to private, invited-only access is redundant
+                if (_selectedVisibility == EventVisibility.private &&
+                    _selectedLicenseType == EventLicenseType.invited) {
+                  _selectedLicenseType = EventLicenseType.none;
+                }
+              });
             },
             items: EventVisibility.values.map((EventVisibility visibility) {
               return DropdownMenuItem<EventVisibility>(
@@ -601,9 +618,17 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
             value: _selectedLicenseType,
             hint: const Text('Select access control'),
             onChanged: (EventLicenseType? newValue) {
+              // Prevent selecting invited-only when visibility is private
+              if (_selectedVisibility == EventVisibility.private &&
+                  newValue == EventLicenseType.invited) {
+                return;
+              }
               setState(() => _selectedLicenseType = newValue);
             },
-            items: EventLicenseType.values.map((EventLicenseType license) {
+            items: (EventLicenseType.values
+                    .where((l) => !(_selectedVisibility == EventVisibility.private && l == EventLicenseType.invited))
+                    .toList())
+                .map((EventLicenseType license) {
               String label;
               String description;
               switch (license) {
@@ -958,7 +983,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                           width: 120,
                           height: 120,
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.3),
+                            color: Colors.white.withOpacity(0.3),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: eventCover != null && eventCover.isNotEmpty
@@ -994,77 +1019,18 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              // Event name with admin badge
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      event.name,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineSmall
-                                          ?.copyWith(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
+                              // Event name
+                              Text(
+                                event.name,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
                                     ),
-                                  ),
-                                  Consumer<AuthProvider>(
-                                    builder: (context, authProvider, _) {
-                                      final currentUser =
-                                          authProvider.currentUser;
-                                      final isOwner =
-                                          currentUser?.id == event.creatorId;
-                                      if (isOwner) {
-                                        return Container(
-                                          margin: const EdgeInsets.only(
-                                            left: 8,
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withValues(
-                                              alpha: 0.25,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            border: Border.all(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.4,
-                                              ),
-                                              width: 1,
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                Icons.admin_panel_settings,
-                                                color: Colors.white,
-                                                size: 14,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'Admin',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }
-                                      return const SizedBox.shrink();
-                                    },
-                                  ),
-                                ],
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 8),
 
@@ -1091,7 +1057,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
 
                             if (isOwner) {
                               return Material(
-                                color: Colors.white.withValues(alpha: 0.3),
+                                color: Colors.white.withOpacity(0.3),
                                 borderRadius: BorderRadius.circular(8),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(8),
@@ -1119,7 +1085,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: Colors.white.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Column(

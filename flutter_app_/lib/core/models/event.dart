@@ -136,7 +136,21 @@ class Event extends Equatable {
   /// Returns true if creatorId is not null (assumption: we're checking against current user in provider)
   bool get isCreatedByMe => creatorId != null;
 
-  factory Event.fromJson(Map<String, dynamic> json) => _$EventFromJson(json);
+  factory Event.fromJson(Map<String, dynamic> json) {
+    // Defensive copy to avoid mutating the original map
+    final map = Map<String, dynamic>.from(json);
+
+    // Ensure required enum fields are present so generated enum decoding
+    // helpers don't throw when the server returns a payload missing them.
+    if (!map.containsKey('type') || map['type'] == null) {
+      map['type'] = 'event';
+    }
+    if (!map.containsKey('visibility') || map['visibility'] == null) {
+      map['visibility'] = 'public';
+    }
+
+    return _$EventFromJson(map);
+  }
   Map<String, dynamic> toJson() => _$EventToJson(this);
 
   @override

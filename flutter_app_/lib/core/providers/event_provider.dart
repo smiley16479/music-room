@@ -197,10 +197,17 @@ class EventProvider extends ChangeNotifier {
         name: name ?? title,
         title: title,
         description: description,
+        type: type,
+        visibility: visibility,
+        licenseType: licenseType,
+        votingEnabled: votingEnabled,
+        coverImageUrl: coverImageUrl,
+        latitude: latitude,
         longitude: longitude,
         locationRadius: locationRadius,
         locationName: locationName,
         votingStartTime: votingStartTime,
+        votingEndTime: votingEndTime,
         eventDate: eventDate,
         startDate: startDate,
         endDate: endDate,
@@ -351,7 +358,14 @@ class EventProvider extends ChangeNotifier {
     bool? isPublic,
     String? eventLicenseType,
   }) async {
-    return updateEvent(id, name: name, description: description);
+    return updateEvent(
+      id,
+      name: name,
+      description: description,
+      visibility: isPublic != null ? (isPublic ? 'public' : 'private') : null,
+      licenseType: eventLicenseType,
+      type: 'playlist',
+    );
   }
 
   /// Delete playlist (same as deleteEvent)

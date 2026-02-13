@@ -69,9 +69,10 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       child: Container(
-        width: MediaQuery.of(context).size.width * 0.9,
-        height: MediaQuery.of(context).size.height * 0.8,
+        width: MediaQuery.of(context).size.width * 0.95,
+        height: MediaQuery.of(context).size.height * 0.85,
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -271,7 +272,7 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
           ],
         ),
         trailing: widget.onTrackAdded != null
-            ? ElevatedButton.icon(
+            ? IconButton(
                 onPressed: () async {
                   // Call the callback instead of closing
                   await widget.onTrackAdded!(track);
@@ -286,19 +287,17 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
                     );
                   }
                 },
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
+                icon: const Icon(Icons.add_circle, size: 28),
+                color: Theme.of(context).colorScheme.primary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               )
-            : ElevatedButton.icon(
+            : IconButton(
                 onPressed: () => Navigator.pop(context, track),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
+                icon: const Icon(Icons.add_circle, size: 28),
+                color: Theme.of(context).colorScheme.primary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
               ),
         isThreeLine: true,
       ),

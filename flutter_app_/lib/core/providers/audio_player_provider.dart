@@ -265,6 +265,11 @@ class AudioPlayerProvider extends ChangeNotifier {
     await _audioService.seek(position);
   }
 
+  /// Seek to position and resume playing (for Android compatibility)
+  Future<void> seekAndResume(Duration position) async {
+    await _audioService.seekAndPlay(position);
+  }
+
   /// Set volume (0.0 to 1.0)
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);

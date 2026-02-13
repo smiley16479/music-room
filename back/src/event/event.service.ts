@@ -1589,6 +1589,34 @@ export class EventService {
     if (event.visibility === EventVisibility.PUBLIC && event.licenseType === EventLicenseType.NONE)
         return; // Everyone can vote
 
+    // If license is INVITED (even on public events), only invited users may vote
+    if (event.licenseType === EventLicenseType.INVITED) {
+      // Event creators can always vote
+      if (event.creatorId === userId) return;
+
+      // Event admins can always vote
+      if (event.participants?.some(a => a.userId === userId && a.role === ParticipantRole.ADMIN)) {
+        return;
+      }
+
+      // Check if user has an accepted invitation
+      const invitation = await this.invitationRepository.findOne({
+        where: {
+          eventId: event.id,
+          inviteeId: userId,
+          status: InvitationStatus.ACCEPTED,
+        },
+      });
+
+      if (invitation) {
+        return;
+      }
+
+      // Do NOT allow generic participants/collaborators to vote unless they have an accepted invitation.
+      // This enforces "invited-only for voting" even for public events.
+      throw new ForbiddenException('Only invited users can vote in this event');
+    }
+
     if ( event.visibility === EventVisibility.PRIVATE ) {
         // Check if user is the event creator
         if (event.creatorId === userId) {
