@@ -127,6 +127,7 @@ void showCreateEventDialog(BuildContext context) {
                       Navigator.pop(context);
                       if (success) {
                         await eventProvider.loadMyEvents();
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Event created successfully!'),

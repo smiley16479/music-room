@@ -155,89 +155,94 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Search field
-                      TextField(
-                        controller: _playlistSearchController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          hintText: 'Search playlists...',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _playlistSearchController.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear),
-                                  onPressed: () {
-                                    _playlistSearchController.clear();
-                                    setState(() {});
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Search field
+                          TextField(
+                            controller: _playlistSearchController,
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              hintText: 'Search playlists...',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon:
+                                  _playlistSearchController.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear),
+                                      onPressed: () {
+                                        _playlistSearchController.clear();
+                                        setState(() {});
+                                      },
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Filters',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          // Visibility filter
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              FilterChip(
+                                label: const Text('All'),
+                                selected: _playlistVisibilityFilter == null,
+                                onSelected: (_) {
+                                  setState(
+                                    () => _playlistVisibilityFilter = null,
+                                  );
+                                },
+                              ),
+                              ...EventVisibility.values.map((visibility) {
+                                return FilterChip(
+                                  label: Text(visibility.name),
+                                  selected:
+                                      _playlistVisibilityFilter == visibility,
+                                  onSelected: (_) {
+                                    setState(
+                                      () => _playlistVisibilityFilter =
+                                          visibility,
+                                    );
                                   },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Filters',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      const SizedBox(height: 8),
-                      // Visibility filter
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          FilterChip(
-                            label: const Text('All'),
-                            selected: _playlistVisibilityFilter == null,
-                            onSelected: (_) {
-                              setState(() => _playlistVisibilityFilter = null);
-                            },
-                          ),
-                          ...EventVisibility.values.map((visibility) {
-                            return FilterChip(
-                              label: Text(visibility.name),
-                              selected: _playlistVisibilityFilter == visibility,
-                              onSelected: (_) {
-                                setState(
-                                  () => _playlistVisibilityFilter = visibility,
                                 );
-                              },
-                            );
-                          }),
+                              }),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // Voting filter
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              FilterChip(
+                                label: const Text('Any voting'),
+                                selected: _playlistVotingFilter == null,
+                                onSelected: (_) {
+                                  setState(() => _playlistVotingFilter = null);
+                                },
+                              ),
+                              FilterChip(
+                                label: const Text('Invited only'),
+                                selected: _playlistVotingFilter == true,
+                                onSelected: (_) {
+                                  setState(() => _playlistVotingFilter = true);
+                                },
+                              ),
+                              FilterChip(
+                                label: const Text('Open voting'),
+                                selected: _playlistVotingFilter == false,
+                                onSelected: (_) {
+                                  setState(() => _playlistVotingFilter = false);
+                                },
+                              ),
+                            ],
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      // Voting filter
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          FilterChip(
-                            label: const Text('Any voting'),
-                            selected: _playlistVotingFilter == null,
-                            onSelected: (_) {
-                              setState(() => _playlistVotingFilter = null);
-                            },
-                          ),
-                          FilterChip(
-                            label: const Text('Invited only'),
-                            selected: _playlistVotingFilter == true,
-                            onSelected: (_) {
-                              setState(() => _playlistVotingFilter = true);
-                            },
-                          ),
-                          FilterChip(
-                            label: const Text('Open voting'),
-                            selected: _playlistVotingFilter == false,
-                            onSelected: (_) {
-                              setState(() => _playlistVotingFilter = false);
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                     ),
                   ),
                 ),
@@ -245,82 +250,87 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: playlists.isEmpty
                       ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.music_note, size: 64),
-                          const SizedBox(height: 16),
-                          const Text('No playlists found'),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: _showCreatePlaylistDialog,
-                            child: const Text('Create Playlist'),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.music_note, size: 64),
+                              const SizedBox(height: 16),
+                              const Text('No playlists found'),
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                onPressed: _showCreatePlaylistDialog,
+                                child: const Text('Create Playlist'),
+                              ),
+                            ],
                           ),
-                          ],
-                        ),
-                      )
+                        )
                       : Center(
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 1200),
                             child: ListView.builder(
-                      itemCount: playlists.length,
-                      itemBuilder: (context, index) {
-                        final playlist = playlists[index];
-                        return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          child: ListTile(
-                            leading: Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: Colors.purple.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child:
-                                  playlist.coverImageUrl != null &&
-                                      playlist.coverImageUrl!.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        playlist.coverImageUrl!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) =>
-                                                const Icon(
-                                                  Icons.music_note,
-                                                  color: Colors.purple,
-                                                  size: 30,
-                                                ),
-                                      ),
-                                    )
-                                  : const Icon(
-                                      Icons.music_note,
-                                      color: Colors.purple,
-                                      size: 30,
-                                    ),
-                            ),
-                            title: Text(playlist.name),
-                            subtitle: Text(
-                              '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => PlaylistDetailsScreen(
-                                    playlistId: playlist.id,
+                              itemCount: playlists.length,
+                              itemBuilder: (context, index) {
+                                final playlist = playlists[index];
+                                return Card(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
                                   ),
-                                ),
-                              );
-                            },
-                          ),
-                        );
-                      },
-                    ),
+                                  child: ListTile(
+                                    leading: Container(
+                                      width: 56,
+                                      height: 56,
+                                      decoration: BoxDecoration(
+                                        color: Colors.purple.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child:
+                                          playlist.coverImageUrl != null &&
+                                              playlist.coverImageUrl!.isNotEmpty
+                                          ? ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                              child: Image.network(
+                                                playlist.coverImageUrl!,
+                                                fit: BoxFit.cover,
+                                                errorBuilder:
+                                                    (
+                                                      context,
+                                                      error,
+                                                      stackTrace,
+                                                    ) => const Icon(
+                                                      Icons.music_note,
+                                                      color: Colors.purple,
+                                                      size: 30,
+                                                    ),
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.music_note,
+                                              color: Colors.purple,
+                                              size: 30,
+                                            ),
+                                    ),
+                                    title: Text(playlist.name),
+                                    subtitle: Text(
+                                      '${playlist.trackCount} tracks • ${playlist.collaboratorCount} collaborators',
+                                    ),
+                                    trailing: const Icon(Icons.chevron_right),
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              PlaylistDetailsScreen(
+                                                playlistId: playlist.id,
+                                              ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                         ),
                 ),
@@ -368,9 +378,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (builderContext, setState) {
             return AlertDialog(
               title: const Text('Create Playlist'),
               content: SingleChildScrollView(
@@ -408,7 +418,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogContext),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
@@ -420,18 +430,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         visibility: isPublic ? 'public' : 'private',
                         type: 'playlist', // Create as playlist
                       );
-                      if (mounted) {
-                        Navigator.pop(context);
+                      if (context.mounted) {
+                        Navigator.pop(dialogContext);
                         if (success) {
                           // Refresh all events to show the new playlist
                           await eventProvider.loadMyEvents();
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          if (!dialogContext.mounted) return;
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
                             const SnackBar(
                               content: Text('Playlist created successfully!'),
                             ),
                           );
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          if (!dialogContext.mounted) return;
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
                             SnackBar(
                               content: Text('Error: ${eventProvider.error}'),
                             ),

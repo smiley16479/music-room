@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../config/app_config.dart';
 
@@ -27,7 +27,7 @@ wsService.leaveEvent(eventId);
 
 /// WebSocket Service for real-time event updates
 class WebSocketService {
-  IO.Socket? _socket;
+  io.Socket? _socket;
   String? _token;
   bool _isConnected = false;
   String? _currentEventId;
@@ -48,9 +48,9 @@ class WebSocketService {
     _token = token;
     debugPrint('🔌 Connecting to WebSocket: ${AppConfig.wsUrl}/events');
 
-    _socket = IO.io(
+    _socket = io.io(
       '${AppConfig.wsUrl}/events',
-      IO.OptionBuilder()
+      io.OptionBuilder()
           .setTransports(['websocket'])
           .enableAutoConnect()
           .enableReconnection()
@@ -278,12 +278,8 @@ class WebSocketService {
     });
 
     _socket!.on('playback-sync', (data) {
-      debugPrint('🔊 Volume changed: $data');
+      debugPrint('🔁 Playback sync: $data');
       _notifyCallbacks('music-volume', data);
-    });
-
-    _socket!.on('playback-sync', (data) {
-      debugPrint('🔄 Playback sync: $data');
       _notifyCallbacks('playback-sync', data);
     });
 
@@ -522,7 +518,12 @@ class WebSocketService {
   /// Optional `trackId` can be provided so the server and other clients
   /// know which track the seek applies to (useful if server state is out-of-date).
   /// Optional `isPlaying` ensures the database reflects the admin's actual playback state.
-  void seekTrack(String eventId, double seekTime, [String? trackId, bool? isPlaying]) {
+  void seekTrack(
+    String eventId,
+    double seekTime, [
+    String? trackId,
+    bool? isPlaying,
+  ]) {
     if (!_isConnected) return;
     final payload = {
       'eventId': eventId,

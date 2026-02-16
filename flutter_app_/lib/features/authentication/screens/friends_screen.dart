@@ -148,20 +148,20 @@ class _FriendsScreenState extends State<FriendsScreen>
   void _showRemoveFriendDialog(User friend, FriendProvider provider) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Remove Friend'),
         content: Text(
           'Are you sure you want to remove ${friend.displayName ?? friend.email} from your friends?',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final success = await provider.removeFriend(friend.id);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -296,7 +296,7 @@ class _FriendsScreenState extends State<FriendsScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.green.withOpacity(0.2),
+          color: Colors.green.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Text(
@@ -310,7 +310,7 @@ class _FriendsScreenState extends State<FriendsScreen>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.orange.withOpacity(0.2),
+          color: Colors.orange.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(12),
         ),
         child: const Text(
@@ -348,19 +348,19 @@ class _FriendsScreenState extends State<FriendsScreen>
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Accept Friend Request'),
         content: Text(
           '${user.displayName ?? user.email ?? 'Unknown'} has sent you a friend request. Accept?',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final success = await provider.acceptInvitation(invitation.id);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -389,7 +389,7 @@ class _FriendsScreenState extends State<FriendsScreen>
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Send Friend Request'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -413,12 +413,12 @@ class _FriendsScreenState extends State<FriendsScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final success = await provider.sendFriendInvitation(
                 inviteeId: user.id,
                 message: messageController.text.isNotEmpty
@@ -686,7 +686,7 @@ class _FriendsScreenState extends State<FriendsScreen>
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.2),
+                    color: Colors.orange.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Text(
@@ -739,20 +739,20 @@ class _FriendsScreenState extends State<FriendsScreen>
   ) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Cancel Request'),
         content: const Text(
           'Are you sure you want to cancel this friend request?',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('No'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final success = await provider.cancelInvitation(invitation.id);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -829,7 +829,9 @@ class _FriendsScreenState extends State<FriendsScreen>
                         gradient: LinearGradient(
                           colors: [
                             Theme.of(context).primaryColor,
-                            Theme.of(context).primaryColor.withOpacity(0.7),
+                            Theme.of(
+                              context,
+                            ).primaryColor.withValues(alpha: 0.7),
                           ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
@@ -855,7 +857,7 @@ class _FriendsScreenState extends State<FriendsScreen>
                                   ? Image.network(
                                       user.avatarUrl!,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) =>
+                                      errorBuilder: (_, _, _) =>
                                           _buildAvatarIcon(),
                                     )
                                   : _buildAvatarIcon(),
@@ -879,8 +881,8 @@ class _FriendsScreenState extends State<FriendsScreen>
                               ),
                               decoration: BoxDecoration(
                                 color: isFriend
-                                    ? Colors.green.withOpacity(0.3)
-                                    : Colors.white.withOpacity(0.2),
+                                    ? Colors.green.withValues(alpha: 0.3)
+                                    : Colors.white.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
@@ -1354,7 +1356,7 @@ class _FriendsScreenState extends State<FriendsScreen>
       return CircleAvatar(
         radius: 24,
         backgroundImage: NetworkImage(user.avatarUrl!),
-        onBackgroundImageError: (_, __) {},
+        onBackgroundImageError: (_, _) {},
         child: user.avatarUrl == null ? _buildAvatarIcon() : null,
       );
     }
@@ -1369,7 +1371,7 @@ class _FriendsScreenState extends State<FriendsScreen>
 
   Widget _buildAvatarIcon() {
     return Container(
-      color: Theme.of(context).primaryColor.withOpacity(0.3),
+      color: Theme.of(context).primaryColor.withValues(alpha: 0.3),
       child: Icon(
         Icons.person,
         size: 40,
