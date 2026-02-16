@@ -88,6 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
           final GoogleSignInAuthentication googleAuth =
               await googleUser.authentication;
 
+          if (!mounted) return;
           final authProvider = context.read<AuthProvider>();
           final platform = Platform.isAndroid ? 'android' : 'ios';
           final success = await authProvider.googleSignIn(
@@ -134,6 +135,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (result.status == LoginStatus.success) {
           final accessToken = result.accessToken;
+          if (!mounted) return;
           final authProvider = context.read<AuthProvider>();
           final success = await authProvider.facebookSignIn(
             accessToken: accessToken?.tokenString ?? '',

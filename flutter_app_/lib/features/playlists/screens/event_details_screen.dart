@@ -5,7 +5,6 @@ import '../../../core/models/event.dart';
 import '../../../core/providers/index.dart';
 import '../../../core/services/index.dart';
 import '../../../core/navigation/route_observer.dart';
-import '../widgets/invite_friends_dialog.dart';
 import 'playlist_details_screen.dart';
 import '../widgets/mini_player_scaffold.dart';
 
@@ -19,11 +18,11 @@ class EventDetailsScreen extends StatefulWidget {
   State<EventDetailsScreen> createState() => _EventDetailsScreenState();
 }
 
-class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware {
+class _EventDetailsScreenState extends State<EventDetailsScreen>
+    with RouteAware {
   ModalRoute<dynamic>? _modalRoute;
   WebSocketService? _wsService;
   bool _isEditMode = false;
-  Event? _localEvent; // Local copy to avoid provider being overwritten
   bool _hasJoinedRoom = false;
   bool _hasLoadedEvent = false;
 
@@ -44,10 +43,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   double? _longitude;
 
   // Form state
-  late EventType? _selectedType;
   late EventVisibility? _selectedVisibility;
   late EventLicenseType? _selectedLicenseType;
-  late bool _votingEnabled;
   late DateTime? _selectedEventDate;
   late DateTime? _selectedStartDate;
   late DateTime? _selectedEndDate;
@@ -79,10 +76,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
     _latitudeController = TextEditingController();
     _longitudeController = TextEditingController();
 
-    _selectedType = null;
     _selectedVisibility = null;
     _selectedLicenseType = null;
-    _votingEnabled = true;
     _selectedEventDate = null;
     _selectedStartDate = null;
     _selectedEndDate = null;
@@ -109,7 +104,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                 .map((p) => Map<String, dynamic>.from(p as Map))
                 .toList();
           });
-          debugPrint('📋 Received ${_connectedUsers.length} current detail participants');
+          debugPrint(
+            '📋 Received ${_connectedUsers.length} current detail participants',
+          );
         }
       });
 
@@ -139,21 +136,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       });
     } catch (e) {
       debugPrint('Error joining event detail room: $e');
-    }
-  }
-
-  void _leaveEventDetailRoom() {
-    try {
-      final ws = _wsService ?? context.read<WebSocketService>();
-      ws.leaveEventDetail(widget.eventId);
-
-      // Clean up listeners
-      ws.off('user-joined-detail');
-      ws.off('user-left-detail');
-      ws.off('current-participants-detail');
-      _hasJoinedRoom = false;
-    } catch (e) {
-      debugPrint('Error leaving event detail room: $e');
     }
   }
 
@@ -225,12 +207,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   Future<void> _loadEvent() async {
     final eventProvider = context.read<EventProvider>();
     await eventProvider.loadEventDetails(widget.eventId);
-    // Store local copy to avoid it being overwritten
-    if (mounted && eventProvider.currentEvent != null) {
-      setState(() {
-        _localEvent = eventProvider.currentEvent;
-      });
-    }
   }
 
   void _navigateToPlaylist(BuildContext context, String eventId) {
@@ -252,10 +228,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
     _longitudeController.text = event.longitude?.toString() ?? '';
 
     setState(() {
-      _selectedType = event.type;
       _selectedVisibility = event.visibility;
       _selectedLicenseType = event.licenseType;
-      _votingEnabled = event.votingEnabled ?? true;
       _selectedEventDate = event.eventDate;
       _selectedStartDate = event.startDate;
       _selectedEndDate = event.endDate;
@@ -294,25 +268,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
     return enumValue.toString().split('.').last;
   }
 
-  /// Convert enum to its JSON value
-  String? _enumToJsonValue(dynamic enumValue) {
-    if (enumValue == null) return null;
-    // The enum's toJson value based on @JsonValue annotation
-    if (enumValue is EventType) {
-      // json_serializable will use the @JsonValue
-      final jsonValue = enumValue.toString().split('.').last;
-      // Convert camelCase to snake_case
-      return jsonValue.replaceAllMapped(
-        RegExp(r'([a-z])([A-Z])'),
-        (m) => '${m.group(1)}_${m.group(2)}'.toLowerCase(),
-      );
-    } else if (enumValue is EventVisibility || enumValue is EventLicenseType) {
-      // These are already lowercase
-      return enumValue.toString().split('.').last;
-    }
-    return null;
-  }
-
   /// Geocode a place name to get coordinates
   Future<void> _geocodeLocation() async {
     if (_locationNameController.text.isEmpty) {
@@ -334,6 +289,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
         _latitudeController.text = _latitude.toString();
         _longitudeController.text = _longitude.toString();
       });
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -342,6 +298,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
         ),
       );
     } else {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Location not found')));
@@ -370,15 +327,17 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       endDate: _selectedEndDate,
       selectedPlaylistId: _selectedPlaylistId,
       visibility: _selectedVisibility != null
-        ? (_selectedVisibility == EventVisibility.public ? 'public' : 'private')
-        : null,
+          ? (_selectedVisibility == EventVisibility.public
+                ? 'public'
+                : 'private')
+          : null,
       licenseType: _selectedLicenseType != null
-        ? (_selectedLicenseType == EventLicenseType.invited
-          ? 'invited'
-          : (_selectedLicenseType == EventLicenseType.locationBased
-            ? 'location_based'
-            : 'none'))
-        : null,
+          ? (_selectedLicenseType == EventLicenseType.invited
+                ? 'invited'
+                : (_selectedLicenseType == EventLicenseType.locationBased
+                      ? 'location_based'
+                      : 'none'))
+          : null,
       locationRadius: radius,
       latitude: _latitude,
       longitude: _longitude,
@@ -388,6 +347,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
       if (success) {
         // Reload event to get updated data
         await _loadEvent();
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Event updated successfully')),
         );
@@ -625,47 +585,56 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
               }
               setState(() => _selectedLicenseType = newValue);
             },
-            items: (EventLicenseType.values
-                    .where((l) => !(_selectedVisibility == EventVisibility.private && l == EventLicenseType.invited))
-                    .toList())
-                .map((EventLicenseType license) {
-              String label;
-              String description;
-              switch (license) {
-                case EventLicenseType.none:
-                  label = 'Open Access';
-                  description = 'Anyone can participate and vote';
-                  break;
-                case EventLicenseType.invited:
-                  label = 'Invited Only';
-                  description = 'Only invited guests can vote';
-                  break;
-                case EventLicenseType.locationBased:
-                  label = 'Location-Based';
-                  description = 'Access based on location';
-                  break;
-              }
-              return DropdownMenuItem<EventLicenseType>(
-                value: license,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      label,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      description,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+            items:
+                (EventLicenseType.values
+                        .where(
+                          (l) =>
+                              !(_selectedVisibility ==
+                                      EventVisibility.private &&
+                                  l == EventLicenseType.invited),
+                        )
+                        .toList())
+                    .map((EventLicenseType license) {
+                      String label;
+                      String description;
+                      switch (license) {
+                        case EventLicenseType.none:
+                          label = 'Open Access';
+                          description = 'Anyone can participate and vote';
+                          break;
+                        case EventLicenseType.invited:
+                          label = 'Invited Only';
+                          description = 'Only invited guests can vote';
+                          break;
+                        case EventLicenseType.locationBased:
+                          label = 'Location-Based';
+                          description = 'Access based on location';
+                          break;
+                      }
+                      return DropdownMenuItem<EventLicenseType>(
+                        value: license,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              label,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              description,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    })
+                    .toList(),
           ),
           if (_selectedLicenseType == EventLicenseType.locationBased)
             Padding(
@@ -896,7 +865,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
               ? TimeOfDay.fromDateTime(selectedDateTime)
               : const TimeOfDay(hour: 0, minute: 0),
         );
-        if (pickedTime != null) {
+        if (pickedTime != null && mounted) {
           // Create DateTime with today's date and selected time
           DateTime newDateTime = DateTime(
             selectedDateTime?.year ?? 2000,
@@ -948,11 +917,10 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   ) {
     // Get cover image from event or first track
     final String? eventCover =
-      event.coverImageUrl ??
-      ((eventProvider.currentPlaylistTracks != null &&
-          eventProvider.currentPlaylistTracks.isNotEmpty)
-        ? eventProvider.currentPlaylistTracks.first.coverUrl
-        : null);
+        event.coverImageUrl ??
+        ((eventProvider.currentPlaylistTracks.isNotEmpty)
+            ? eventProvider.currentPlaylistTracks.first.coverUrl
+            : null);
 
     return SingleChildScrollView(
       child: Center(
@@ -983,7 +951,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                           width: 120,
                           height: 120,
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.3),
+                            color: Colors.white.withValues(alpha: 0.3),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: eventCover != null && eventCover.isNotEmpty
@@ -1022,9 +990,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                               // Event name
                               Text(
                                 event.name,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
+                                style: Theme.of(context).textTheme.headlineSmall
                                     ?.copyWith(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
@@ -1048,35 +1014,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                           ),
                         ),
                         const SizedBox(width: 8),
-
-                        // Invite/Manage Button
-                        Consumer<AuthProvider>(
-                          builder: (context, authProvider, _) {
-                            final currentUser = authProvider.currentUser;
-                            final isOwner = currentUser?.id == event.creatorId;
-
-                            if (isOwner) {
-                              return Material(
-                                color: Colors.white.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(8),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(8),
-                                  onTap: () =>
-                                      _showInviteFriendsDialog(context, event),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    child: const Icon(
-                                      Icons.person_add,
-                                      color: Colors.white,
-                                      size: 24,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          },
-                        ),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -1085,15 +1022,15 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
+                        color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Column(
                         children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildBannerDetail(
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final details = <Widget>[
+                                _buildBannerDetail(
                                   context,
                                   icon: Icons.calendar_today,
                                   label: 'Event Date',
@@ -1101,37 +1038,63 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                                       ? _formatDate(event.eventDate!)
                                       : 'Not set',
                                 ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: _buildBannerDetail(
+                                _buildBannerDetail(
                                   context,
                                   icon: Icons.people,
                                   label: 'Participants',
                                   value: '${event.participants?.length ?? 0}',
                                 ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: _buildBannerDetail(
+                                _buildBannerDetail(
                                   context,
                                   icon: Icons.visibility,
                                   label: 'Visibility',
                                   value: _getEnumLabel(event.visibility),
                                 ),
-                              ),
-                            ],
+                              ];
+
+                              if (event.locationName != null &&
+                                  event.locationName!.isNotEmpty) {
+                                details.add(
+                                  _buildBannerDetail(
+                                    context,
+                                    icon: Icons.location_on,
+                                    label: 'Location',
+                                    value: event.locationName!,
+                                  ),
+                                );
+                              }
+
+                              final maxWidth = constraints.maxWidth;
+                              const double spacing = 16.0;
+                              const double minItemWidth = 240.0;
+                              // Compute how many columns we can fit given a minimum item width
+                              final int computedColumns =
+                                  ((maxWidth + spacing) /
+                                          (minItemWidth + spacing))
+                                      .floor();
+                              int columns = computedColumns < 1
+                                  ? 1
+                                  : computedColumns;
+                              // Don't create more columns than there are details
+                              if (columns > details.length) {
+                                columns = details.length;
+                              }
+                              final double itemWidth =
+                                  (maxWidth - (columns - 1) * spacing) /
+                                  columns;
+
+                              return Wrap(
+                                spacing: spacing,
+                                runSpacing: 12,
+                                children: details
+                                    .map(
+                                      (w) =>
+                                          SizedBox(width: itemWidth, child: w),
+                                    )
+                                    .toList(),
+                              );
+                            },
                           ),
-                          if (event.locationName != null &&
-                              event.locationName!.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            _buildBannerDetail(
-                              context,
-                              icon: Icons.location_on,
-                              label: 'Location',
-                              value: event.locationName!,
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -1228,67 +1191,76 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
                           border: Border.all(color: Colors.grey.shade300),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _connectedUsers.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final user = _connectedUsers[index];
-                            final name = user['displayName'] as String? ?? 'Unknown User';
-                            final avatarUrl = user['avatarUrl'] as String?;
-                            final userId = user['userId'] as String?;
-                            final isCreator = userId == event.creatorId;
+                        child: MediaQuery.removePadding(
+                          context: context,
+                          removeBottom: true,
+                          removeTop: true,
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _connectedUsers.length,
+                            separatorBuilder: (context, index) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final user = _connectedUsers[index];
+                              final name =
+                                  user['displayName'] as String? ??
+                                  'Unknown User';
+                              final avatarUrl = user['avatarUrl'] as String?;
+                              final userId = user['userId'] as String?;
+                              final isCreator = userId == event.creatorId;
 
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: Colors.green.shade100,
-                                child: avatarUrl != null && avatarUrl.isNotEmpty
-                                    ? ClipOval(
-                                        child: Image.network(
-                                          avatarUrl,
-                                          width: 40,
-                                          height: 40,
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) =>
-                                                  Icon(
-                                                    Icons.person,
-                                                    color: Colors.green.shade700,
-                                                  ),
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.green.shade100,
+                                  child:
+                                      avatarUrl != null && avatarUrl.isNotEmpty
+                                      ? ClipOval(
+                                          child: Image.network(
+                                            avatarUrl,
+                                            width: 40,
+                                            height: 40,
+                                            fit: BoxFit.cover,
+                                            errorBuilder:
+                                                (context, error, stackTrace) =>
+                                                    Icon(
+                                                      Icons.person,
+                                                      color:
+                                                          Colors.green.shade700,
+                                                    ),
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.person,
+                                          color: Colors.green.shade700,
                                         ),
-                                      )
-                                    : Icon(
-                                        Icons.person,
-                                        color: Colors.green.shade700,
-                                      ),
-                              ),
-                              title: Text(
-                                name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w500,
                                 ),
-                              ),
-                              subtitle: Text(
-                                isCreator ? 'Creator' : 'Online',
-                                style: TextStyle(
-                                  color: isCreator
-                                      ? Colors.blue.shade700
-                                      : Colors.green.shade600,
-                                  fontWeight: FontWeight.w500,
+                                title: Text(
+                                  name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                              trailing: Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
+                                subtitle: Text(
+                                  isCreator ? 'Creator' : 'Online',
+                                  style: TextStyle(
+                                    color: isCreator
+                                        ? Colors.blue.shade700
+                                        : Colors.green.shade600,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
+                                trailing: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: Colors.green,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       )
                     else
@@ -1359,44 +1331,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
     );
   }
 
-  Widget _buildInfoCard(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: Colors.blue.shade700, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: Colors.blue.shade700,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.blue.shade600),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildDetailRow(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1426,19 +1360,19 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
   void _showDeleteConfirmation(EventProvider eventProvider) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Delete Event'),
         content: const Text(
           'Are you sure you want to delete this event? This action cannot be undone.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               final success = await eventProvider.deleteEvent(widget.eventId);
               if (mounted) {
                 if (success) {
@@ -1456,17 +1390,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> with RouteAware
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
-      ),
-    );
-  }
-
-  void _showInviteFriendsDialog(BuildContext context, Event event) {
-    showDialog(
-      context: context,
-      builder: (context) => InviteFriendsDialog(
-        eventId: event.id,
-        eventName: event.name,
-        isPlaylist: event.isPlaylist,
       ),
     );
   }

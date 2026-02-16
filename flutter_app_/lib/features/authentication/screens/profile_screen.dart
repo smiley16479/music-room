@@ -20,11 +20,7 @@ class SingleChoice extends StatelessWidget {
   final Privacy value;
   final ValueChanged<Privacy> onChanged;
 
-  const SingleChoice({
-    super.key,
-    required this.value,
-    required this.onChanged,
-  });
+  const SingleChoice({super.key, required this.value, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -70,38 +66,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Cache for pending invitation counts
   Map<String, int>? _cachedInvitationCounts;
   DateTime? _lastFetchTime;
-  
+
   Future<Map<String, int>> _getPendingInvitationCounts() async {
     // Return cached data if less than 30 seconds old
     if (_cachedInvitationCounts != null && _lastFetchTime != null) {
-      if (DateTime.now().difference(_lastFetchTime!) < const Duration(seconds: 30)) {
+      if (DateTime.now().difference(_lastFetchTime!) <
+          const Duration(seconds: 30)) {
         return _cachedInvitationCounts!;
       }
     }
-    
+
     try {
       final authProvider = context.read<AuthProvider>();
       final apiService = authProvider.authService.apiService;
-      final response = await apiService.get('/invitations/received?status=pending');
-      
+      final response = await apiService.get(
+        '/invitations/received?status=pending',
+      );
+
       final invitations = (response['data'] as List? ?? [])
           .map((i) => Invitation.fromJson(i as Map<String, dynamic>))
           .toList();
-      
+
       final counts = {
         'event': invitations.where((i) => i.type == 'event').length,
         'playlist': invitations.where((i) => i.type == 'playlist').length,
       };
-      
+
       _cachedInvitationCounts = counts;
       _lastFetchTime = DateTime.now();
-      
+
       return counts;
     } catch (e) {
       return {'event': 0, 'playlist': 0};
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
@@ -123,7 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   gradient: LinearGradient(
                     colors: [
                       Theme.of(context).primaryColor,
-                      Theme.of(context).primaryColor.withOpacity(0.7),
+                      Theme.of(context).primaryColor.withValues(alpha: 0.7),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -139,7 +138,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
                       ),
-                      child: user.avatarUrl != null && user.avatarUrl!.startsWith('http')
+                      child:
+                          user.avatarUrl != null &&
+                              user.avatarUrl!.startsWith('http')
                           ? ClipOval(
                               child: Image.network(
                                 user.avatarUrl!,
@@ -155,9 +156,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     // User Name
                     Text(
                       user.displayName ?? user.email ?? 'Unknown',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            color: Colors.white,
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.headlineSmall?.copyWith(color: Colors.white),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
@@ -165,9 +166,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     if (user.email != null)
                       Text(
                         user.email!,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.white70,
-                            ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                       ),
                   ],
                 ),
@@ -271,29 +272,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 8),
                     Consumer<FriendProvider>(
                       builder: (context, friendProvider, _) {
-                        final friendReceivedCount = friendProvider.pendingReceivedInvitations.length;
-                        final friendSentCount = friendProvider.pendingSentInvitations.length;
-                        
+                        final friendReceivedCount =
+                            friendProvider.pendingReceivedInvitations.length;
+                        final friendSentCount =
+                            friendProvider.pendingSentInvitations.length;
+
                         // Check for all invitation types by trying to use the API
                         return FutureBuilder<Map<String, int>>(
                           future: _getPendingInvitationCounts(),
                           builder: (context, snapshot) {
-                            final eventInviteCount = snapshot.data?['event'] ?? 0;
-                            final playlistInviteCount = snapshot.data?['playlist'] ?? 0;
-                            final totalReceived = friendReceivedCount + eventInviteCount + playlistInviteCount;
+                            final eventInviteCount =
+                                snapshot.data?['event'] ?? 0;
+                            final playlistInviteCount =
+                                snapshot.data?['playlist'] ?? 0;
+                            final totalReceived =
+                                friendReceivedCount +
+                                eventInviteCount +
+                                playlistInviteCount;
                             final totalSent = friendSentCount;
-                            
+
                             if (totalReceived == 0 && totalSent == 0) {
                               return const SizedBox.shrink();
                             }
-                            
+
                             return Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.blue.withOpacity(0.1),
+                                color: Colors.blue.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                  color: Colors.blue.withOpacity(0.3),
+                                  color: Colors.blue.withValues(alpha: 0.3),
                                   width: 1,
                                 ),
                               ),
@@ -313,8 +321,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                           totalReceived > 0 && totalSent > 0
                                               ? '$totalReceived pending invitation${totalReceived > 1 ? 's' : ''} • $totalSent sent'
                                               : totalReceived > 0
-                                                  ? '$totalReceived pending invitation${totalReceived > 1 ? 's' : ''}'
-                                                  : '$totalSent pending invitation${totalSent > 1 ? 's' : ''} sent',
+                                              ? '$totalReceived pending invitation${totalReceived > 1 ? 's' : ''}'
+                                              : '$totalSent pending invitation${totalSent > 1 ? 's' : ''} sent',
                                           style: TextStyle(
                                             color: Colors.blue.shade700,
                                             fontSize: 13,
@@ -329,7 +337,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     Padding(
                                       padding: const EdgeInsets.only(left: 28),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           if (friendReceivedCount > 0)
                                             Text(
@@ -388,7 +397,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const AccountLinkingScreen(),
+                                builder: (context) =>
+                                    const AccountLinkingScreen(),
                               ),
                             );
                           },
@@ -427,8 +437,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ListTile(
                       title: const Text('Email Verified'),
                       trailing: Icon(
-                        (user.emailVerified ?? false) ? Icons.check_circle : Icons.cancel,
-                        color: (user.emailVerified ?? false) ? Colors.green : Colors.red,
+                        (user.emailVerified ?? false)
+                            ? Icons.check_circle
+                            : Icons.cancel,
+                        color: (user.emailVerified ?? false)
+                            ? Colors.green
+                            : Colors.red,
                       ),
                     ),
                     const Divider(),
@@ -448,7 +462,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         if (email == null) return;
 
                         ScaffoldMessenger.of(parentCtx).showSnackBar(
-                          const SnackBar(content: Text('Sending password reset email...')),
+                          const SnackBar(
+                            content: Text('Sending password reset email...'),
+                          ),
                         );
 
                         try {
@@ -459,13 +475,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                           if (parentCtx.mounted) {
                             ScaffoldMessenger.of(parentCtx).showSnackBar(
-                              SnackBar(content: Text('Password reset email sent to $email')),
+                              SnackBar(
+                                content: Text(
+                                  'Password reset email sent to $email',
+                                ),
+                              ),
                             );
                           }
                         } catch (e) {
                           if (parentCtx.mounted) {
                             ScaffoldMessenger.of(parentCtx).showSnackBar(
-                              SnackBar(content: Text('Failed to send reset email: ${e.toString()}')),
+                              SnackBar(
+                                content: Text(
+                                  'Failed to send reset email: ${e.toString()}',
+                                ),
+                              ),
                             );
                           }
                         }
@@ -485,7 +509,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildAvatarPlaceholder(BuildContext context) {
     return Container(
-      color: Theme.of(context).primaryColor.withOpacity(0.3),
+      color: Theme.of(context).primaryColor.withValues(alpha: 0.3),
       child: Icon(
         Icons.person,
         size: 50,
@@ -494,7 +518,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, String label, String value, String visibility) {
+  Widget _buildInfoRow(
+    BuildContext context,
+    String label,
+    String value,
+    String visibility,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -508,9 +537,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Text(
                   label,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.grey,
-                        fontSize: 15,
-                      ),
+                    color: Colors.grey,
+                    fontSize: 15,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -519,25 +548,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(
                 visibility,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.purple,
-                      fontSize: 12,
-                    ),
+                  color: Colors.purple,
+                  fontSize: 12,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
     );
   }
 
-  Widget _buildMusicPreferencesRow(BuildContext context, List<String> preferences, String visibility) {
+  Widget _buildMusicPreferencesRow(
+    BuildContext context,
+    List<String> preferences,
+    String visibility,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -551,9 +581,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Text(
                   'Music Preferences',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.grey,
-                        fontSize: 15,
-                      ),
+                    color: Colors.grey,
+                    fontSize: 15,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -562,9 +592,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Text(
                 visibility,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.purple,
-                      fontSize: 12,
-                    ),
+                  color: Colors.purple,
+                  fontSize: 12,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -578,21 +608,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: preferences.map((genre) {
                 return Chip(
                   label: Text(genre),
-                  backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                  backgroundColor: Theme.of(
+                    context,
+                  ).primaryColor.withValues(alpha: 0.1),
                   labelStyle: TextStyle(
                     color: Theme.of(context).primaryColor,
                     fontSize: 12,
                   ),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 );
               }).toList(),
             )
           else
-            Text(
-              'Not set',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+            Text('Not set', style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
     );
@@ -605,7 +637,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isConnected ? Colors.green.withOpacity(0.2) : Colors.grey.withOpacity(0.2),
+          color: isConnected
+              ? Colors.green.withValues(alpha: 0.2)
+              : Colors.grey.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
@@ -646,17 +680,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     // Visibility states
-    Privacy displayNameVisibility = _parseVisibility(user.displayNameVisibility);
+    Privacy displayNameVisibility = _parseVisibility(
+      user.displayNameVisibility,
+    );
     Privacy bioVisibility = _parseVisibility(user.bioVisibility);
     Privacy locationVisibility = _parseVisibility(user.locationVisibility);
     Privacy birthDateVisibility = _parseVisibility(user.birthDateVisibility);
-    Privacy musicPreferenceVisibility = _parseVisibility(user.musicPreferenceVisibility);
+    Privacy musicPreferenceVisibility = _parseVisibility(
+      user.musicPreferenceVisibility,
+    );
 
     // Music preferences
     final availableGenres = [
-      'Rock', 'Pop', 'Jazz', 'Classical', 'Hip Hop', 'Rap',
-      'Blues', 'Country', 'Electronic', 'Reggae', 'Metal',
-      'R&B', 'Soul', 'Indie', 'Folk', 'Punk'
+      'Rock',
+      'Pop',
+      'Jazz',
+      'Classical',
+      'Hip Hop',
+      'Rap',
+      'Blues',
+      'Country',
+      'Electronic',
+      'Reggae',
+      'Metal',
+      'R&B',
+      'Soul',
+      'Indie',
+      'Folk',
+      'Punk',
     ];
     Set<String> selectedGenres = user.musicPreferences?.toSet() ?? {};
 
@@ -748,8 +799,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         if (picked != null) {
                           setDialogState(() {
                             selectedDate = picked;
-                            birthDateController.text =
-                                picked.toIso8601String().split('T').first;
+                            birthDateController.text = picked
+                                .toIso8601String()
+                                .split('T')
+                                .first;
                           });
                         }
                       },
@@ -820,7 +873,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 }
                               });
                             },
-                            selectedColor: Theme.of(context).primaryColor.withOpacity(0.3),
+                            selectedColor: Theme.of(
+                              context,
+                            ).primaryColor.withValues(alpha: 0.3),
                             checkmarkColor: Theme.of(context).primaryColor,
                           );
                         }).toList(),
@@ -847,12 +902,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     if (displayNameController.text.isNotEmpty) {
                       // Close dialog first to avoid navigation issues
                       Navigator.of(context).pop();
-                      
+
                       // Use parent context for the auth provider
                       final authProvider = parentContext.read<AuthProvider>();
-  
+
                       final success = await authProvider.updateProfile(
-                        displayName: displayNameController.text.trim().isNotEmpty
+                        displayName:
+                            displayNameController.text.trim().isNotEmpty
                             ? displayNameController.text.trim()
                             : null,
                         bio: bioController.text.trim().isNotEmpty
@@ -864,14 +920,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         birthDate: birthDateController.text.trim().isNotEmpty
                             ? birthDateController.text.trim()
                             : null,
-                        displayNameVisibility: _visibilityToString(displayNameVisibility),
+                        displayNameVisibility: _visibilityToString(
+                          displayNameVisibility,
+                        ),
                         bioVisibility: _visibilityToString(bioVisibility),
-                        locationVisibility: _visibilityToString(locationVisibility),
-                        birthDateVisibility: _visibilityToString(birthDateVisibility),
+                        locationVisibility: _visibilityToString(
+                          locationVisibility,
+                        ),
+                        birthDateVisibility: _visibilityToString(
+                          birthDateVisibility,
+                        ),
                         musicPreferences: selectedGenres.toList(),
-                        musicPreferenceVisibility: _visibilityToString(musicPreferenceVisibility),
+                        musicPreferenceVisibility: _visibilityToString(
+                          musicPreferenceVisibility,
+                        ),
                       );
-                      
+
                       // Show the snackbar using the parent context
                       if (parentContext.mounted) {
                         if (success) {
@@ -891,7 +955,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                   },
                   child: const Text('Save'),
-                )
+                ),
               ],
             );
           },

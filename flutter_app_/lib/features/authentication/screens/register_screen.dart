@@ -229,6 +229,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               final GoogleSignInAuthentication googleAuth =
                                   await googleUser.authentication;
 
+                              if (!context.mounted) return;
                               final authProvider = context.read<AuthProvider>();
                               final platform = Platform.isAndroid
                                   ? 'android'
@@ -238,7 +239,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 platform: platform,
                               );
 
-                              if (!mounted) return;
+                              if (!context.mounted) return;
 
                               if (success) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -257,6 +258,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               }
                             }
                           } catch (e) {
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Error: $e')),
                             );
@@ -275,12 +277,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                             if (result.status == LoginStatus.success) {
                               final accessToken = result.accessToken;
+                              if (!context.mounted) return;
                               final authProvider = context.read<AuthProvider>();
                               final success = await authProvider.facebookSignIn(
                                 accessToken: accessToken?.tokenString ?? '',
                               );
 
-                              if (!mounted) return;
+                              if (!context.mounted) return;
 
                               if (success) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -298,6 +301,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 );
                               }
                             } else if (result.status == LoginStatus.cancelled) {
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('Facebook login cancelled'),
@@ -305,6 +309,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               );
                             }
                           } catch (e) {
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Error: $e')),
                             );

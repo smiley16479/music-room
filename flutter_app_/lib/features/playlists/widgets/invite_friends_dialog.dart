@@ -43,7 +43,7 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
     try {
       final friendProvider = context.read<FriendProvider>();
       await friendProvider.loadFriends();
-      
+
       if (mounted) {
         setState(() {
           _friends = friendProvider.friends;
@@ -89,7 +89,7 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
 
     try {
       final eventProvider = context.read<EventProvider>();
-      
+
       // Use the invitation system (for private events)
       // This sends invitations instead of directly adding as participants
       final success = await eventProvider.inviteUsers(
@@ -111,7 +111,9 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to send invitations: ${eventProvider.error}'),
+              content: Text(
+                'Failed to send invitations: ${eventProvider.error}',
+              ),
               backgroundColor: Colors.red,
             ),
           );
@@ -161,16 +163,16 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
                       children: [
                         Text(
                           'Invite Friends',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
                               ),
                         ),
                         Text(
                           'to ${widget.eventName}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.white70,
-                              ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: Colors.white70),
                         ),
                       ],
                     ),
@@ -207,32 +209,31 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
             ),
 
             // Friends list
-            Expanded(
-              child: _buildFriendsList(),
-            ),
+            Expanded(child: _buildFriendsList()),
 
             // Footer with full-width Invite button
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: Colors.grey.shade300),
-                ),
+                border: Border(top: BorderSide(color: Colors.grey.shade300)),
               ),
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.person_add),
-                  label: Text(_selectedFriendIds.isEmpty
-                      ? 'Invite'
-                      : 'Invite (${_selectedFriendIds.length})'),
+                  label: Text(
+                    _selectedFriendIds.isEmpty
+                        ? 'Invite'
+                        : 'Invite (${_selectedFriendIds.length})',
+                  ),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     backgroundColor: Colors.purple,
                     foregroundColor: Colors.white,
                   ),
-                  onPressed:
-                      _selectedFriendIds.isEmpty ? null : _sendInvitations,
+                  onPressed: _selectedFriendIds.isEmpty
+                      ? null
+                      : _sendInvitations,
                 ),
               ),
             ),
@@ -244,9 +245,7 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
 
   Widget _buildFriendsList() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_error != null) {
@@ -254,11 +253,7 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.red.shade300,
-            ),
+            Icon(Icons.error_outline, size: 48, color: Colors.red.shade300),
             const SizedBox(height: 16),
             Text(
               'Failed to load friends',
@@ -267,9 +262,9 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
             const SizedBox(height: 8),
             Text(
               _error!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.grey),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
@@ -291,17 +286,13 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              _searchQuery.isEmpty
-                  ? Icons.people_outline
-                  : Icons.search_off,
+              _searchQuery.isEmpty ? Icons.people_outline : Icons.search_off,
               size: 48,
               color: Colors.grey.shade400,
             ),
             const SizedBox(height: 16),
             Text(
-              _searchQuery.isEmpty
-                  ? 'No friends yet'
-                  : 'No friends found',
+              _searchQuery.isEmpty ? 'No friends yet' : 'No friends found',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -309,9 +300,9 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
               _searchQuery.isEmpty
                   ? 'Add friends to invite them'
                   : 'Try a different search',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.grey),
             ),
           ],
         ),
@@ -330,7 +321,9 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
           title: Text(friend.displayName ?? 'Unknown'),
           subtitle: friend.email != null ? Text(friend.email!) : null,
           secondary: CircleAvatar(
-            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+            backgroundColor: Theme.of(
+              context,
+            ).primaryColor.withValues(alpha: 0.2),
             child: Text(
               (friend.displayName ?? 'U')[0].toUpperCase(),
               style: TextStyle(

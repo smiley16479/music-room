@@ -30,7 +30,7 @@ class TrackVotingWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     // Disable voting for current track
     final canVote = isEnabled && !isCurrentTrack;
 
@@ -45,12 +45,14 @@ class TrackVotingWidget extends StatelessWidget {
           isActive: userVote == VoteType.upvote,
           isEnabled: canVote,
           color: Colors.green,
-          onTap: canVote ? () {
-            // Always call onVote - backend handles toggle behavior
-            onVote?.call(VoteType.upvote);
-          } : null,
+          onTap: canVote
+              ? () {
+                  // Always call onVote - backend handles toggle behavior
+                  onVote?.call(VoteType.upvote);
+                }
+              : null,
         ),
-        
+
         // Score display
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -58,15 +60,15 @@ class TrackVotingWidget extends StatelessWidget {
             score >= 0 ? '+$score' : '$score',
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
-              color: score > 0 
-                  ? Colors.green 
-                  : score < 0 
-                      ? Colors.red 
-                      : theme.colorScheme.onSurface,
+              color: score > 0
+                  ? Colors.green
+                  : score < 0
+                  ? Colors.red
+                  : theme.colorScheme.onSurface,
             ),
           ),
         ),
-        
+
         // Downvote button
         _VoteButton(
           icon: Icons.thumb_down_outlined,
@@ -75,19 +77,21 @@ class TrackVotingWidget extends StatelessWidget {
           isActive: userVote == VoteType.downvote,
           isEnabled: canVote,
           color: Colors.red,
-          onTap: canVote ? () {
-            // Always call onVote - backend handles toggle behavior
-            onVote?.call(VoteType.downvote);
-          } : null,
+          onTap: canVote
+              ? () {
+                  // Always call onVote - backend handles toggle behavior
+                  onVote?.call(VoteType.downvote);
+                }
+              : null,
         ),
-        
+
         // Current track indicator
         if (isCurrentTrack) ...[
           const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.2),
+              color: theme.colorScheme.primary.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
@@ -126,8 +130,10 @@ class _VoteButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final buttonColor = isActive ? color : theme.colorScheme.onSurface.withOpacity(0.6);
-    
+    final buttonColor = isActive
+        ? color
+        : theme.colorScheme.onSurface.withValues(alpha: 0.6);
+
     return InkWell(
       onTap: isEnabled ? onTap : null,
       borderRadius: BorderRadius.circular(20),
@@ -138,7 +144,9 @@ class _VoteButton extends StatelessWidget {
           children: [
             Icon(
               isActive ? activeIcon : icon,
-              color: isEnabled ? buttonColor : buttonColor.withOpacity(0.4),
+              color: isEnabled
+                  ? buttonColor
+                  : buttonColor.withValues(alpha: 0.4),
               size: 20,
             ),
             if (count > 0) ...[
@@ -146,7 +154,9 @@ class _VoteButton extends StatelessWidget {
               Text(
                 '$count',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: isEnabled ? buttonColor : buttonColor.withOpacity(0.4),
+                  color: isEnabled
+                      ? buttonColor
+                      : buttonColor.withValues(alpha: 0.4),
                   fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                 ),
               ),
@@ -188,19 +198,23 @@ class CompactTrackVotingWidget extends StatelessWidget {
         // Upvote
         IconButton(
           icon: Icon(
-            userVote == VoteType.upvote ? Icons.arrow_upward : Icons.arrow_upward_outlined,
+            userVote == VoteType.upvote
+                ? Icons.arrow_upward
+                : Icons.arrow_upward_outlined,
             size: 16,
           ),
           color: userVote == VoteType.upvote ? Colors.green : null,
-          onPressed: canVote ? () {
-            // Always call onVote - backend handles toggle behavior
-            onVote?.call(VoteType.upvote);
-          } : null,
+          onPressed: canVote
+              ? () {
+                  // Always call onVote - backend handles toggle behavior
+                  onVote?.call(VoteType.upvote);
+                }
+              : null,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           iconSize: 16,
         ),
-        
+
         // Score
         SizedBox(
           width: 24,
@@ -209,26 +223,30 @@ class CompactTrackVotingWidget extends StatelessWidget {
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.bold,
-              color: score > 0 
-                  ? Colors.green 
-                  : score < 0 
-                      ? Colors.red 
-                      : null,
+              color: score > 0
+                  ? Colors.green
+                  : score < 0
+                  ? Colors.red
+                  : null,
             ),
           ),
         ),
-        
+
         // Downvote
         IconButton(
           icon: Icon(
-            userVote == VoteType.downvote ? Icons.arrow_downward : Icons.arrow_downward_outlined,
+            userVote == VoteType.downvote
+                ? Icons.arrow_downward
+                : Icons.arrow_downward_outlined,
             size: 16,
           ),
           color: userVote == VoteType.downvote ? Colors.red : null,
-          onPressed: canVote ? () {
-            // Always call onVote - backend handles toggle behavior
-            onVote?.call(VoteType.downvote);
-          } : null,
+          onPressed: canVote
+              ? () {
+                  // Always call onVote - backend handles toggle behavior
+                  onVote?.call(VoteType.downvote);
+                }
+              : null,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           iconSize: 16,

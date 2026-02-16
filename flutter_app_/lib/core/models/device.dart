@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
 import 'package:json_annotation/json_annotation.dart';
 
 part 'device.g.dart';
@@ -164,7 +165,7 @@ class Device extends Equatable {
         delegatedToId: json['delegatedToId'] as String?,
       );
     } catch (e) {
-      print('Error parsing Device from JSON: $e');
+      debugPrint('Error parsing Device from JSON: $e');
       throw Exception('Failed to parse Device: $e');
     }
   }
