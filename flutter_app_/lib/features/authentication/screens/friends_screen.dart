@@ -603,7 +603,15 @@ class _FriendsScreenState extends State<FriendsScreen>
         ),
       );
       if (success) {
+        // Always refresh friends list
         await provider.loadFriends();
+
+        // For event/playlist invitations, also reload the events list so the
+        // newly joined playlist or event appears immediately without a manual refresh.
+        if (invitation.type == 'event' || invitation.type == 'playlist') {
+          // ignore: use_build_context_synchronously
+          await context.read<EventProvider>().loadEvents();
+        }
       }
     }
   }

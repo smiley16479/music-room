@@ -8,7 +8,15 @@ import '../../../core/services/api_service.dart';
 class MusicSearchDialog extends StatefulWidget {
   final Future<bool> Function(TrackSearchResult track)? onTrackAdded;
 
-  const MusicSearchDialog({super.key, this.onTrackAdded});
+  /// Set of "title:::artist" keys (lowercase) for tracks already in the playlist.
+  /// Used to visually indicate duplicates without blocking the user.
+  final Set<String> existingTrackKeys;
+
+  const MusicSearchDialog({
+    super.key,
+    this.onTrackAdded,
+    this.existingTrackKeys = const {},
+  });
 
   @override
   State<MusicSearchDialog> createState() => _MusicSearchDialogState();
@@ -18,6 +26,9 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
   final TextEditingController _searchController = TextEditingController();
   List<TrackSearchResult> _searchResults = [];
   bool _isSearching = false;
+
+  /// Deezer IDs of tracks added during this dialog session.
+  final Set<String> _addedInSession = {};
 
   late MusicService _musicService;
 
@@ -195,6 +206,11 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
   }
 
   Widget _buildTrackTile(TrackSearchResult track) {
+    final trackKey =
+        '${track.title.toLowerCase().trim()}:::${track.artist.toLowerCase().trim()}';
+    final isAlreadyAdded = widget.existingTrackKeys.contains(trackKey) ||
+        _addedInSession.contains(track.id);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -271,34 +287,47 @@ class _MusicSearchDialogState extends State<MusicSearchDialog> {
             ),
           ],
         ),
-        trailing: widget.onTrackAdded != null
-            ? IconButton(
-                onPressed: () async {
-                  // Call the callback instead of closing
-                  await widget.onTrackAdded!(track);
-                  // Don't close the dialog, just show a snackbar
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('✅ ${track.title} added to playlist'),
-                        duration: const Duration(seconds: 2),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.add_circle, size: 28),
-                color: Theme.of(context).colorScheme.primary,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        trailing: isAlreadyAdded
+            ? Tooltip(
+                message: 'Already in playlist',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Icon(
+                    Icons.check_circle,
+                    color: Colors.green.shade600,
+                    size: 28,
+                  ),
+                ),
               )
-            : IconButton(
-                onPressed: () => Navigator.pop(context, track),
-                icon: const Icon(Icons.add_circle, size: 28),
-                color: Theme.of(context).colorScheme.primary,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              ),
+            : widget.onTrackAdded != null
+                ? IconButton(
+                    onPressed: () async {
+                      final success = await widget.onTrackAdded!(track);
+                      if (success && mounted) {
+                        setState(() {
+                          _addedInSession.add(track.id);
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('✅ ${track.title} added to playlist'),
+                            duration: const Duration(seconds: 2),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.add_circle, size: 28),
+                    color: Theme.of(context).colorScheme.primary,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  )
+                : IconButton(
+                    onPressed: () => Navigator.pop(context, track),
+                    icon: const Icon(Icons.add_circle, size: 28),
+                    color: Theme.of(context).colorScheme.primary,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
         isThreeLine: true,
       ),
     );

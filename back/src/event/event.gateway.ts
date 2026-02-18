@@ -912,12 +912,37 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   }
 
   notifyEventUpdated(eventId: string, event: Event) {
-    const room = SOCKET_ROOMS.EVENT(eventId);
-    this.server.to(room).emit('event-updated', {
+    const payload = {
       eventId,
       event,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Always notify clients currently in the event room (join-event)
+    this.server.to(SOCKET_ROOMS.EVENT(eventId)).emit('event-updated', payload);
+
+    // Notify clients viewing the event detail screen
+    this.server.to(SOCKET_ROOMS.EVENT_DETAIL(eventId)).emit('event-updated', payload);
+
+    // Notify clients viewing the playlist detail screen
+    this.server.to(SOCKET_ROOMS.EVENT_PLAYLIST(eventId)).emit('event-updated', payload);
+
+    // For public events: broadcast to the global events list room
+    if (event.visibility === EventVisibility.PUBLIC) {
+      this.server.to(SOCKET_ROOMS.EVENTS).emit('event-updated', payload);
+    } else {
+      // For private events: notify creator and each participant via their personal rooms
+      if (event.creatorId) {
+        this.server.to(SOCKET_ROOMS.USER(event.creatorId)).emit('event-updated', payload);
+      }
+      if (event.participants) {
+        for (const p of event.participants) {
+          if (p && p.userId) {
+            this.server.to(SOCKET_ROOMS.USER(p.userId)).emit('event-updated', payload);
+          }
+        }
+      }
+    }
   }
 
   async notifyEventDeleted(eventId: string) {

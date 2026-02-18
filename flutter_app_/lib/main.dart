@@ -181,6 +181,7 @@ class _InitialScreenState extends State<_InitialScreen> {
   bool _isOAuthCallback = false;
   StreamSubscription<Uri>? _deepLinkSubscription;
   late AppLinks _appLinks;
+  AuthProvider? _authProvider; // Store reference for listener removal
 
   // GlobalKey to preserve HomeScreen state across rebuilds
   static final GlobalKey _homeScreenKey = GlobalKey();
@@ -196,8 +197,18 @@ class _InitialScreenState extends State<_InitialScreen> {
 
   @override
   void dispose() {
+    _authProvider?.removeListener(_onAuthStateChanged);
     _deepLinkSubscription?.cancel();
     super.dispose();
+  }
+
+  /// Stop audio whenever the user is no longer authenticated (logout / token expiry)
+  void _onAuthStateChanged() {
+    if (!mounted) return;
+    final authProvider = context.read<AuthProvider>();
+    if (!authProvider.isAuthenticated && !authProvider.isLoading) {
+      context.read<AudioPlayerProvider>().stop();
+    }
   }
 
   void _initDeepLinks() {
@@ -292,10 +303,10 @@ class _InitialScreenState extends State<_InitialScreen> {
 
   Future<void> _initializeAuth() async {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().init();
+      _authProvider = context.read<AuthProvider>();
+      _authProvider!.addListener(_onAuthStateChanged);
+      _authProvider!.init();
     });
-    // final authProvider = context.read<AuthProvider>();
-    // await authProvider.init();
   }
 
   @override

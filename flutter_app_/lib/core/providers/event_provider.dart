@@ -16,6 +16,12 @@ class EventProvider extends ChangeNotifier {
   String? _error;
   bool _createdByMeOnly = false;
 
+  /// Called whenever a track is explicitly removed from the playlist (via
+  /// REST API or socket). Screens can set this to react to removals — e.g.
+  /// to stop the audio player when the currently-playing track is removed.
+  /// NOTE: this is NOT called for natural track-ended progression.
+  void Function(String trackId)? onTrackRemoved;
+
   EventProvider({required this.eventService, this.webSocketService}) {
     _setupWebSocketListeners();
   }
@@ -218,6 +224,12 @@ class EventProvider extends ChangeNotifier {
       final index = _events.indexWhere((e) => e.id == id);
       if (index != -1) {
         _events[index] = updated;
+      }
+
+      // Also refresh _currentEvent so currentPlaylist / currentEvent reflects
+      // the change immediately without needing a full reload.
+      if (_currentEvent?.id == id) {
+        _currentEvent = updated;
       }
 
       _isLoading = false;
@@ -492,6 +504,7 @@ class EventProvider extends ChangeNotifier {
     try {
       await eventService.removeTrackFromPlaylist(playlistId, trackId);
       _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
+      onTrackRemoved?.call(trackId);
       notifyListeners();
       return true;
     } catch (e) {
@@ -714,6 +727,7 @@ class EventProvider extends ChangeNotifier {
         if (eventId != null && _currentEvent?.id == eventId) {
           if (trackId != null) {
             _currentPlaylistTracks.removeWhere((t) => t.trackId == trackId);
+            onTrackRemoved?.call(trackId);
             notifyListeners();
           }
         }

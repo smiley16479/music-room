@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/models/event.dart';
-import '../../../core/models/device.dart';
 import '../../../core/models/index.dart';
 import '../../../core/providers/index.dart';
 import '../../../core/services/index.dart';
@@ -202,6 +200,34 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       // NOTE: track-added, track-removed, and queue-reordered are handled
       // by EventProvider's global listeners. Do NOT register handlers here
       // because off() in cleanup would destroy EventProvider's listeners too.
+      //
+      // However, we register a callback on EventProvider so that if the
+      // currently-playing track is removed we stop the local audio player.
+      try {
+        final eventProvider = context.read<EventProvider>();
+        eventProvider.onTrackRemoved = (removedTrackId) async {
+          if (!mounted) return;
+          final audioProvider = context.read<AudioPlayerProvider>();
+          if (audioProvider.currentTrack?.trackId == removedTrackId) {
+            debugPrint(
+              '⏹️ Currently-playing track removed — stopping audio player',
+            );
+            _handlingSocketEvent = true;
+            await audioProvider.stop();
+            _handlingSocketEvent = false;
+            _lastKnownPlayingState = false;
+            if (mounted) {
+              setState(() {
+                _serverTrackId = null;
+                _serverIsPlaying = false;
+                _serverPosition = 0;
+                _serverDuration = 0;
+                _lastTimeSyncReceived = null;
+              });
+            }
+          }
+        };
+      } catch (_) {}
 
       ws.on('vote-updated', (data) {
         if (mounted) {
@@ -716,6 +742,15 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       _isListeningToAudio = false;
     }
 
+    // Clear the track-removed callback to avoid stale closures after dispose
+    try {
+      // ignore: use_build_context_synchronously
+      final eventProvider = context.read<EventProvider>();
+      if (eventProvider.onTrackRemoved != null) {
+        eventProvider.onTrackRemoved = null;
+      }
+    } catch (_) {}
+
     // Safely leave room using cached websocket service (avoid context in dispose)
     try {
       if (_wsService != null) {
@@ -866,6 +901,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       name: _nameController.text,
       description: _descriptionController.text,
       eventLicenseType: _votingInvitedOnly ? 'invited' : 'none',
+      isPublic: _selectedVisibility == EventVisibility.public,
     );
 
     if (mounted) {
@@ -948,6 +984,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                 builder: (context, eventProvider, authProvider, deviceProvider, _) {
                   final playlist = eventProvider.currentPlaylist;
                   final isEvent = playlist?.type == EventType.event;
+
                   final canControl = _canControlPlayback(
                     playlist?.creatorId,
                     deviceProvider.delegatedDevices,
@@ -957,6 +994,23 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                   // Hide FAB for non-admin/non-delegated users on event playlists
                   if (isEvent == true && !canControl) {
                     return const SizedBox.shrink();
+                  }
+
+                  // For playlists (type=playlist) that are public, only allow admins (creator or admin participants)
+                  if (playlist != null && playlist.type == EventType.playlist) {
+                    final currentUserId = authProvider.currentUser?.id;
+                    final isCreator = currentUserId != null && currentUserId == playlist.creatorId;
+                    final isAdminParticipant = playlist.participants?.any((p) {
+                          return p.userId == currentUserId &&
+                              (p.role == ParticipantRole.admin || p.role == ParticipantRole.creator);
+                        }) == true;
+
+                    final isAdmin = isCreator || isAdminParticipant;
+
+                    if (playlist.visibility == EventVisibility.public && !isAdmin) {
+                      // Public playlist — hide add for non-admin users
+                      return const SizedBox.shrink();
+                    }
                   }
 
                   return FloatingActionButton(
@@ -2219,9 +2273,20 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
   }
 
   void _showAddTrackDialog() async {
+    // Build a set of "title:::artist" keys for tracks already in the playlist
+    // so the dialog can visually mark them as already added.
+    final existingTrackKeys = context
+        .read<EventProvider>()
+        .currentPlaylistTracks
+        .where((t) => t.trackTitle != null && t.trackArtist != null)
+        .map((t) =>
+            '${t.trackTitle!.toLowerCase().trim()}:::${t.trackArtist!.toLowerCase().trim()}')
+        .toSet();
+
     showDialog(
       context: context,
       builder: (context) => MusicSearchDialog(
+        existingTrackKeys: existingTrackKeys,
         onTrackAdded: (track) async {
           final eventProvider = context.read<EventProvider>();
 

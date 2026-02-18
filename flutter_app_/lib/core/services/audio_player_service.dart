@@ -79,7 +79,8 @@ class AudioPlayerService {
   /// Stop
   Future<void> stop() async {
     debugPrint('🔊 stop(): current position=${_audioPlayer.position}');
-    await _audioPlayer.stop();
+    await _audioPlayer.pause(); // Immediately silence audio output
+    await _audioPlayer.stop();  // Then reset player state
   }
 
   /// Seek to position
