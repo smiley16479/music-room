@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/models/event.dart';
+import '../../../core/models/device.dart';
+import '../../../core/models/index.dart';
 import '../../../core/providers/index.dart';
 import '../../../core/services/index.dart';
 import '../../../core/navigation/route_observer.dart';
@@ -80,7 +82,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
 
   /// Listener for AudioPlayerProvider state changes.
   /// In the new server-driven model:
-  /// - Admin: does NOT emit socket events here. Admin controls use dedicated buttons.
+  /// - Admin/Delegated: does NOT emit socket events here. Admin controls use dedicated buttons.
   /// - Non-admin: when pressing play after a local pause, request sync from server.
   void _onAudioStateChanged() {
     if (!mounted || _handlingSocketEvent) return;
@@ -89,13 +91,20 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
     if (audioProvider == null) return;
 
     // Only act for event playlists
-    bool isOwner = false;
+    bool canControl = false;
     try {
       final eventProvider = context.read<EventProvider>();
       final authProvider = context.read<AuthProvider>();
+      final deviceProvider = context.read<DeviceProvider>();
       final playlist = eventProvider.currentPlaylist;
       if (playlist == null || playlist.type != EventType.event) return;
-      isOwner = authProvider.currentUser?.id == playlist.creatorId;
+      
+      // Check if user can control (owner OR delegated)
+      canControl = _canControlPlayback(
+        playlist.creatorId,
+        deviceProvider.delegatedDevices,
+        authProvider.currentUser?.id,
+      );
     } catch (_) {
       return;
     }
@@ -108,13 +117,13 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
       return;
     }
 
-    if (isOwner) {
-      // Admin: pressing play/pause on the local audio player should NOT
+    if (canControl) {
+      // Admin/Delegated: pressing play/pause on the local audio player should NOT
       // change local state independently. Instead, revert the action and
       // let the server drive via the dedicated admin buttons.
       if (isPlaying && !_serverIsPlaying) {
-        // Admin pressed play locally but server is paused → pause back locally
-        debugPrint('🚫 Admin local play blocked: server is paused, reverting');
+        // User pressed play locally but server is paused → pause back locally
+        debugPrint('🚫 Admin/Delegated local play blocked: server is paused, reverting');
         _handlingSocketEvent = true;
         _audioProvider?.pause();
         _handlingSocketEvent = false;
@@ -809,6 +818,48 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
     });
   }
 
+  /// Check if current user can control playback for this playlist
+  /// Returns true if user is the owner OR has delegation from the owner
+  bool _canControlPlayback(String? playlistCreatorId, List<Device> delegatedDevices, String? currentUserId) {
+    if (currentUserId == null || playlistCreatorId == null) return false;
+    
+    // User is the owner
+    if (currentUserId == playlistCreatorId) return true;
+    
+    // User has delegation from the creator (check for active delegations)
+    return delegatedDevices.any((device) => 
+      device.ownerId == playlistCreatorId && device.isDelegated
+    );
+  }
+
+  /// Handle voting with error notification
+  Future<void> _handleVote(String trackId, VoteType voteType) async {
+    final votingProvider = context.read<VotingProvider>();
+    final success = await votingProvider.vote(trackId, voteType);
+    
+    debugPrint('🗳️ Vote result - success: $success, error: ${votingProvider.error}');
+    
+    if (!success && mounted && votingProvider.error != null) {
+      debugPrint('🚨 Showing error notification: ${votingProvider.error}');
+      // Show error notification
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(votingProvider.error!),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
+        ),
+      );
+      
+      // Clear error after displaying
+      votingProvider.clearError();
+    }
+  }
+
   Future<void> _savePlaylist(EventProvider eventProvider) async {
     final success = await eventProvider.updatePlaylist(
       widget.playlistId,
@@ -893,15 +944,18 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         ),
         floatingActionButton: _isEditMode
             ? null
-            : Consumer2<EventProvider, AuthProvider>(
-                builder: (context, eventProvider, authProvider, _) {
+            : Consumer3<EventProvider, AuthProvider, DeviceProvider>(
+                builder: (context, eventProvider, authProvider, deviceProvider, _) {
                   final playlist = eventProvider.currentPlaylist;
                   final isEvent = playlist?.type == EventType.event;
-                  final isOwner =
-                      authProvider.currentUser?.id == playlist?.creatorId;
+                  final canControl = _canControlPlayback(
+                    playlist?.creatorId,
+                    deviceProvider.delegatedDevices,
+                    authProvider.currentUser?.id,
+                  );
 
-                  // Hide FAB for non-admin users on event playlists
-                  if (isEvent == true && isOwner != true) {
+                  // Hide FAB for non-admin/non-delegated users on event playlists
+                  if (isEvent == true && !canControl) {
                     return const SizedBox.shrink();
                   }
 
@@ -1012,15 +1066,18 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                           // Admin playback controls (play/pause/skip/stop) for event playlists
                           // These only send commands to the server. Local playback is driven
                           // by server events (music-play, music-pause, etc.)
-                          Consumer2<AuthProvider, AudioPlayerProvider>(
-                            builder: (context, authProvider, audioProvider, _) {
+                          Consumer3<AuthProvider, AudioPlayerProvider, DeviceProvider>(
+                            builder: (context, authProvider, audioProvider, deviceProvider, _) {
                               final currentUser = authProvider.currentUser;
-                              final isOwner =
-                                  currentUser?.id == playlist.creatorId;
                               final isEvent = playlist.type == EventType.event;
+                              final canControl = _canControlPlayback(
+                                playlist.creatorId,
+                                deviceProvider.delegatedDevices,
+                                currentUser?.id,
+                              );
 
-                              // Only show for admin/owner of event playlists
-                              if (!isEvent || !isOwner) {
+                              // Only show for admin/owner/delegated users of event playlists
+                              if (!isEvent || !canControl) {
                                 return const SizedBox.shrink();
                               }
 
@@ -1231,14 +1288,18 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                 // Seek bar
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: Consumer2<AuthProvider, AudioPlayerProvider>(
-                    builder: (context, authProvider, audioProvider, _) {
+                  child: Consumer3<AuthProvider, AudioPlayerProvider, DeviceProvider>(
+                    builder: (context, authProvider, audioProvider, deviceProvider, _) {
                       final currentUser = authProvider.currentUser;
-                      final isOwner = currentUser?.id == playlist.creatorId;
                       final isEvent = playlist.type == EventType.event;
+                      final canControl = _canControlPlayback(
+                        playlist.creatorId,
+                        deviceProvider.delegatedDevices,
+                        currentUser?.id,
+                      );
 
                       if (isEvent) {
-                        if (!isOwner) return const SizedBox.shrink();
+                        if (!canControl) return const SizedBox.shrink();
 
                         if (_serverTrackId == null &&
                             !audioProvider.hasCurrentTrack) {
@@ -1486,13 +1547,20 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                           (isFirstTrack && isPlaybackActive))
                                     : isCurrentlyPlaying;
 
-                                return Consumer<AuthProvider>(
-                                  builder: (context, authProvider, _) {
+                                return Consumer2<AuthProvider, DeviceProvider>(
+                                  builder: (context, authProvider, deviceProvider, _) {
                                     final currentUser =
                                         authProvider.currentUser;
                                     final isOwner =
                                         currentUser?.id == playlist.creatorId;
-                                    final canDelete = isOwner;
+                                    // For event playlists, owner OR delegated users can delete tracks
+                                    // For standard playlists, only owner can delete
+                                    final canControl = _canControlPlayback(
+                                      playlist.creatorId,
+                                      deviceProvider.delegatedDevices,
+                                      currentUser?.id,
+                                    );
+                                    final canDelete = isEventPlaylist ? canControl : isOwner;
 
                                     final trackContent = AnimatedContainer(
                                       duration: const Duration(
@@ -1786,8 +1854,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                                               playlist
                                                                   .votingEnabled ??
                                                               true,
-                                                          onVote: (voteType) {
-                                                            votingProvider.vote(
+                                                          onVote: (voteType) async {
+                                                            await _handleVote(
                                                               track.trackId,
                                                               voteType,
                                                             );
@@ -1830,8 +1898,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                                           playlist
                                                               .votingEnabled ??
                                                           true,
-                                                      onVote: (voteType) {
-                                                        votingProvider.vote(
+                                                      onVote: (voteType) async {
+                                                        await _handleVote(
                                                           track.trackId,
                                                           voteType,
                                                         );

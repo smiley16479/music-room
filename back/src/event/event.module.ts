@@ -26,6 +26,7 @@ import { EmailModule } from '../email/email.module';
 import { AuthModule } from '../auth/auth.module';
 import { MusicModule } from '../music/music.module';
 import { CommonModule } from '../common/common.module';
+import { DeviceModule } from '../device/device.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { CommonModule } from '../common/common.module';
     AuthModule,
     MusicModule,
     CommonModule,
+    forwardRef(() => DeviceModule),
   ],
   controllers: [EventController, PlaylistController],
   providers: [EventService, EventStreamService, EventParticipantService, EventGateway],

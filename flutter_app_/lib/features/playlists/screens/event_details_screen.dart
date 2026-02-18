@@ -322,6 +322,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
           ? _playlistNameController.text
           : null,
       votingStartTime: _formatTimeToString(_selectedVotingStartTime),
+      votingEndTime: _formatTimeToString(_selectedVotingEndTime),
       eventDate: _selectedEventDate,
       startDate: _selectedStartDate,
       endDate: _selectedEndDate,

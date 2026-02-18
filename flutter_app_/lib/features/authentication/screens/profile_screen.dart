@@ -242,7 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
 
-              // Friends Section
+              // MARK: Friends
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(

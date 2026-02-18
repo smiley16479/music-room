@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/index.dart';
 import '../services/index.dart';
@@ -30,6 +31,12 @@ class VotingProvider extends ChangeNotifier {
   Map<String, TrackVoteInfo> get trackVotes => _trackVotes;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  /// Clear error message
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
 
   /// Get vote info for a specific track
   TrackVoteInfo? getTrackVoteInfo(String trackId) {
@@ -244,11 +251,14 @@ class VotingProvider extends ChangeNotifier {
   }
 
   /// Load voting results for current event
-  Future<void> loadVotingResults() async {
+  /// If preserveError is true, won't clear existing error state (useful when reverting optimistic updates)
+  Future<void> loadVotingResults({bool preserveError = false}) async {
     if (_currentEventId == null) return;
 
     _isLoading = true;
-    _error = null;
+    if (!preserveError) {
+      _error = null;
+    }
     notifyListeners();
 
     try {
@@ -258,7 +268,10 @@ class VotingProvider extends ChangeNotifier {
         _trackVotes[trackInfo.trackId] = trackInfo;
       }
     } catch (e) {
-      _error = e.toString();
+      // Only set error if we're not preserving an existing error
+      if (!preserveError) {
+        _error = e.toString();
+      }
       debugPrint('❌ Error loading voting results: $e');
     }
 
@@ -278,16 +291,28 @@ class VotingProvider extends ChangeNotifier {
       // Optimistic update for immediate UI feedback
       _updateLocalVote(trackId, isToggleOff ? null : VoteType.upvote);
 
+      // Get user location for location-based events (optional)
+      final position = await _getUserLocation();
+      
+      debugPrint('📍 Upvote - Location obtained: ${position != null ? "${position.latitude}, ${position.longitude}" : "null"}');
+
       // Call API for persistence - WebSocket events will handle the real-time sync
       // Note: We don't also send via WebSocket to avoid duplicate vote processing
-      await votingService.upvote(_currentEventId!, trackId);
+      await votingService.upvote(
+        _currentEventId!,
+        trackId,
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      );
 
       return true;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error upvoting track: $e');
-      // Revert optimistic update on error
-      await loadVotingResults();
+      debugPrint('❌ Error type: ${e.runtimeType}');
+      debugPrint('❌ Error string: $_error');
+      // Revert optimistic update on error (preserve error message)
+      await loadVotingResults(preserveError: true);
       return false;
     }
   }
@@ -304,16 +329,67 @@ class VotingProvider extends ChangeNotifier {
       // Optimistic update for immediate UI feedback
       _updateLocalVote(trackId, isToggleOff ? null : VoteType.downvote);
 
+      // Get user location for location-based events (optional)
+      final position = await _getUserLocation();
+      
+      debugPrint('📍 Downvote - Location obtained: ${position != null ? "${position.latitude}, ${position.longitude}" : "null"}');
+
       // Call API for persistence - WebSocket events will handle the real-time sync
-      await votingService.downvote(_currentEventId!, trackId);
+      await votingService.downvote(
+        _currentEventId!,
+        trackId,
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      );
 
       return true;
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error downvoting track: $e');
-      // Revert optimistic update on error
-      await loadVotingResults();
+      debugPrint('❌ Error type: ${e.runtimeType}');
+      debugPrint('❌ Error string: $_error');
+      // Revert optimistic update on error (preserve error message)
+      await loadVotingResults(preserveError: true);
       return false;
+    }
+  }
+
+  /// Get user's current location (returns null if unavailable or permission denied)
+  Future<Position?> _getUserLocation() async {
+    try {
+      // Check if location services are enabled
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('⚠️ Location services are disabled');
+        return null;
+      }
+
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          debugPrint('⚠️ Location permission denied');
+          return null;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        debugPrint('⚠️ Location permission denied forever');
+        return null;
+      }
+
+      // Get current position
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 5),
+      );
+
+      debugPrint('📍 Got user location: ${position.latitude}, ${position.longitude}');
+      return position;
+    } catch (e) {
+      debugPrint('⚠️ Error getting user location: $e');
+      return null;
     }
   }
 

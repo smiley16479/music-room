@@ -23,7 +23,7 @@ import { UpdateDeviceDto } from './dto/update-device.dto';
 import { DelegateControlDto } from './dto/delegate-control.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
-import { DeviceGateway } from './device.gateway';
+import { EventGateway } from '../event/event.gateway';
 
 export interface DeviceWithStats extends Device {
   stats: {
@@ -66,8 +66,8 @@ export class DeviceService {
     private readonly deviceRepository: Repository<Device>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @Inject(forwardRef(() => DeviceGateway))
-    private readonly deviceGateway: DeviceGateway,
+    @Inject(forwardRef(() => EventGateway))
+    private readonly deviceGateway: EventGateway,
   ) {}
 
   // Device CRUD Operations
@@ -259,7 +259,14 @@ export class DeviceService {
   }
 
   async update(id: string, updateDeviceDto: UpdateDeviceDto, userId: string): Promise<DeviceWithStats> {
-    const device = await this.findById(id, userId);
+    const device = await this.deviceRepository.findOne({
+      where: { id },
+      relations: ['owner', 'delegatedTo'],
+    });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
 
     // Only device owner can update device info
     if (device.ownerId !== userId) {
@@ -287,7 +294,14 @@ export class DeviceService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const device = await this.findById(id, userId);
+    const device = await this.deviceRepository.findOne({
+      where: { id },
+      relations: ['owner', 'delegatedTo'],
+    });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
 
     // Only device owner can delete device
     if (device.ownerId !== userId) {
@@ -404,11 +418,28 @@ export class DeviceService {
     requesterId: string, 
     delegateDto: DelegateControlDto
   ): Promise<DeviceWithStats> {
-    const device = await this.findById(deviceId, requesterId);
+    // Load device without stats to ensure TypeORM can track changes
+    const device = await this.deviceRepository.findOne({
+      where: { id: deviceId },
+      relations: ['owner', 'delegatedTo'],
+    });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
 
     // Only device owner can delegate control
     if (device.ownerId !== requesterId) {
       throw new ForbiddenException('Only the device owner can delegate control');
+    }
+
+    // Get owner user object for notifications
+    const ownerUser = await this.userRepository.findOne({
+      where: { id: requesterId },
+    });
+
+    if (!ownerUser) {
+      throw new NotFoundException('Owner user not found');
     }
 
     // Check if target user exists
@@ -425,6 +456,10 @@ export class DeviceService {
       throw new BadRequestException('Cannot delegate control to yourself');
     }
 
+    // Store previous delegation info for notification
+    const previousDelegatedTo = device.delegatedTo;
+    const wasDelegated = !!device.delegatedToId;
+
     // Set default expiration if not provided (24 hours)
     const expiresAt = delegateDto.expiresAt ? 
       new Date(delegateDto.expiresAt) : 
@@ -439,36 +474,59 @@ export class DeviceService {
       canChangePlaylist: false,
     };
 
-    // Update device with delegation info
-    device.delegatedToId = delegateDto.delegatedToId;
+    // Update device with delegation info (this will replace existing delegation)
+    // IMPORTANT: Update the relation object, not just the ID
+    device.delegatedTo = targetUser;
+    device.delegatedToId = targetUser.id;
     device.delegationExpiresAt = expiresAt;
     device.delegationPermissions = { ...defaultPermissions, ...delegateDto.permissions };
 
+    console.log(`🔄 Delegating device ${deviceId}:`, {
+      from: previousDelegatedTo?.id,
+      to: targetUser.id,
+      wasDelegated,
+    });
+
     const updatedDevice = await this.deviceRepository.save(device);
 
-    // Notify about delegation
+    console.log(`✅ Device delegation saved. delegatedToId is now: ${updatedDevice.delegatedToId}`);
+
+    // Notify previous user if delegation was transferred
+    if (wasDelegated && previousDelegatedTo && previousDelegatedTo.id !== delegateDto.delegatedToId) {
+      console.log(`📤 About to notify control revoked to previous user: ${previousDelegatedTo.id}`);
+      this.deviceGateway.notifyControlRevoked(
+        deviceId,
+        previousDelegatedTo,
+        ownerUser
+      );
+    }
+
+    // Notify new user about delegation
+    console.log(`📤 About to notify control delegated to new user: ${targetUser.id}`);
+    console.log(`   deviceGateway exists? ${!!this.deviceGateway}`);
+    console.log(`   notifyControlDelegated exists? ${typeof this.deviceGateway?.notifyControlDelegated}`);
+    
     this.deviceGateway.notifyControlDelegated(
       deviceId, 
       targetUser, 
       device.delegationPermissions,
-      requesterId
+      ownerUser
     );
+    
+    console.log(`✅ notifyControlDelegated called successfully`);
 
     return this.addDeviceStats(updatedDevice);
   }
 
   async revokeDelegation(deviceId: string, requesterId: string): Promise<DeviceWithStats> {
-    const device = await this.findById(deviceId, requesterId);
-    /* const device = await this.deviceRepository.findOne({
+    const device = await this.deviceRepository.findOne({
       where: { id: deviceId },
       relations: ['owner', 'delegatedTo'],
     });
 
     if (!device) {
       throw new NotFoundException('Device not found');
-    } */
-
-    console.log('Revoking delegation for device:', device);
+    }
     
     // Only owner or delegated user can revoke
     const canRevoke = device.ownerId === requesterId || device.delegatedToId === requesterId;
@@ -476,10 +534,21 @@ export class DeviceService {
       throw new ForbiddenException('You cannot revoke control for this device');
     }
 
+    // Get requester user object for notifications
+    const requesterUser = await this.userRepository.findOne({
+      where: { id: requesterId },
+    });
+
+    if (!requesterUser) {
+      throw new NotFoundException('Requester user not found');
+    }
+
     const previousDelegatedTo = device.delegatedTo;
 
+    console.log(`🔄 Revoking delegation for device ${deviceId}, previousDelegatedTo: ${previousDelegatedTo?.id}`);
+
     // Notify about revocation
-    this.deviceGateway.notifyControlRevoked(device.identifier, previousDelegatedTo, requesterId);
+    this.deviceGateway.notifyControlRevoked(deviceId, previousDelegatedTo, requesterUser);
 
     // Clear delegation
     device.delegatedTo = null;
@@ -489,7 +558,7 @@ export class DeviceService {
 
     const updatedDevice = await this.deviceRepository.save(device);
 
-    console.log('Revoking delegation for updatedDevice:', updatedDevice);
+    console.log(`✅ Delegation revoked. delegatedToId is now: ${updatedDevice.delegatedToId}`);
 
     return this.addDeviceStats(updatedDevice);
   }
@@ -499,7 +568,14 @@ export class DeviceService {
     requesterId: string, 
     additionalHours: number
   ): Promise<DeviceWithStats> {
-    const device = await this.findById(deviceId, requesterId);
+    const device = await this.deviceRepository.findOne({
+      where: { id: deviceId },
+      relations: ['owner', 'delegatedTo'],
+    });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
 
     // Only device owner can extend delegation
     if (device.ownerId !== requesterId) {
@@ -661,6 +737,7 @@ export class DeviceService {
     for (const device of expiredDelegations) {
       const previousDelegatedTo = device.delegatedTo;
       
+      device.delegatedTo = null;
       device.delegatedToId = null;
       device.delegationExpiresAt = null;
       device.delegationPermissions = null;
@@ -669,7 +746,7 @@ export class DeviceService {
 
       // Notify about automatic revocation
       this.deviceGateway.notifyControlRevoked(
-        device.identifier, 
+        device.id, 
         previousDelegatedTo, 
         'system' // System-initiated revocation
       );

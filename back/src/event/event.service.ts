@@ -77,6 +77,7 @@ export class EventService {
     private readonly playlistTrackRepository: Repository<PlaylistTrack>,
     private readonly eventParticipantService: EventParticipantService,
     private readonly emailService: EmailService,
+    @Inject(forwardRef(() => EventGateway))
     private readonly eventGateway: EventGateway,
     private readonly geocodingService: GeocodingService,
   ) {}
@@ -619,7 +620,7 @@ export class EventService {
 
 
   // Voting System
-  async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto)/* : Promise<TrackVoteSnapshot[]> */ {
+  async voteForTrack(eventId: string, userId: string, voteDto: CreateVoteDto, latitude?: number, longitude?: number)/* : Promise<TrackVoteSnapshot[]> */ {
 
     const event = await this.findById(eventId, userId);
 
@@ -628,8 +629,8 @@ export class EventService {
       throw new BadRequestException('Voting is only available for events, not playlists');
     }
 
-    // Check if user can vote
-    await this.checkVotingPermissions(event, userId);
+    // Check if user can vote (including location check if applicable)
+    await this.checkVotingPermissions(event, userId, latitude, longitude);
 
     // Get track
     const track = await this.trackRepository.findOne({
@@ -1120,8 +1121,8 @@ export class EventService {
       return true;
     }
 
-    // Check if current time is within voting hours (only applies to location-based events)
-    if (event.licenseType === EventLicenseType.LOCATION_BASED && event.votingStartTime && event.votingEndTime) {
+    // Check if current time is within voting hours (applies to time-based and location-based events)
+    if ((event.licenseType === EventLicenseType.TIME_BASED || event.licenseType === EventLicenseType.LOCATION_BASED) && event.votingStartTime && event.votingEndTime) {
       const now = new Date();
       const currentTime = now.toTimeString().substring(0, 5); // HH:MM format
 
@@ -1563,7 +1564,7 @@ export class EventService {
     throw new ForbiddenException('You are not invited to this private event');
   }
 
-  private async checkVotingPermissions(event: Event, userId: string): Promise<void> {
+  private async checkVotingPermissions(event: Event, userId: string, userLatitude?: number, userLongitude?: number): Promise<void> {
     // Check if event should be live based on dates (fallback for cron job delays)
     const now = new Date();
     let effectiveStatus = event.status;
@@ -1655,7 +1656,7 @@ export class EventService {
       }
 
       // Event creators can always vote in their own events
-      if ( event.licenseType === EventLicenseType.LOCATION_BASED ) {
+      if (event.licenseType === EventLicenseType.LOCATION_BASED) {
         
         if (event.creatorId === userId) {
           return;
@@ -1666,10 +1667,36 @@ export class EventService {
           return;
         }
         
-        // Check voting time restrictions for location-based events
+        // Check voting time restrictions for location-based events (if votingStartTime and votingEndTime are set)
         const canVoteByTime = await this.checkVotingTimePermission(event, userId);
         if (!canVoteByTime) {
           throw new ForbiddenException('Voting is not allowed outside the specified voting hours for this location-based event');
+        }
+
+        // Check location proximity
+        if (!userLatitude || !userLongitude) {
+          throw new ForbiddenException('Location is required to vote in this location-based event');
+        }
+
+        if (!event.latitude || !event.longitude) {
+          throw new ForbiddenException('Event location is not configured');
+        }
+
+        const distance = this.calculateDistance(
+          event.latitude,
+          event.longitude,
+          userLatitude,
+          userLongitude
+        );
+
+        // Convert distance from kilometers to meters
+        const distanceInMeters = distance * 1000;
+        const allowedRadius = event.locationRadius || 1000; // Default 1km if not set
+
+        if (distanceInMeters > allowedRadius) {
+          throw new ForbiddenException(
+            `You must be within ${allowedRadius}m of the event location to vote. You are ${Math.round(distanceInMeters)}m away.`
+          );
         }
       }
   }

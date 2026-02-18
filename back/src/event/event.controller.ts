@@ -572,7 +572,7 @@ export class EventController {
     @Body() voteDto: CreateVoteDto,
     @CurrentUser() user: User,
   ) {
-    const results = await this.eventService.voteForTrack(id, user.id, voteDto);
+    const results = await this.eventService.voteForTrack(id, user.id, voteDto, voteDto.latitude, voteDto.longitude);
     return {
       success: true,
       message: 'Vote submitted successfully',

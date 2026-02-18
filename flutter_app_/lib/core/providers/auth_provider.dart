@@ -46,6 +46,7 @@ class AuthProvider extends ChangeNotifier {
       if (_isAuthenticated && _token != null && webSocketService != null) {
         await webSocketService!.connect(_token!);
         webSocketService!.joinEventsRoom();
+        _setupDeviceNotifications();
       }
     } catch (e) {
       _currentUser = null;
@@ -101,6 +102,7 @@ class AuthProvider extends ChangeNotifier {
       if (_token != null && webSocketService != null) {
         await webSocketService!.connect(_token!);
         webSocketService!.joinEventsRoom();
+        _setupDeviceNotifications();
       }
 
       // Register device after successful login
@@ -275,6 +277,22 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Setup device delegation notification listeners
+  void _setupDeviceNotifications() {
+    webSocketService?.setupDeviceNotificationListeners(
+      onControlReceived: (data) {
+        debugPrint('🎮 You received control of device: ${data['deviceId']}');
+        // Trigger a notification or update UI
+        // The screen can listen to these events via webSocketService.on('device-control-received')
+      },
+      onControlRevoked: (data) {
+        debugPrint('🚫 Your control was revoked for device: ${data['deviceId']}');
+        // Trigger a notification or update UI
+        // The screen can listen to these events via webSocketService.on('device-control-revoked')
+      },
+    );
   }
 
   /// Clear error

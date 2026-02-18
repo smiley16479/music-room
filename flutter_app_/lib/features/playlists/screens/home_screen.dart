@@ -45,10 +45,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadAllEvents() async {
     debugPrint('🟡 _loadAllEvents() called');
     final eventProvider = context.read<EventProvider>();
+    final deviceProvider = context.read<DeviceProvider>();
     debugPrint('🟡 EventProvider obtained');
-    await eventProvider.loadEvents();
+    
+    // Load events and delegated devices in parallel
+    await Future.wait([
+      eventProvider.loadEvents(),
+      deviceProvider.loadDelegatedDevices(),
+    ]);
+    
     debugPrint(
       '🟡 loadEvents() completed - Total: ${eventProvider.allEvents.length}, Playlists: ${eventProvider.myPlaylists.length}, Events: ${eventProvider.realEvents.length}',
+    );
+    debugPrint(
+      '🎮 Delegated devices loaded: ${deviceProvider.delegatedDevices.length}',
     );
   }
 

@@ -174,13 +174,30 @@ class ApiService {
     logger.d('Decoded body type: ${body.runtimeType}');
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
+      // Check if response body indicates an error (NestJS may return 200 with error field)
+      if (body is Map<String, dynamic>) {
+        final success = body['success'];
+        final error = body['error'];
+        
+        logger.d('Response body - success: $success, error: $error');
+        
+        // If success is explicitly false or there's an error field, throw an exception
+        if (success == false || error != null) {
+          final errorMessage = _extractErrorMessage(body);
+          logger.e('API error detected in 2xx response: $errorMessage');
+          throw ApiException(errorMessage);
+        }
+      }
       return body;
     } else if (response.statusCode == 401) {
-      throw UnauthorizedException('Unauthorized');
+      String message = _extractErrorMessage(body);
+      throw UnauthorizedException(message.isNotEmpty ? message : 'Unauthorized');
     } else if (response.statusCode == 403) {
-      throw ForbiddenException('Forbidden');
+      String message = _extractErrorMessage(body);
+      throw ForbiddenException(message.isNotEmpty ? message : 'Forbidden');
     } else if (response.statusCode == 404) {
-      throw NotFoundException('Not found');
+      String message = _extractErrorMessage(body);
+      throw NotFoundException(message.isNotEmpty ? message : 'Not found');
     } else if (response.statusCode >= 500) {
       String message = _extractErrorMessage(body);
       throw ServerException(message);

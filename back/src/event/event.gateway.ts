@@ -27,10 +27,22 @@ import { getAvatarUrl } from 'src/common/utils/avatar.utils';
 import { create } from 'domain';
 import { UserService } from 'src/user/user.service';
 import { ParticipantRole } from './entities/event-participant.entity';
+import { Device, DeviceStatus } from 'src/device/entities/device.entity';
+import { DeviceService, PlaybackCommand } from 'src/device/device.service';
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
+  deviceId?: string;
+  deviceIdentifier?: string;
   user?: User;
+}
+
+interface DeviceConnectionInfo {
+  deviceId: string;
+  deviceName: string;
+  userId: string;
+  userAgent?: string;
+  connectedAt: string;
 }
 
 @WebSocketGateway({
@@ -38,7 +50,7 @@ interface AuthenticatedSocket extends Socket {
     origin: '*', // process.env.FRONTEND_URL || 'http://localhost:5173',
     credentials: true,
   },
-  namespace: '/events',
+  namespace: '/',
 })
 export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -54,10 +66,12 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     private eventService: EventService,
     @Inject(forwardRef(() => EventStreamService))
     private eventStreamService: EventStreamService,
+    @Inject(forwardRef(() => DeviceService))
+    private deviceService: DeviceService,
   ) {}
 
   afterInit(server: Server) {
-    this.logger.log('Events WebSocket Gateway initialized');
+    this.logger.log('WebSocket Gateway initialized (Events & Devices)');
   }
 
   async handleConnection(client: AuthenticatedSocket) {
@@ -86,7 +100,12 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
           try {
             const user = await this.userService.findById(client.userId);
             client.user = user;
-            this.logger.log(`Client connected: ${client.id} (User: ${client.userId}, Display: ${user.displayName || user.email || 'No name'})`);
+            
+            // Automatically join the user's personal room for notifications
+            const userRoom = SOCKET_ROOMS.USER(client.userId);
+            await client.join(userRoom);
+            
+            this.logger.log(`✅ Client connected: ${client.id} (User: ${client.userId}, Display: ${user.displayName || user.email || 'No name'}) - Joined room: ${userRoom}`);
             break;
           } catch (error) {
             retryCount++;
@@ -590,7 +609,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   @SubscribeMessage('upvote-track')
   async handleUpvoteTrack(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string },
+    @MessageBody() { eventId, trackId, latitude, longitude }: { eventId: string; trackId: string; latitude?: number; longitude?: number },
   ) {
     try {
       if (!client.userId) {
@@ -601,7 +620,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       await this.eventService.voteForTrack(eventId, client.userId, {
         trackId,
         type: 'upvote' as any,
-      });
+      }, latitude, longitude);
 
       this.logger.log(`User ${client.userId} upvoted track ${trackId} in event ${eventId}`);
     } catch (error) {
@@ -616,7 +635,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
   @SubscribeMessage('downvote-track')
   async handleDownvoteTrack(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() { eventId, trackId }: { eventId: string; trackId: string },
+    @MessageBody() { eventId, trackId, latitude, longitude }: { eventId: string; trackId: string; latitude?: number; longitude?: number },
   ) {
     try {
       if (!client.userId) {
@@ -627,7 +646,7 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
       await this.eventService.voteForTrack(eventId, client.userId, {
         trackId,
         type: 'downvote' as any,
-      });
+      }, latitude, longitude);
 
       this.logger.log(`User ${client.userId} downvoted track ${trackId} in event ${eventId}`);
     } catch (error) {
@@ -1879,7 +1898,21 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
 
       // Check if user is admin
       const isAdmin = event.participants?.some(participant => participant.userId === userId && participant.role === ParticipantRole.ADMIN);
-      return !!isAdmin;
+      if (isAdmin) {
+        return true;
+      }
+
+      // Check if user has delegation from the event creator
+      // User can control if they have an active device delegation from the creator
+      const delegatedDevices = await this.deviceService.findDelegatedDevices(userId);
+      const hasDelegationFromCreator = delegatedDevices.some(device => {
+        // Check if device is owned by event creator and delegation is still active
+        const isFromCreator = device.ownerId === event.creatorId;
+        const isActive = device.delegationExpiresAt && new Date(device.delegationExpiresAt) > new Date();
+        return isFromCreator && isActive;
+      });
+
+      return hasDelegationFromCreator;
     } catch (error) {
       this.logger.error(`Error checking playback control permissions: ${error.message}`);
       return false;
@@ -2093,5 +2126,422 @@ export class EventGateway implements OnGatewayInit, OnGatewayConnection, OnGatew
     } catch (error) {
       client.emit('error', { message: 'Failed to join user room' });
     }
+  }
+
+  // ==================== DEVICE HANDLERS ====================
+
+  // Device Connection Management
+  @SubscribeMessage('connect-device')
+  async handleConnectDevice(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    const deviceIdentifier = data[0]?.deviceIdentifier;
+    console.log('handleConnectDevice called', deviceIdentifier, client.id);
+
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        console.error('handleConnectDevice unauthorized: no userId', { clientUserId: client.userId });
+        return;
+      }
+
+      // Register connection with device service
+      await this.deviceService.registerConnection(
+        client.userId,
+        client.id,
+        undefined,
+        deviceIdentifier,
+      );
+
+      // Join device room
+      const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
+      this.logger.debug(`Joining DEVICE room ${room} for device ${deviceIdentifier}`);
+      await client.join(room);
+      const userRoom = SOCKET_ROOMS.USER(client.userId);
+      await client.join(userRoom);
+      
+      // Store device info in client
+      client.deviceIdentifier = deviceIdentifier;
+      client.data.connectedAt = new Date().toISOString();
+
+      client.emit('device-connected', {
+        deviceIdentifier,
+        message: 'Successfully connected to device',
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} connected to device ${deviceIdentifier}`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to connect to device', details: error.message });
+      this.logger.error(`device ${deviceIdentifier} Error: ${error.message}`);
+    }
+  }
+
+  @SubscribeMessage('disconnect-device')
+  async handleDisconnectDevice(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { deviceId }: { deviceId: string },
+    @MessageBody() data?: any,
+  ) {
+    console.log('handle disconnect-device called', { deviceId, data });
+
+    try {
+      if (!client.userId || client.deviceId !== deviceId) {
+        console.log('handle disconnect-device unauthorized', { clientUserId: client.userId, clientDeviceId: client.deviceId, deviceId });
+        client.emit('error', { message: 'Not connected to this device' });
+        return;
+      }
+
+      // Leave device room
+      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      await client.leave(room);
+
+      // Unregister connection
+      await this.deviceService.unregisterConnection(client.id);
+
+      // Clear device info from client
+      delete client.deviceId;
+      delete client.data.deviceInfo;
+      delete client.data.connectedAt;
+
+      client.emit('device-disconnected', {
+        deviceId,
+        message: 'Successfully disconnected from device',
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`User ${client.userId} disconnected from device ${deviceId}`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to disconnect from device', details: error.message });
+    }
+  }
+
+  // Heartbeat for connection maintenance
+  @SubscribeMessage('heartbeat')
+  async handleHeartbeat(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { deviceId }: { deviceId?: string },
+  ) {
+    try {
+      if (client.deviceId && deviceId && client.deviceId === deviceId) {
+        await this.deviceService.updateLastActivity(client.id);
+        client.emit('heartbeat-ack', { timestamp: new Date().toISOString() });
+      }
+    } catch (error) {
+      // Silently handle heartbeat errors
+    }
+  }
+
+  // Device Status Updates
+  @SubscribeMessage('update-device-status')
+  async handleUpdateDeviceStatus(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { deviceId, status, metadata }: { 
+      deviceId: string; 
+      status: DeviceStatus; 
+      metadata?: any;
+    },
+  ) {
+    try {
+      if (!client.userId || client.deviceId !== deviceId) {
+        client.emit('error', { message: 'Unauthorized device status update' });
+        return;
+      }
+
+      // Update last activity
+      await this.deviceService.updateLastActivity(client.id);
+
+      // Broadcast status update to device room
+      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      this.server.to(room).emit('device-status-updated', {
+        deviceId,
+        status,
+        metadata,
+        updatedBy: client.userId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log(`Device ${deviceId} status updated to ${status}`);
+    } catch (error) {
+      client.emit('error', { message: 'Failed to update device status', details: error.message });
+    }
+  }
+
+  // Playback State Synchronization (for devices)
+  @SubscribeMessage('device-playback-state')
+  async handleDevicePlaybackState(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    const { deviceIdentifier, command } = data[0];
+
+    this.logger.debug(`SubscribeMessage('device-playback-state') Device ${deviceIdentifier} state command: ${command}`);
+
+    try {
+      // Update last activity
+      await this.deviceService.updateLastActivity(client.id);
+
+      // Broadcast playback state to device room
+      const room = SOCKET_ROOMS.DEVICE(deviceIdentifier);
+      client.to(room).emit('playback-state-updated', {
+        deviceIdentifier,
+        command,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      // Silently handle playback state errors
+    }
+  }
+
+  // Real-time notifications to device controllers
+  @SubscribeMessage('request-device-info')
+  async handleRequestDeviceInfo(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { deviceId }: { deviceId: string },
+  ) {
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // Check if user has access to device
+      const device = await this.deviceService.findById(deviceId, client.userId);
+      
+      // Request info from connected device clients
+      const room = SOCKET_ROOMS.DEVICE(deviceId);
+      this.server.to(room).emit('device-info-requested', {
+        requesterId: client.userId,
+        requestId: `${client.id}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+      });
+
+    } catch (error) {
+      client.emit('error', { message: 'Failed to request device info', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('device-info-response')
+  async handleDeviceInfoResponse(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() { requestId, deviceInfo, playbackState }: { 
+      requestId: string;
+      deviceInfo: any;
+      playbackState: any;
+    },
+  ) {
+    try {
+      // Forward response back to requester
+      this.server.emit('device-info-received', {
+        requestId,
+        deviceId: client.deviceId,
+        deviceInfo,
+        playbackState,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      // Silently handle response errors
+    }
+  }
+
+  // Get device connections in real-time
+  @SubscribeMessage('get-device-connections')
+  async handleGetDeviceConnections(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    const deviceId = data[0]?.deviceId;
+    try {
+      if (!client.userId) {
+        client.emit('error', { message: 'Authentication required' });
+        return;
+      }
+      const connections = await this.getDeviceConnections(deviceId);
+      console.log('handleGetDeviceConnections called', { deviceId, connections });
+      client.emit('device-connections', { deviceId, connections });
+    } catch (error) {
+      client.emit('error', { message: 'Failed to get device connections', details: error.message });
+    }
+  }
+
+  @SubscribeMessage('which-rooms')
+  async handleGetwhichRooms(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data?: any,
+  ) {
+    console.log('Rooms du client:', Array.from(client.rooms));
+  }
+
+  // ==================== DEVICE NOTIFICATION METHODS ====================
+
+  // Server-side notification methods (called by DeviceService)
+  notifyDeviceConnected(deviceId: string, userId: string) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('device-connected-notification', {
+      deviceId,
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyDeviceDisconnected(deviceId: string, userId: string) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('device-disconnected-notification', {
+      deviceId,
+      userId,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyDeviceUpdated(deviceId: string, device: Device) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('device-updated', {
+      deviceId,
+      device: {
+        id: device.id,
+        name: device.name,
+        type: device.type,
+        status: device.status,
+        canBeControlled: device.canBeControlled,
+        lastSeen: device.lastSeen,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyDeviceStatusChanged(deviceId: string, status: DeviceStatus) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('device-status-changed', {
+      deviceId,
+      status,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  notifyControlDelegated(
+    deviceId: string, 
+    delegatedTo: User, 
+    permissions: any, 
+    delegatedBy: User
+  ) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('control-delegated', {
+      deviceId,
+      delegatedTo: {
+        id: delegatedTo.id,
+        displayName: delegatedTo.displayName,
+        avatarUrl: delegatedTo.avatarUrl,
+      },
+      permissions,
+      delegatedBy: {
+        id: delegatedBy.id,
+        displayName: delegatedBy.displayName,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    // Also notify the delegated user directly
+    const userRoom = SOCKET_ROOMS.USER(delegatedTo.id);
+    const socketsInRoom = this.server?.sockets?.adapter?.rooms?.get(userRoom)?.size || 0;
+    
+    this.server.to(userRoom).emit('device-control-received', {
+      deviceId,
+      permissions,
+      delegatedBy: {
+        id: delegatedBy.id,
+        displayName: delegatedBy.displayName,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log(`✅ Control delegated - deviceRoom: ${room}, userRoom: ${userRoom} (${socketsInRoom} sockets)`);
+  }
+
+  notifyControlRevoked(deviceId: string, previousDelegatedTo: User | null, revokedBy: User | string) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    const revokedByData = typeof revokedBy === 'string' ? revokedBy : {
+      id: revokedBy.id,
+      displayName: revokedBy.displayName,
+    };
+    
+    this.server.to(room).emit('control-revoked', {
+      deviceId,
+      previousDelegatedTo: previousDelegatedTo ? {
+        id: previousDelegatedTo.id,
+        displayName: previousDelegatedTo.displayName,
+      } : null,
+      revokedBy: revokedByData,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Also notify the previously delegated user
+    if (previousDelegatedTo) {
+      const userRoom = SOCKET_ROOMS.USER(previousDelegatedTo.id);
+      const socketsInRoom = this.server?.sockets?.adapter?.rooms?.get(userRoom)?.size || 0;
+      
+      this.server.to(userRoom).emit('device-control-revoked', {
+        deviceId,
+        revokedBy: revokedByData,
+        timestamp: new Date().toISOString(),
+      });
+      console.log(`⚠️ Control revoked - deviceRoom: ${room}, userRoom: ${userRoom} (${socketsInRoom} sockets), previousUser: ${previousDelegatedTo.id}`);
+    } else {
+      console.log(`⚠️ Control revoked - deviceRoom: ${room}, no previous delegation`);
+    }
+  }
+
+  notifyDelegationExtended(deviceId: string, newExpiresAt: Date, extendedBy: string) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('delegation-extended', {
+      deviceId,
+      newExpiresAt,
+      extendedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  sendPlaybackCommand(deviceId: string, command: PlaybackCommand) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    this.server.to(room).emit('playback-command', {
+      deviceId,
+      command: command.command,
+      data: command.data,
+      sentBy: command.sentBy,
+      timestamp: command.timestamp.toISOString(),
+    });
+  }
+
+  // ==================== DEVICE UTILITY METHODS ====================
+
+  // Utility methods
+  async disconnectDeviceConnections(deviceId: string) {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    const sockets = await this.server.in(room).fetchSockets();
+    
+    sockets.forEach(socket => {
+      socket.emit('device-deleted', {
+        deviceId,
+        message: 'Device has been deleted',
+        timestamp: new Date().toISOString(),
+      });
+      socket.disconnect();
+    });
+  }
+
+  async getDeviceConnections(deviceId: string): Promise<DeviceConnectionInfo[]> {
+    const room = SOCKET_ROOMS.DEVICE(deviceId);
+    const sockets = await this.server.in(room).fetchSockets();
+    
+    return sockets.map(socket => {
+      const authSocket = socket as unknown as AuthenticatedSocket;
+      return {
+        deviceId,
+        deviceName: authSocket.data?.deviceInfo?.name || 'Unknown Device',
+        userId: authSocket.userId || 'unknown',
+        userAgent: authSocket.data?.deviceInfo?.userAgent,
+        connectedAt: authSocket.data?.connectedAt || new Date().toISOString(),
+      };
+    });
   }
 }

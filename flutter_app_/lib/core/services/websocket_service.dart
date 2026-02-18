@@ -5,6 +5,8 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 import '../../config/app_config.dart';
 
 /** MARK: Pour utiliser les WebSockets dans les screens :
+
+/// EVENTS
 // Récupérer le service
 final wsService = context.read<WebSocketService>();
 
@@ -22,6 +24,27 @@ wsService.playTrack(eventId, trackId: trackId);
 
 // Quitter l'event
 wsService.leaveEvent(eventId);
+
+/// DEVICES
+// Connecter un device
+wsService.connectDevice(deviceIdentifier);
+
+// Écouter les notifications de délégation
+wsService.on('device-control-received', (data) {
+  print('You received control of a device: $data');
+  // Show notification
+});
+
+wsService.on('device-control-revoked', (data) {
+  print('Your control was revoked: $data');
+  // Update UI
+});
+
+// Envoyer l'état du playback
+wsService.sendDevicePlaybackState(deviceIdentifier, 'play');
+
+// Demander les infos d'un device
+wsService.requestDeviceInfo(deviceId);
 
  */
 
@@ -46,10 +69,10 @@ class WebSocketService {
     }
 
     _token = token;
-    debugPrint('🔌 Connecting to WebSocket: ${AppConfig.wsUrl}/events');
+    debugPrint('🔌 Connecting to WebSocket: ${AppConfig.wsUrl}');
 
     _socket = io.io(
-      '${AppConfig.wsUrl}/events',
+      AppConfig.wsUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
           .enableAutoConnect()
@@ -359,6 +382,97 @@ class WebSocketService {
       debugPrint('❌ Error from server: $data');
       _notifyCallbacks('error', data);
     });
+
+    // Device events
+    _socket!.on('device-control-received', (data) {
+      debugPrint('🎮 Device control received: $data');
+      _notifyCallbacks('device-control-received', data);
+    });
+
+    _socket!.on('device-control-revoked', (data) {
+      debugPrint('🚫 Device control revoked: $data');
+      _notifyCallbacks('device-control-revoked', data);
+    });
+
+    _socket!.on('control-delegated', (data) {
+      debugPrint('👥 Control delegated: $data');
+      _notifyCallbacks('control-delegated', data);
+    });
+
+    _socket!.on('control-revoked', (data) {
+      debugPrint('👥 Control revoked: $data');
+      _notifyCallbacks('control-revoked', data);
+    });
+
+    _socket!.on('delegation-extended', (data) {
+      debugPrint('⏰ Delegation extended: $data');
+      _notifyCallbacks('delegation-extended', data);
+    });
+
+    _socket!.on('device-connected', (data) {
+      debugPrint('🔌 Device connected: $data');
+      _notifyCallbacks('device-connected', data);
+    });
+
+    _socket!.on('device-disconnected', (data) {
+      debugPrint('🔌 Device disconnected: $data');
+      _notifyCallbacks('device-disconnected', data);
+    });
+
+    _socket!.on('device-status-updated', (data) {
+      debugPrint('📊 Device status updated: $data');
+      _notifyCallbacks('device-status-updated', data);
+    });
+
+    _socket!.on('playback-state-updated', (data) {
+      debugPrint('▶️ Playback state updated: $data');
+      _notifyCallbacks('playback-state-updated', data);
+    });
+
+    _socket!.on('device-updated', (data) {
+      debugPrint('🔄 Device updated: $data');
+      _notifyCallbacks('device-updated', data);
+    });
+
+    _socket!.on('device-status-changed', (data) {
+      debugPrint('📱 Device status changed: $data');
+      _notifyCallbacks('device-status-changed', data);
+    });
+
+    _socket!.on('playback-command', (data) {
+      debugPrint('🎵 Playback command: $data');
+      _notifyCallbacks('playback-command', data);
+    });
+
+    _socket!.on('device-deleted', (data) {
+      debugPrint('🗑️ Device deleted: $data');
+      _notifyCallbacks('device-deleted', data);
+    });
+
+    _socket!.on('device-connected-notification', (data) {
+      debugPrint('🔔 Device connected notification: $data');
+      _notifyCallbacks('device-connected-notification', data);
+    });
+
+    _socket!.on('device-disconnected-notification', (data) {
+      debugPrint('🔔 Device disconnected notification: $data');
+      _notifyCallbacks('device-disconnected-notification', data);
+    });
+
+    _socket!.on('device-info-requested', (data) {
+      debugPrint('❓ Device info requested: $data');
+      _notifyCallbacks('device-info-requested', data);
+    });
+
+    _socket!.on('device-info-received', (data) {
+      debugPrint('ℹ️ Device info received: $data');
+      _notifyCallbacks('device-info-received', data);
+    });
+
+    _socket!.on('device-connections', (data) {
+      debugPrint('👥 Device connections: $data');
+      _notifyCallbacks('device-connections', data);
+    });
   }
 
   /// Register a callback for a specific event
@@ -625,6 +739,107 @@ class WebSocketService {
     if (!_isConnected) return;
     _socket!.emit('join-user-room');
     debugPrint('📤 Joining user room for notifications');
+  }
+
+  // ========== DEVICE METHODS ==========
+
+  /// Connect to a device
+  void connectDevice(String deviceIdentifier, {Map<String, dynamic>? deviceInfo}) {
+    if (!_isConnected) return;
+    _socket!.emit('connect-device', {
+      'deviceIdentifier': deviceIdentifier,
+      if (deviceInfo != null) 'deviceInfo': deviceInfo,
+    });
+    debugPrint('📤 Connecting to device: $deviceIdentifier');
+  }
+
+  /// Disconnect from a device
+  void disconnectDevice(String deviceId) {
+    if (!_isConnected) return;
+    _socket!.emit('disconnect-device', {'deviceId': deviceId});
+    debugPrint('📤 Disconnecting from device: $deviceId');
+  }
+
+  /// Send heartbeat for device connection
+  void sendDeviceHeartbeat(String deviceId) {
+    if (!_isConnected) return;
+    _socket!.emit('heartbeat', {'deviceId': deviceId});
+  }
+
+  /// Update device status
+  void updateDeviceStatus(String deviceId, String status, {Map<String, dynamic>? metadata}) {
+    if (!_isConnected) return;
+    _socket!.emit('update-device-status', {
+      'deviceId': deviceId,
+      'status': status,
+      if (metadata != null) 'metadata': metadata,
+    });
+    debugPrint('📤 Updating device status: $deviceId -> $status');
+  }
+
+  /// Send playback state
+  void sendDevicePlaybackState(String deviceIdentifier, String command) {
+    if (!_isConnected) return;
+    _socket!.emit('device-playback-state', {
+      'deviceIdentifier': deviceIdentifier,
+      'command': command,
+    });
+    debugPrint('📤 Sending playback state for device: $deviceIdentifier');
+  }
+
+  /// Request device info
+  void requestDeviceInfo(String deviceId) {
+    if (!_isConnected) return;
+    _socket!.emit('request-device-info', {'deviceId': deviceId});
+    debugPrint('📤 Requesting device info: $deviceId');
+  }
+
+  /// Send device info response
+  void sendDeviceInfoResponse(String requestId, Map<String, dynamic> deviceInfo, Map<String, dynamic> playbackState) {
+    if (!_isConnected) return;
+    _socket!.emit('device-info-response', {
+      'requestId': requestId,
+      'deviceInfo': deviceInfo,
+      'playbackState': playbackState,
+    });
+    debugPrint('📤 Sending device info response for request: $requestId');
+  }
+
+  /// Get device connections
+  void getDeviceConnections(String deviceId) {
+    if (!_isConnected) return;
+    _socket!.emit('get-device-connections', {'deviceId': deviceId});
+    debugPrint('📤 Getting device connections: $deviceId');
+  }
+
+  /// Get which rooms the client is in (for debugging)
+  void getWhichRooms() {
+    if (!_isConnected) return;
+    _socket!.emit('which-rooms');
+    debugPrint('📤 Getting which rooms client is in');
+  }
+
+  /// Setup device notification listeners
+  /// This should be called once after connecting to receive delegation notifications
+  void setupDeviceNotificationListeners({
+    Function(Map<String, dynamic>)? onControlReceived,
+    Function(Map<String, dynamic>)? onControlRevoked,
+  }) {
+    if (onControlReceived != null) {
+      on('device-control-received', (data) {
+        if (data is Map<String, dynamic>) {
+          onControlReceived(data);
+        }
+      });
+    }
+
+    if (onControlRevoked != null) {
+      on('device-control-revoked', (data) {
+        if (data is Map<String, dynamic>) {
+          onControlRevoked(data);
+        }
+      });
+    }
   }
 
   /// Disconnect WebSocket

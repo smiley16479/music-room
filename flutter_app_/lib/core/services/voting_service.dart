@@ -32,29 +32,52 @@ class VotingService {
   /// Submit a vote for a track (upvote or downvote)
   /// If user already has the same vote type, it will be removed (toggle)
   /// If user has a different vote type, it will be changed
+  /// Optional latitude and longitude for location-based events
   Future<void> vote({
     required String eventId,
     required String trackId,
     required VoteType type,
+    double? latitude,
+    double? longitude,
   }) async {
     final endpoint = '${AppConfig.eventsEndpoint}/$eventId/vote';
     
-    await apiService.post(endpoint, body: {
+    final Map<String, dynamic> body = {
       'trackId': trackId,
       'type': type == VoteType.upvote ? 'upvote' : 'downvote',
-    });
+    };
+    
+    // Add location if provided
+    if (latitude != null && longitude != null) {
+      body['latitude'] = latitude;
+      body['longitude'] = longitude;
+    }
+    
+    await apiService.post(endpoint, body: body);
 
     debugPrint('Vote submitted: $type for track $trackId in event $eventId');
   }
 
   /// Upvote a track
-  Future<void> upvote(String eventId, String trackId) async {
-    await vote(eventId: eventId, trackId: trackId, type: VoteType.upvote);
+  Future<void> upvote(String eventId, String trackId, {double? latitude, double? longitude}) async {
+    await vote(
+      eventId: eventId,
+      trackId: trackId,
+      type: VoteType.upvote,
+      latitude: latitude,
+      longitude: longitude,
+    );
   }
 
   /// Downvote a track
-  Future<void> downvote(String eventId, String trackId) async {
-    await vote(eventId: eventId, trackId: trackId, type: VoteType.downvote);
+  Future<void> downvote(String eventId, String trackId, {double? latitude, double? longitude}) async {
+    await vote(
+      eventId: eventId,
+      trackId: trackId,
+      type: VoteType.downvote,
+      latitude: latitude,
+      longitude: longitude,
+    );
   }
 
   /// Remove vote for a track
