@@ -20,7 +20,6 @@ class _FriendsScreenState extends State<FriendsScreen>
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
   bool _isInitialized = false;
-  bool _listenersSetup = false;
 
   @override
   void initState() {
@@ -28,76 +27,9 @@ class _FriendsScreenState extends State<FriendsScreen>
     _tabController = TabController(length: 4, vsync: this);
   }
 
-  void _setupDeviceNotificationListeners() {
-    final wsService = context.read<WebSocketService>();
-    
-    debugPrint('🔔 Setting up device notification listeners');
-    
-    // Listen for device control received
-    wsService.on('device-control-received', (data) {
-      debugPrint('🎮 RECEIVED device-control-received event: $data');
-      if (!mounted) return;
-      
-      final delegatedByData = data['delegatedBy'];
-      final delegatedByName = delegatedByData is Map 
-          ? delegatedByData['displayName'] as String? ?? 'Unknown'
-          : delegatedByData as String? ?? 'Unknown';
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🎮 You received control of a device from $delegatedByName'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'View',
-            textColor: Colors.white,
-            onPressed: () {
-              // Navigate to devices tab or device detail
-              _tabController.animateTo(3); // Navigate to "My Devices" tab
-            },
-          ),
-        ),
-      );
-      
-      // Refresh devices list
-      context.read<DeviceProvider>().refreshAll();
-    });
-    
-    // Listen for device control revoked
-    wsService.on('device-control-revoked', (data) {
-      debugPrint('🚫 RECEIVED device-control-revoked event: $data');
-      if (!mounted) return;
-      
-      final revokedByData = data['revokedBy'];
-      final revokedByName = revokedByData is Map 
-          ? revokedByData['displayName'] as String? ?? 'Unknown'
-          : revokedByData as String? ?? 'System';
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🚫 Your device control was revoked by $revokedByName'),
-          backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-      
-      // Refresh devices list
-      context.read<DeviceProvider>().refreshAll();
-    });
-    
-    debugPrint('✅ Device notification listeners configured');
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    
-    // Setup WebSocket listeners once
-    if (!_listenersSetup) {
-      _listenersSetup = true;
-      _setupDeviceNotificationListeners();
-    }
-    
     if (!_isInitialized) {
       _isInitialized = true;
       _loadData();

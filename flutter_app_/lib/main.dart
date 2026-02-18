@@ -15,6 +15,10 @@ import 'features/authentication/screens/reset_password_screen.dart';
 import 'features/authentication/screens/forgot_password_screen.dart';
 import 'features/playlists/screens/home_screen.dart';
 
+// Global key for showing notifications from anywhere
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = 
+    GlobalKey<ScaffoldMessengerState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   debugPrint('🟢 App starting...');
@@ -43,6 +47,12 @@ void main() async {
   );
   final webSocketService = WebSocketService();
   final votingService = VotingService(apiService: apiService);
+  
+  // Initialize global notification service
+  final notificationService = NotificationService(
+    webSocketService: webSocketService,
+    scaffoldMessengerKey: scaffoldMessengerKey,
+  );
   // PlaylistService is now an alias for EventService
 
   debugPrint('🟢 Services initialized');
@@ -53,6 +63,7 @@ void main() async {
         Provider<ApiService>(create: (_) => apiService),
         Provider<AuthService>(create: (_) => authService),
         Provider<WebSocketService>(create: (_) => webSocketService),
+        Provider<NotificationService>(create: (_) => notificationService),
         Provider<PlaylistService>(
           create: (_) => eventService,
         ), // PlaylistService is typedef for EventService
@@ -77,6 +88,7 @@ void main() async {
             authService: authService,
             webSocketService: webSocketService,
             deviceRegistrationService: deviceRegistrationService,
+            notificationService: notificationService,
           ),
         ),
         ChangeNotifierProvider(
@@ -118,6 +130,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: scaffoldMessengerKey,
       title: AppConfig.appName,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple),

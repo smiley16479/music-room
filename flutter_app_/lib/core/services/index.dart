@@ -12,3 +12,4 @@ export 'device_registration_service.dart';
 export 'device_service.dart';
 export 'audio_player_service.dart';
 export 'voting_service.dart';
+export 'notification_service.dart';

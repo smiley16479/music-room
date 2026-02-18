@@ -8,6 +8,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService authService;
   final WebSocketService? webSocketService;
   final DeviceRegistrationService? deviceRegistrationService;
+  final NotificationService? notificationService;
 
   User? _currentUser;
   String? _token;
@@ -19,6 +20,7 @@ class AuthProvider extends ChangeNotifier {
     required this.authService,
     this.webSocketService,
     this.deviceRegistrationService,
+    this.notificationService,
   });
 
   // Getters
@@ -46,7 +48,8 @@ class AuthProvider extends ChangeNotifier {
       if (_isAuthenticated && _token != null && webSocketService != null) {
         await webSocketService!.connect(_token!);
         webSocketService!.joinEventsRoom();
-        _setupDeviceNotifications();
+        // Initialize global notification service
+        notificationService?.initialize();
       }
     } catch (e) {
       _currentUser = null;
@@ -102,7 +105,8 @@ class AuthProvider extends ChangeNotifier {
       if (_token != null && webSocketService != null) {
         await webSocketService!.connect(_token!);
         webSocketService!.joinEventsRoom();
-        _setupDeviceNotifications();
+        // Initialize global notification service
+        notificationService?.initialize();
       }
 
       // Register device after successful login
@@ -277,22 +281,6 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-  }
-
-  /// Setup device delegation notification listeners
-  void _setupDeviceNotifications() {
-    webSocketService?.setupDeviceNotificationListeners(
-      onControlReceived: (data) {
-        debugPrint('🎮 You received control of device: ${data['deviceId']}');
-        // Trigger a notification or update UI
-        // The screen can listen to these events via webSocketService.on('device-control-received')
-      },
-      onControlRevoked: (data) {
-        debugPrint('🚫 Your control was revoked for device: ${data['deviceId']}');
-        // Trigger a notification or update UI
-        // The screen can listen to these events via webSocketService.on('device-control-revoked')
-      },
-    );
   }
 
   /// Clear error

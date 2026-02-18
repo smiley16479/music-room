@@ -1121,8 +1121,8 @@ export class EventService {
       return true;
     }
 
-    // Check if current time is within voting hours (applies to time-based and location-based events)
-    if ((event.licenseType === EventLicenseType.TIME_BASED || event.licenseType === EventLicenseType.LOCATION_BASED) && event.votingStartTime && event.votingEndTime) {
+    // Check if current time is within voting hours (only applies to location-based events)
+    if (event.licenseType === EventLicenseType.LOCATION_BASED && event.votingStartTime && event.votingEndTime) {
       const now = new Date();
       const currentTime = now.toTimeString().substring(0, 5); // HH:MM format
 
