@@ -1926,6 +1926,14 @@ export class EventService {
     // Notify participants with the full playlistTrack details
     this.eventGateway.notifyTrackAdded(eventId, savedWithDetails || saved, userId);
 
+    // Reorder the queue so the newly added track is placed according to current vote scores
+    // This ensures tracks with negative scores stay below newly added (score 0) tracks
+    try {
+      await this.reorderQueueByVotes(eventId);
+    } catch (error) {
+      console.error('Failed to reorder queue after adding track:', error);
+    }
+
     // Return formatted response matching Flutter model expectations (use details when available)
     const respSource = savedWithDetails || saved;
     return {

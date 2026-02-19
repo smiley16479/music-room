@@ -58,6 +58,10 @@ class AudioPlayerProvider extends ChangeNotifier {
   // Flag to disable auto-advance completely (for event playlists)
   bool _autoAdvanceDisabled = false;
 
+  /// Guard flag to prevent _playNext() from being triggered more than once
+  /// while a track transition is already in progress.
+  bool _isAdvancing = false;
+
   /// Disable auto-advance for event playlists where server controls progression
   void disableAutoAdvance() {
     _autoAdvanceDisabled = true;
@@ -81,8 +85,12 @@ class AudioPlayerProvider extends ChangeNotifier {
         if (onTrackCompleted != null && _currentTrack != null) {
           // Let the caller (event playlist screen) handle track completion
           onTrackCompleted!(_currentTrack!);
-        } else if (!_autoAdvanceDisabled) {
-          // Auto-advance only if not disabled
+        } else if (!_autoAdvanceDisabled && !_isAdvancing) {
+          // Auto-advance only if not disabled and not already advancing.
+          // The _isAdvancing guard prevents a second call that can be
+          // triggered by just_audio re-emitting completed when the player
+          // is paused/stopped during the track transition.
+          _isAdvancing = true;
           _playNext();
         }
         // If auto-advance is disabled and no callback, do nothing (wait for server)
@@ -279,15 +287,22 @@ class AudioPlayerProvider extends ChangeNotifier {
 
   /// Play next track in playlist
   Future<void> _playNext() async {
-    if (_playlist.isEmpty) return;
+    if (_playlist.isEmpty) {
+      _isAdvancing = false;
+      return;
+    }
 
-    if (_currentIndex < _playlist.length - 1) {
-      _currentIndex++;
-      await playTrack(_playlist[_currentIndex]);
-    } else {
-      // End of playlist
-      _isPlaying = false;
-      notifyListeners();
+    try {
+      if (_currentIndex < _playlist.length - 1) {
+        _currentIndex++;
+        await playTrack(_playlist[_currentIndex]);
+      } else {
+        // End of playlist
+        _isPlaying = false;
+        notifyListeners();
+      }
+    } finally {
+      _isAdvancing = false;
     }
   }
 

@@ -79,8 +79,11 @@ class AudioPlayerService {
   /// Stop
   Future<void> stop() async {
     debugPrint('🔊 stop(): current position=${_audioPlayer.position}');
-    await _audioPlayer.pause(); // Immediately silence audio output
-    await _audioPlayer.stop();  // Then reset player state
+    // Note: do NOT call pause() here before stop().
+    // Calling pause() on a completed player re-emits
+    // ProcessingState.completed, which would incorrectly trigger
+    // auto-advance a second time and skip every other track.
+    await _audioPlayer.stop(); // Transitions directly to idle state
   }
 
   /// Seek to position

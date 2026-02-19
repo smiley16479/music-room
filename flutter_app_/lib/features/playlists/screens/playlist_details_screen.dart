@@ -696,6 +696,24 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
           debugPrint('Error handling time-sync: $e');
         }
       });
+
+      // Refresh delegated devices when delegation is granted or revoked so
+      // the admin controls appear/disappear without requiring a page reload.
+      ws.on('device-control-received', (data) async {
+        if (!mounted) return;
+        debugPrint('🎮 Control delegation received — refreshing delegated devices');
+        try {
+          await context.read<DeviceProvider>().loadDelegatedDevices();
+        } catch (_) {}
+      });
+
+      ws.on('device-control-revoked', (data) async {
+        if (!mounted) return;
+        debugPrint('🚫 Control delegation revoked — refreshing delegated devices');
+        try {
+          await context.read<DeviceProvider>().loadDelegatedDevices();
+        } catch (_) {}
+      });
     } catch (e) {
       debugPrint('Error joining event playlist room: $e');
     }
@@ -767,6 +785,8 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         _wsService!.off('music-track-changed');
         _wsService!.off('playback-sync');
         _wsService!.off('time-sync');
+        _wsService!.off('device-control-received');
+        _wsService!.off('device-control-revoked');
         _hasJoinedRoom = false;
       }
     } catch (e) {

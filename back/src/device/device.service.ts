@@ -547,9 +547,6 @@ export class DeviceService {
 
     console.log(`🔄 Revoking delegation for device ${deviceId}, previousDelegatedTo: ${previousDelegatedTo?.id}`);
 
-    // Notify about revocation
-    this.deviceGateway.notifyControlRevoked(deviceId, previousDelegatedTo, requesterUser);
-
     // Clear delegation
     device.delegatedTo = null;
     device.delegatedToId = null;
@@ -559,6 +556,8 @@ export class DeviceService {
     const updatedDevice = await this.deviceRepository.save(device);
 
     console.log(`✅ Delegation revoked. delegatedToId is now: ${updatedDevice.delegatedToId}`);
+
+    this.deviceGateway.notifyControlRevoked(deviceId, previousDelegatedTo, requesterUser);
 
     return this.addDeviceStats(updatedDevice);
   }
