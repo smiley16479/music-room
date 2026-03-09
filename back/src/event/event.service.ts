@@ -1123,10 +1123,19 @@ export class EventService {
 
     // Check if current time is within voting hours (only applies to location-based events)
     if (event.licenseType === EventLicenseType.LOCATION_BASED && event.votingStartTime && event.votingEndTime) {
-      const now = new Date();
-      const currentTime = now.toTimeString().substring(0, 5); // HH:MM format
+      // Use Europe/Paris timezone to match the timezone the owner used when setting the hours
+      const timeZone = 'Europe/Paris';
+      const nowParis = toZonedTime(new Date(), timeZone);
+      // Build HH:MM string from the Paris-local date so comparison is timezone-aware
+      const hh = nowParis.getHours().toString().padStart(2, '0');
+      const mm = nowParis.getMinutes().toString().padStart(2, '0');
+      const currentTime = `${hh}:${mm}`;
 
-      if (currentTime < event.votingStartTime || currentTime > event.votingEndTime) {
+      // Normalise stored times to HH:MM (they may be stored as HH:MM:SS)
+      const startTime = event.votingStartTime.substring(0, 5);
+      const endTime   = event.votingEndTime.substring(0, 5);
+
+      if (currentTime < startTime || currentTime > endTime) {
         return false;
       }
     }
@@ -1670,12 +1679,22 @@ export class EventService {
         // Check voting time restrictions for location-based events (if votingStartTime and votingEndTime are set)
         const canVoteByTime = await this.checkVotingTimePermission(event, userId);
         if (!canVoteByTime) {
-          throw new ForbiddenException('Voting is not allowed outside the specified voting hours for this location-based event');
+          const timeZone = 'Europe/Paris';
+          const nowParis = toZonedTime(new Date(), timeZone);
+          const hh = nowParis.getHours().toString().padStart(2, '0');
+          const mm = nowParis.getMinutes().toString().padStart(2, '0');
+          const start = event.votingStartTime?.substring(0, 5) ?? '??:??';
+          const end   = event.votingEndTime?.substring(0, 5)   ?? '??:??';
+          throw new ForbiddenException(
+            `Voting for this event is only open between ${start} and ${end} (Paris time). Your current time is ${hh}:${mm}.`
+          );
         }
 
         // Check location proximity
         if (!userLatitude || !userLongitude) {
-          throw new ForbiddenException('Location is required to vote in this location-based event');
+          throw new ForbiddenException(
+            'Your device location could not be determined. Please enable GPS / location services and try again.'
+          );
         }
 
         if (!event.latitude || !event.longitude) {
@@ -1694,8 +1713,10 @@ export class EventService {
         const allowedRadius = event.locationRadius || 1000; // Default 1km if not set
 
         if (distanceInMeters > allowedRadius) {
+          const locationLabel = event.locationName ? ` (${event.locationName})` : '';
           throw new ForbiddenException(
-            `You must be within ${allowedRadius}m of the event location to vote. You are ${Math.round(distanceInMeters)}m away.`
+            `You are too far from the event location${locationLabel} to vote. ` +
+            `Allowed radius: ${allowedRadius}m — your distance: ${Math.round(distanceInMeters)}m.`
           );
         }
       }
@@ -1871,15 +1892,22 @@ export class EventService {
 
     const isCreator = event.creatorId === userId;
     const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+    const isCollaborator = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.COLLABORATOR);
 
-    // For events, only creator or admins can add tracks (non-admin users cannot)
-    // For playlists, same restriction applies
-    if (!isCreator && !isAdmin) {
-      throw new ForbiddenException(
-        event.type === EventType.EVENT
-          ? 'Only the creator or admins can add tracks to events'
-          : 'Only the creator or admins can add tracks',
-      );
+    if (event.type === EventType.EVENT) {
+      // For events, only creator or admins can add tracks
+      if (!isCreator && !isAdmin) {
+        throw new ForbiddenException('Only the creator or admins can add tracks to events');
+      }
+    } else {
+      // For standard playlists: check license type
+      // licenseType = INVITED → only creator, admins, or invited collaborators can add tracks
+      // licenseType = NONE (default) → everyone can add tracks
+      if (event.licenseType === EventLicenseType.INVITED) {
+        if (!isCreator && !isAdmin && !isCollaborator) {
+          throw new ForbiddenException('Only invited users can add tracks to this playlist');
+        }
+      }
     }
 
     // Get or create track from Deezer ID

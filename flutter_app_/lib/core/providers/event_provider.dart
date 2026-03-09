@@ -84,6 +84,14 @@ class EventProvider extends ChangeNotifier {
           _events.add(event);
         }
       }
+      // log the loaded events for debugging
+      debugPrint('✅ Loaded events count: ${_events.length}');
+      debugPrint('📋 Event details:');
+      for (var e in _events) {
+        debugPrint(
+          '  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})',
+        );
+      }
     } catch (e) {
       _error = e.toString();
       debugPrint('❌ Error loading events: $e');

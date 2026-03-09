@@ -694,8 +694,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
                   _selectedVotingStartTime,
                   (DateTime? time) =>
                       setState(() => _selectedVotingStartTime = time),
-                  startDate: _selectedStartDate,
-                  endDate: _selectedEndDate,
                 ),
               ),
               const SizedBox(width: 12),
@@ -705,8 +703,6 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
                   _selectedVotingEndTime,
                   (DateTime? time) =>
                       setState(() => _selectedVotingEndTime = time),
-                  startDate: _selectedStartDate,
-                  endDate: _selectedEndDate,
                 ),
               ),
             ],
@@ -854,10 +850,8 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
   Widget _buildTimeField(
     String label,
     DateTime? selectedDateTime,
-    Function(DateTime?) onTimeSelected, {
-    DateTime? startDate,
-    DateTime? endDate,
-  }) {
+    Function(DateTime?) onTimeSelected,
+  ) {
     return ElevatedButton(
       onPressed: () async {
         final TimeOfDay? pickedTime = await showTimePicker(
@@ -867,38 +861,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
               : const TimeOfDay(hour: 0, minute: 0),
         );
         if (pickedTime != null && mounted) {
-          // Create DateTime with today's date and selected time
-          DateTime newDateTime = DateTime(
-            selectedDateTime?.year ?? 2000,
-            selectedDateTime?.month ?? 1,
-            selectedDateTime?.day ?? 1,
+          // Store as a time-only DateTime (date part is irrelevant — only HH:MM is sent to the backend)
+          final newDateTime = DateTime(
+            2000, 1, 1,
             pickedTime.hour,
             pickedTime.minute,
           );
-
-          // Validation: votingStartTime and votingEndTime must be during event
-          if (startDate != null || endDate != null) {
-            final start = startDate ?? _selectedStartDate;
-            final end = endDate ?? _selectedEndDate;
-
-            if (start != null && newDateTime.isBefore(start)) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Voting time must be after event start'),
-                ),
-              );
-              return;
-            }
-            if (end != null && newDateTime.isAfter(end)) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Voting time must be before event end'),
-                ),
-              );
-              return;
-            }
-          }
-
           onTimeSelected(newDateTime);
         }
       },

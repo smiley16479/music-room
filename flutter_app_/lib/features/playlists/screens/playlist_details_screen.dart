@@ -867,7 +867,7 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
         _nameController.text = playlist.name;
         _descriptionController.text = playlist.description ?? '';
         _selectedVisibility = playlist.visibility;
-        _votingInvitedOnly = playlist.licenseType == 'invited';
+        _votingInvitedOnly = playlist.licenseType == EventLicenseType.invited;
       }
       _isEditMode = !_isEditMode;
     });
@@ -1016,7 +1016,9 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                     return const SizedBox.shrink();
                   }
 
-                  // For playlists (type=playlist) that are public, only allow admins (creator or admin participants)
+                  // For standard playlists: check license type to decide who can add tracks
+                  // licenseType = invited → only creator, admins, and invited collaborators
+                  // licenseType = none (default) → everyone can add tracks
                   if (playlist != null && playlist.type == EventType.playlist) {
                     final currentUserId = authProvider.currentUser?.id;
                     final isCreator = currentUserId != null && currentUserId == playlist.creatorId;
@@ -1024,11 +1026,15 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                           return p.userId == currentUserId &&
                               (p.role == ParticipantRole.admin || p.role == ParticipantRole.creator);
                         }) == true;
+                    final isCollaborator = playlist.participants?.any((p) {
+                          return p.userId == currentUserId &&
+                              p.role == ParticipantRole.collaborator;
+                        }) == true;
 
-                    final isAdmin = isCreator || isAdminParticipant;
+                    final canEdit = isCreator || isAdminParticipant || isCollaborator;
 
-                    if (playlist.visibility == EventVisibility.public && !isAdmin) {
-                      // Public playlist — hide add for non-admin users
+                    if (playlist.licenseType == EventLicenseType.invited && !canEdit) {
+                      // Invited-only license — hide add track for non-invited users
                       return const SizedBox.shrink();
                     }
                   }
@@ -2161,7 +2167,51 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
               );
             }).toList(),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
+
+          // License Management — only for standard playlists, not event playlists
+          if (playlist.type == EventType.playlist) ...[
+            Text(
+              'License',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Colors.purple,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.purple.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Restrict editing to invited users only'),
+                subtitle: Text(
+                  _votingInvitedOnly
+                      ? 'Only people you invite can add tracks'
+                      : 'Anyone can add tracks to this playlist',
+                  style: TextStyle(
+                    color: _votingInvitedOnly
+                        ? Colors.orange.shade700
+                        : Colors.green.shade700,
+                    fontSize: 12,
+                  ),
+                ),
+                secondary: Icon(
+                  _votingInvitedOnly ? Icons.lock : Icons.lock_open,
+                  color: _votingInvitedOnly ? Colors.orange : Colors.green,
+                ),
+                value: _votingInvitedOnly,
+                activeThumbColor: Colors.purple,
+                onChanged: (bool value) {
+                  setState(() => _votingInvitedOnly = value);
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // Playlist Stats (Read-only)
           Text(

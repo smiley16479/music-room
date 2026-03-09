@@ -26,8 +26,10 @@ class EventService {
     List<dynamic> dataList;
     if (response is Map<String, dynamic> && response.containsKey('data')) {
       dataList = response['data'] as List;
+      debugPrint('Extracted data list from wrapped response: ${response['data']}');
     } else if (response is List) {
       dataList = response;
+      debugPrint('Response is a List: $dataList');
     } else {
       throw Exception(
         'Invalid response format: expected List but got ${response.runtimeType}',
@@ -70,8 +72,11 @@ class EventService {
     List<dynamic> dataList;
     if (response is Map<String, dynamic> && response.containsKey('data')) {
       dataList = response['data'] as List;
+      debugPrint('Get my events response: $response');
+      debugPrint('Data list extracted: $dataList');
     } else if (response is List) {
       dataList = response;
+      debugPrint('Get my events response is a List: $dataList');
     } else {
       throw Exception(
         'Invalid response format: expected List but got ${response.runtimeType}',
