@@ -9,12 +9,16 @@ class InviteFriendsDialog extends StatefulWidget {
   final String eventId;
   final String eventName;
   final bool isPlaylist;
+  /// IDs of users already in the event/playlist (participants + creator).
+  /// These friends will be shown as already added and cannot be re-selected.
+  final Set<String> existingParticipantIds;
 
   const InviteFriendsDialog({
     super.key,
     required this.eventId,
     required this.eventName,
     this.isPlaylist = false,
+    this.existingParticipantIds = const {},
   });
 
   @override
@@ -61,10 +65,14 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
   }
 
   List<User> get _filteredFriends {
+    // Always exclude friends who are already participants/creator
+    final base = _friends.where(
+      (f) => !widget.existingParticipantIds.contains(f.id),
+    ).toList();
     if (_searchQuery.isEmpty) {
-      return _friends;
+      return base;
     }
-    return _friends.where((friend) {
+    return base.where((friend) {
       final name = friend.displayName?.toLowerCase() ?? '';
       final email = friend.email?.toLowerCase() ?? '';
       final query = _searchQuery.toLowerCase();
@@ -281,6 +289,9 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
     final filteredFriends = _filteredFriends;
 
     if (filteredFriends.isEmpty) {
+      // Distinguish between "no friends at all" vs "all friends already in the event"
+      final allAlreadyIn = _friends.isNotEmpty &&
+          _friends.every((f) => widget.existingParticipantIds.contains(f.id));
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -292,13 +303,17 @@ class _InviteFriendsDialogState extends State<InviteFriendsDialog> {
             ),
             const SizedBox(height: 16),
             Text(
-              _searchQuery.isEmpty ? 'No friends yet' : 'No friends found',
+              _searchQuery.isEmpty
+                  ? (allAlreadyIn ? 'All friends already added' : 'No friends yet')
+                  : 'No friends found',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
               _searchQuery.isEmpty
-                  ? 'Add friends to invite them'
+                  ? (allAlreadyIn
+                      ? 'Every friend is already a member of this ${widget.isPlaylist ? 'playlist' : 'event'}'
+                      : 'Add friends to invite them')
                   : 'Try a different search',
               style: Theme.of(
                 context,

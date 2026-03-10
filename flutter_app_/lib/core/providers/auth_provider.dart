@@ -51,6 +51,14 @@ class AuthProvider extends ChangeNotifier {
         // Initialize global notification service
         notificationService?.initialize();
       }
+
+      // Register device if authenticated
+      if (_isAuthenticated && deviceRegistrationService != null) {
+        final success = await deviceRegistrationService!.registerDevice();
+        if (!success) {
+          debugPrint('Warning: Device registration failed during init');
+        }
+      }
     } catch (e) {
       _currentUser = null;
       _isAuthenticated = false;
@@ -269,6 +277,24 @@ class AuthProvider extends ChangeNotifier {
       _currentUser = await authService.facebookSignIn(accessToken: accessToken);
       _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
+
+      // Connect to WebSocket after successful login
+      if (_token != null && webSocketService != null) {
+        await webSocketService!.connect(_token!);
+        webSocketService!.joinEventsRoom();
+        notificationService?.initialize();
+      }
+
+      // Register device after successful login
+      if (deviceRegistrationService != null) {
+        final success = await deviceRegistrationService!.registerDevice();
+        if (!success) {
+          debugPrint(
+            'Warning: Device registration failed, but Facebook login succeeded',
+          );
+        }
+      }
+
       _isLoading = false;
       notifyListeners();
       return true;
