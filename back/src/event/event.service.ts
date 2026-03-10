@@ -1835,12 +1835,28 @@ export class EventService {
   async removeTrack(eventId: string, trackId: string, userId: string): Promise<void> {
     const event = await this.findById(eventId, userId);
 
-    // Only creator or admin can remove tracks
     const isCreator = event.creatorId === userId;
     const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
+    // Include both COLLABORATOR and PARTICIPANT – accepted-invitation users receive PARTICIPANT role
+    const isInvitedParticipant = event.participants?.some(
+      p => p.userId === userId &&
+        (p.role === ParticipantRole.COLLABORATOR || p.role === ParticipantRole.PARTICIPANT)
+    );
 
-    if (!isCreator && !isAdmin) {
-      throw new ForbiddenException('Only the creator or admins can remove tracks');
+    if (event.type === EventType.EVENT) {
+      // For events, only creator or admins can remove tracks
+      if (!isCreator && !isAdmin) {
+        throw new ForbiddenException('Only the creator or admins can remove tracks from events');
+      }
+    } else {
+      // For standard playlists: mirror the add-track permission logic
+      // licenseType = INVITED → only creator, admins, or invited participants can remove tracks
+      // licenseType = NONE (default / public) → everyone can remove tracks
+      if (event.licenseType === EventLicenseType.INVITED) {
+        if (!isCreator && !isAdmin && !isInvitedParticipant) {
+          throw new ForbiddenException('Only invited users can remove tracks from this playlist');
+        }
+      }
     }
 
     // Find and remove the track
@@ -1896,7 +1912,11 @@ export class EventService {
 
     const isCreator = event.creatorId === userId;
     const isAdmin = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.ADMIN);
-    const isCollaborator = event.participants?.some(p => p.userId === userId && p.role === ParticipantRole.COLLABORATOR);
+    // Include both COLLABORATOR and PARTICIPANT – accepted-invitation users receive PARTICIPANT role
+    const isInvitedParticipant = event.participants?.some(
+      p => p.userId === userId &&
+        (p.role === ParticipantRole.COLLABORATOR || p.role === ParticipantRole.PARTICIPANT)
+    );
 
     if (event.type === EventType.EVENT) {
       // For events, only creator or admins can add tracks
@@ -1905,10 +1925,10 @@ export class EventService {
       }
     } else {
       // For standard playlists: check license type
-      // licenseType = INVITED → only creator, admins, or invited collaborators can add tracks
+      // licenseType = INVITED → only creator, admins, or invited participants can add tracks
       // licenseType = NONE (default) → everyone can add tracks
       if (event.licenseType === EventLicenseType.INVITED) {
-        if (!isCreator && !isAdmin && !isCollaborator) {
+        if (!isCreator && !isAdmin && !isInvitedParticipant) {
           throw new ForbiddenException('Only invited users can add tracks to this playlist');
         }
       }

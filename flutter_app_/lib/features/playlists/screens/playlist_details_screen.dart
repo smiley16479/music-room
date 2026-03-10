@@ -1026,9 +1026,11 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                           return p.userId == currentUserId &&
                               (p.role == ParticipantRole.admin || p.role == ParticipantRole.creator);
                         }) == true;
+                    // Include both collaborator and participant – accepted-invitation users get participant role
                     final isCollaborator = playlist.participants?.any((p) {
                           return p.userId == currentUserId &&
-                              p.role == ParticipantRole.collaborator;
+                              (p.role == ParticipantRole.collaborator ||
+                               p.role == ParticipantRole.participant);
                         }) == true;
 
                     final canEdit = isCreator || isAdminParticipant || isCollaborator;
@@ -1634,13 +1636,31 @@ class _PlaylistDetailsScreenState extends State<PlaylistDetailsScreen>
                                     final isOwner =
                                         currentUser?.id == playlist.creatorId;
                                     // For event playlists, owner OR delegated users can delete tracks
-                                    // For standard playlists, only owner can delete
+                                    // For standard playlists, mirror the add-track permission logic:
+                                    //   licenseType = invited → creator, admin, or collaborator
+                                    //   licenseType = none (public) → everyone
                                     final canControl = _canControlPlayback(
                                       playlist.creatorId,
                                       deviceProvider.delegatedDevices,
                                       currentUser?.id,
                                     );
-                                    final canDelete = isEventPlaylist ? canControl : isOwner;
+                                    late final bool canDelete;
+                                    if (isEventPlaylist) {
+                                      canDelete = canControl;
+                                    } else if (playlist.licenseType == EventLicenseType.invited) {
+                                      final isAdminParticipant = playlist.participants?.any((p) =>
+                                            p.userId == currentUser?.id &&
+                                            (p.role == ParticipantRole.admin || p.role == ParticipantRole.creator)) == true;
+                                      // Include both collaborator and participant – accepted-invitation users get participant role
+                                      final isCollaborator = playlist.participants?.any((p) =>
+                                            p.userId == currentUser?.id &&
+                                            (p.role == ParticipantRole.collaborator ||
+                                             p.role == ParticipantRole.participant)) == true;
+                                      canDelete = isOwner || isAdminParticipant || isCollaborator;
+                                    } else {
+                                      // Public playlist (licenseType = none): everyone can remove tracks
+                                      canDelete = true;
+                                    }
 
                                     final trackContent = AnimatedContainer(
                                       duration: const Duration(

@@ -58,12 +58,22 @@ class _CollaboratorDialogState extends State<CollaboratorDialog> {
   }
 
   void _showInviteFriendsDialog() {
+    // Build the set of user IDs already in this playlist (participants + creator)
+    final existingIds = <String>{
+      if (_playlist?.creatorId != null) _playlist!.creatorId!,
+      ...?_playlist
+          ?.participants
+          ?.map((p) => p.userId)
+          .whereType<String>(),
+    };
+
     showDialog(
       context: context,
       builder: (context) => InviteFriendsDialog(
         eventId: widget.playlistId,
         eventName: widget.playlistName,
         isPlaylist: true,
+        existingParticipantIds: existingIds,
       ),
     ).then((_) {
       // Reload playlist after inviting friends
