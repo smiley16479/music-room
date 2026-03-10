@@ -220,6 +220,7 @@ export class EventService {
 
     // Always filter location-based events based on user location
     const filteredEvents = await this.filterEventsByLocation(events, userLocation, userId);
+    // console.log(`Found events: ${events.length}, filteredEvents: ${filteredEvents.length}, applying location filter for user ${userId} at location ${userLocation ? `${userLocation.latitude},${userLocation.longitude}` : 'N/A'}`);
 
     const eventsWithStats = await Promise.all(
       filteredEvents.map(event => this.addEventStats(event, userId)),

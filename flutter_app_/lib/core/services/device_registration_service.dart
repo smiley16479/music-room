@@ -270,6 +270,8 @@ class DeviceRegistrationService {
       // POST to backend
       final response = await apiService.post('/devices', body: body);
 
+      debugPrint('AAAAAAAAAAAAAAAAAAAAAAAAAAA Device register response: $response');
+
       if (response['success'] == true) {
         debugPrint('Device registered successfully');
         return true;

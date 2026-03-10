@@ -36,10 +36,8 @@ class _EventsScreenState extends State<EventsScreen> {
 
   Future<void> _loadEvents() async {
     final eventProvider = context.read<EventProvider>();
-    // Only load if not already loaded
-    if (eventProvider.myEvents.isEmpty) {
-      await eventProvider.loadMyEvents();
-    }
+    // Load all events (user's + public) and their location-based variants
+    await eventProvider.loadEvents();
   }
 
   @override

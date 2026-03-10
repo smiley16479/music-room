@@ -563,16 +563,16 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
           ),
           const SizedBox(height: 12),
 
-          _buildSectionTitle('Voting Settings'),
+          _buildSectionTitle('Voting Access Settings'),
           const SizedBox(height: 8),
 
-          Text(
-            'Access Control',
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
+          // Text(
+          //   'Access Control',
+          //   style: Theme.of(
+          //     context,
+          //   ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+          // ),
+          // const SizedBox(height: 8),
 
           DropdownButton<EventLicenseType>(
             isExpanded: true,
@@ -621,7 +621,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
                             Text(
                               label,
                               style: const TextStyle(
-                                fontWeight: FontWeight.w600,
+                                // fontWeight: FontWeight.w600,
                               ),
                             ),
                             Text(
@@ -650,7 +650,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen>
                 ),
               ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
           // Dates & Times
           _buildSectionTitle('Dates & Times'),

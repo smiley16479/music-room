@@ -12,8 +12,18 @@ class EventService {
   EventService({required this.apiService});
 
   /// Get all events
-  Future<List<Event>> getEvents({int page = 1, int limit = 20}) async {
+  /// Optionally pass location to filter location-based events
+  Future<List<Event>> getEvents({
+    int page = 1,
+    int limit = 20,
+    double? latitude,
+    double? longitude,
+  }) async {
     final params = {'page': page.toString(), 'limit': limit.toString()};
+
+    // Add location parameters if provided
+    if (latitude != null) params['latitude'] = latitude.toString();
+    if (longitude != null) params['longitude'] = longitude.toString();
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
@@ -54,12 +64,22 @@ class EventService {
   }
 
   /// Get my events
-  Future<List<Event>> getMyEvents({int page = 1, int limit = 20}) async {
+  /// Optionally pass location to filter location-based events
+  Future<List<Event>> getMyEvents({
+    int page = 1,
+    int limit = 20,
+    double? latitude,
+    double? longitude,
+  }) async {
     final params = {
       'page': page.toString(),
       'limit': limit.toString(),
       'scope': 'my', // Use unified endpoint with scope parameter
     };
+
+    // Add location parameters if provided
+    if (latitude != null) params['latitude'] = latitude.toString();
+    if (longitude != null) params['longitude'] = longitude.toString();
 
     final queryString = params.entries
         .map((e) => '${e.key}=${e.value}')
