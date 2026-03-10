@@ -1,35 +1,15 @@
 #!/bin/bash
-# ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║          🎵  MUSIC-ROOM — Full Development Environment Installer  🎵       ║
-# ║                    Adapted for 42 School (Ubuntu 22.04)                     ║
-# ║          All heavy installs go to ~/sgoinfre to respect 5GB quota           ║
-# ╚══════════════════════════════════════════════════════════════════════════════╝
-set -euo pipefail
+# ==============================================================================
+# MUSIC-ROOM - Full Development Environment Installer
+# Adapted for 42 School (Ubuntu 22.04)
+# All installs in ~/sgoinfre - NO sudo - NO apt - user-space only
+# ==============================================================================
 
-# ─────────────────────────────────────────────────────────────
-# CONFIGURATION
-# ─────────────────────────────────────────────────────────────
-SGOINFRE="$HOME/sgoinfre"
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+set -uo pipefail
 
-# Paths inside sgoinfre
-FLUTTER_DIR="$SGOINFRE/flutter"
-ANDROID_SDK="$SGOINFRE/android-sdk"
-ANDROID_AVD="$SGOINFRE/android-avd"
-DOCKER_DIR="$SGOINFRE/docker"
-NVM_DIR_CUSTOM="$SGOINFRE/nvm"
-CHROME_DIR="$SGOINFRE/chrome"
-TMP_DIR="$SGOINFRE/tmp"
+LOG_FILE=""
 
-# Versions
-NODE_VERSION="22"
-FLUTTER_CHANNEL="stable"
-ANDROID_API_LEVEL=34
-CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-
-# ─────────────────────────────────────────────────────────────
-# COLORS & UI HELPERS
-# ─────────────────────────────────────────────────────────────
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -40,18 +20,75 @@ BOLD='\033[1m'
 DIM='\033[2m'
 RESET='\033[0m'
 
+info()    { echo -e "  ${BLUE}ℹ${RESET}  $1"; }
+success() { echo -e "  ${GREEN}✔${RESET}  $1"; }
+warn()    { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
+err()     { echo -e "  ${RED}✖${RESET}  $1"; }
+
+# Global error trap — catches any unexpected failure with diagnostics
+on_error() {
+    local exit_code=$?
+    local line_no=$1
+    local cmd=$2
+    echo ""
+    echo -e "  ${RED}${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "  ${RED}${BOLD}║                  ❌  INSTALLATION FAILED                     ║${RESET}"
+    echo -e "  ${RED}${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+    echo ""
+    err "Script failed at ${BOLD}line $line_no${RESET}"
+    err "Command: ${DIM}$cmd${RESET}"
+    err "Exit code: ${BOLD}$exit_code${RESET}"
+    echo ""
+    if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
+        err "Last 20 lines of log:"
+        echo -e "  ${DIM}─────────────────────────────────────────${RESET}"
+        tail -20 "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
+            echo -e "  ${DIM}  $line${RESET}"
+        done
+        echo -e "  ${DIM}─────────────────────────────────────────${RESET}"
+        err "Full log: $LOG_FILE"
+    fi
+    echo ""
+    err "To retry: ${GREEN}bash install.sh${RESET} (idempotent — skips completed steps)"
+    echo ""
+    exit $exit_code
+}
+
+trap 'on_error ${LINENO} "${BASH_COMMAND}"' ERR
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+SGOINFRE="$HOME/sgoinfre"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+FLUTTER_DIR="$SGOINFRE/flutter"
+ANDROID_SDK="$SGOINFRE/android-sdk"
+ANDROID_AVD="$SGOINFRE/android-avd"
+NVM_DIR_CUSTOM="$SGOINFRE/nvm"
+PUB_CACHE_DIR="$SGOINFRE/pub_cache"
+TMP_DIR="$SGOINFRE/tmp"
+
+NODE_VERSION="22"
+FLUTTER_CHANNEL="stable"
+ANDROID_API_LEVEL=36
+CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+
 TOTAL_STEPS=10
 CURRENT_STEP=0
 
+# ==============================================================================
+# UI HELPERS
+# ==============================================================================
 print_banner() {
     echo ""
     echo -e "${MAGENTA}${BOLD}"
     echo "  ╔══════════════════════════════════════════════════════════════╗"
-    echo "  ║           MUSIC-ROOM  —  Environment Installer             ║"
-    echo "  ║              42 School  •  Ubuntu 22.04                    ║"
+    echo "  ║           MUSIC-ROOM  —  Environment Installer               ║"
+    echo "  ║         42 School  •  Ubuntu 22.04  •  No sudo               ║"
     echo "  ╚══════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
-    echo -e "  ${DIM}All installations go to ~/sgoinfre to respect 5GB quota${RESET}"
+    echo -e "  ${DIM}All installations go to ~/sgoinfre (user-space only)${RESET}"
     echo ""
 }
 
@@ -64,386 +101,331 @@ step_header() {
     echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo -e "${CYAN}${BOLD}  [$CURRENT_STEP/$TOTAL_STEPS]  $1${RESET}"
     echo -ne "  ${GREEN}"
-    printf '█%.0s' $(seq 1 $filled 2>/dev/null || true)
+    for ((j=0; j<filled; j++)); do printf '█'; done
     echo -ne "${DIM}"
-    printf '░%.0s' $(seq 1 $empty 2>/dev/null || true)
+    for ((j=0; j<empty; j++)); do printf '░'; done
     echo -e "${RESET}  ${BOLD}${pct}%${RESET}"
     echo -e "${BLUE}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
     echo ""
 }
 
-info()    { echo -e "  ${BLUE}ℹ${RESET}  $1"; }
-success() { echo -e "  ${GREEN}✔${RESET}  $1"; }
-warn()    { echo -e "  ${YELLOW}⚠${RESET}  $1"; }
-err()     { echo -e "  ${RED}✖${RESET}  $1"; }
-
-spinner() {
-    local pid=$1
-    local msg=$2
+# Run a command with spinner animation, log output. Fail loudly.
+run_logged() {
+    local msg="$1"
+    shift
     local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     local i=0
+
+    "$@" >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+
     while kill -0 "$pid" 2>/dev/null; do
         local c="${spin:i++%${#spin}:1}"
         printf "\r  ${CYAN}%s${RESET}  %s" "$c" "$msg"
         sleep 0.1
     done
+
     wait "$pid"
-    local exit_code=$?
-    printf "\r"
-    if [ $exit_code -eq 0 ]; then
+    local rc=$?
+    printf "\r\033[K"
+
+    if [ $rc -eq 0 ]; then
         success "$msg"
     else
-        err "$msg (exit code: $exit_code)"
-        return $exit_code
+        err "$msg"
+        err "Command failed (exit $rc): $*"
+        if [ -n "$LOG_FILE" ]; then
+            err "Last 10 lines of log:"
+            tail -10 "$LOG_FILE" 2>/dev/null | while IFS= read -r logline; do
+                echo -e "    ${DIM}$logline${RESET}"
+            done
+        fi
+        return $rc
     fi
 }
 
-run_with_spinner() {
-    local msg="$1"
-    shift
-    "$@" > "$TMP_DIR/install_log_$$.txt" 2>&1 &
-    spinner $! "$msg"
+# Re-apply the /tmp symlink for Flutter's startup lockfile.
+# Called before every flutter invocation inside this script so that even if
+# Flutter itself recreated the real NFS file we immediately fix it again.
+flutter_fix_lock() {
+    local lf="$FLUTTER_DIR/bin/cache/lockfile"
+    local tl="/tmp/.flutter_startup_lock_$(id -u)"
+    mkdir -p "$FLUTTER_DIR/bin/cache" 2>/dev/null || true
+    # Replace with symlink only if not already a correct symlink
+    if [ ! -L "$lf" ] || [ "$(readlink "$lf")" != "$tl" ]; then
+        rm -rf "$lf" 2>/dev/null
+        ln -sf "$tl" "$lf"
+    fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# PRE-FLIGHT CHECKS
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 1: PRE-FLIGHT CHECKS
+# ==============================================================================
 preflight_checks() {
     step_header "Pre-flight checks"
 
-    # Check we're on Ubuntu
-    if ! grep -qi "ubuntu" /etc/os-release 2>/dev/null; then
-        warn "Not running Ubuntu — some steps may need adjustment"
-    else
+    # OS
+    if grep -qi "ubuntu" /etc/os-release 2>/dev/null; then
         success "Ubuntu detected"
+    else
+        warn "Not Ubuntu — some steps may differ"
     fi
 
-    # Check sgoinfre exists and is writable
-    if [ ! -d "$SGOINFRE" ]; then
-        mkdir -p "$SGOINFRE"
-    fi
+    # sgoinfre
+    [ ! -d "$SGOINFRE" ] && mkdir -p "$SGOINFRE"
     if [ -w "$SGOINFRE" ]; then
         success "~/sgoinfre is writable"
     else
         err "~/sgoinfre is not writable — cannot proceed"
-        exit 1
+        return 1
     fi
 
-    # Create temp dir
+    # Temp + log
     mkdir -p "$TMP_DIR"
-    success "Temp directory ready: $TMP_DIR"
+    LOG_FILE="$TMP_DIR/install_$(date +%Y%m%d_%H%M%S).log"
+    touch "$LOG_FILE"
+    success "Log file: $LOG_FILE"
 
-    # Check internet connectivity
+    # Internet
     if curl -s --max-time 5 https://google.com > /dev/null 2>&1; then
         success "Internet connectivity OK"
     else
         err "No internet — cannot download packages"
-        exit 1
+        return 1
     fi
 
-    # ── Fix sgoinfre storage type issues ──
-    # On 42 machines, sgoinfre may be on NFS/CIFS/FUSE which causes:
-    #   - Flutter lockfile "waiting for process" loop (flock doesn't work)
-    #   - Slow or broken file watchers
-    # Solution: disable Flutter analytics/lockfile, and ensure no flock usage
-    info "Checking sgoinfre filesystem type..."
+    # Filesystem type (NFS = lockfile issues)
     local fs_type
     fs_type=$(df -T "$SGOINFRE" 2>/dev/null | tail -1 | awk '{print $2}')
-    info "Filesystem type: ${BOLD}$fs_type${RESET}"
-
-    if [[ "$fs_type" == "nfs"* ]] || [[ "$fs_type" == "cifs" ]] || [[ "$fs_type" == "fuse"* ]] || [[ "$fs_type" == "tmpfs" ]]; then
-        warn "Network/special filesystem detected — will apply lockfile workarounds"
-        export SGOINFRE_IS_NETWORK=1
-    else
-        success "Standard filesystem — no special workarounds needed"
-        export SGOINFRE_IS_NETWORK=0
+    info "Filesystem: ${BOLD}$fs_type${RESET}"
+    if [[ "$fs_type" == "nfs"* ]] || [[ "$fs_type" == "cifs" ]] || [[ "$fs_type" == "fuse"* ]]; then
+        warn "Network FS — Flutter lockfile workarounds will be applied"
     fi
 
-    # Show available space
+    # Space
     local avail
     avail=$(df -h "$SGOINFRE" | tail -1 | awk '{print $4}')
-    info "Available space in sgoinfre: ${BOLD}$avail${RESET}"
-}
+    info "Space available: ${BOLD}$avail${RESET}"
 
-# ─────────────────────────────────────────────────────────────
-# STEP 1: SYSTEM DEPENDENCIES (apt)
-# ─────────────────────────────────────────────────────────────
-install_system_deps() {
-    step_header "Installing system dependencies (apt)"
-
-    local pkgs=(
-        curl wget git unzip xz-utils zip
-        apt-transport-https ca-certificates gnupg lsb-release
-        lib32stdc++6 libc6-i386
-        clang cmake ninja-build pkg-config
-        libgtk-3-dev liblzma-dev libstdc++-12-dev
-        openjdk-17-jdk
-        jq
-    )
-
-    info "Updating package lists..."
-    sudo apt-get update -qq > /dev/null 2>&1
-    success "Package lists updated"
-
-    info "Installing ${#pkgs[@]} packages..."
-    sudo apt-get install -y -qq "${pkgs[@]}" > /dev/null 2>&1
-    success "System dependencies installed"
-
-    # Verify Java
-    if java -version 2>&1 | grep -q "17"; then
-        success "Java 17 (OpenJDK) available"
-    else
-        warn "Java 17 not detected — Android SDK may have issues"
-    fi
-}
-
-# ─────────────────────────────────────────────────────────────
-# STEP 2: DOCKER
-# ─────────────────────────────────────────────────────────────
-install_docker() {
-    step_header "Installing Docker & Docker Compose"
-
-    if command -v docker &> /dev/null; then
-        success "Docker already installed: $(docker --version | head -1)"
-    else
-        info "Installing Docker Engine..."
-
-        # Remove old versions
-        sudo apt-get remove -y -qq docker docker-engine docker.io containerd runc 2>/dev/null || true
-
-        # Add Docker GPG key and repo
-        sudo install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
-        sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-        echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-        sudo apt-get update -qq > /dev/null 2>&1
-        sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin > /dev/null 2>&1
-
-        success "Docker installed: $(docker --version | head -1)"
-    fi
-
-    # Docker Compose (plugin check)
-    if docker compose version &> /dev/null; then
-        success "Docker Compose available: $(docker compose version --short 2>/dev/null || echo 'OK')"
-    else
-        warn "Docker Compose plugin not found — install docker-compose-plugin"
-    fi
-
-    # Ensure user is in docker group
-    if ! groups "$USER" | grep -q docker; then
-        info "Adding $USER to docker group..."
-        sudo usermod -aG docker "$USER"
-        warn "You may need to log out/in for docker group to take effect"
-        warn "Or run: newgrp docker"
-    else
-        success "User $USER is in docker group"
-    fi
-
-    # ── Relocate Docker data-root to sgoinfre ──
-    info "Configuring Docker data-root to sgoinfre..."
-    mkdir -p "$DOCKER_DIR"
-
-    local daemon_json="/etc/docker/daemon.json"
-    local need_restart=0
-
-    if [ -f "$daemon_json" ]; then
-        if grep -q "$DOCKER_DIR" "$daemon_json" 2>/dev/null; then
-            success "Docker data-root already set to $DOCKER_DIR"
+    # Required tools (pre-installed at 42)
+    info "Checking system tools (pre-installed at 42)..."
+    local all_present=1
+    for tool in git curl wget unzip; do
+        if command -v "$tool" &>/dev/null; then
+            success "$tool found"
         else
-            warn "Existing daemon.json found — merging data-root"
-            local tmp_json
-            tmp_json=$(jq --arg dr "$DOCKER_DIR" '. + {"data-root": $dr}' "$daemon_json" 2>/dev/null || echo "{\"data-root\": \"$DOCKER_DIR\"}")
-            echo "$tmp_json" | sudo tee "$daemon_json" > /dev/null
-            need_restart=1
+            err "$tool NOT found — should be pre-installed at 42"
+            all_present=0
+        fi
+    done
+    [ $all_present -eq 0 ] && return 1
+
+    # Docker (system-installed at 42)
+    if command -v docker &>/dev/null; then
+        success "Docker: $(docker --version 2>&1 | head -c 50)"
+        if docker compose version &>/dev/null; then
+            success "Docker Compose: $(docker compose version --short 2>/dev/null)"
+        else
+            warn "Docker Compose not available"
+        fi
+        if docker ps &>/dev/null; then
+            success "Docker daemon accessible"
+        else
+            warn "Cannot reach Docker daemon — try: ${GREEN}newgrp docker${RESET}"
         fi
     else
-        sudo mkdir -p /etc/docker
-        echo "{\"data-root\": \"$DOCKER_DIR\"}" | sudo tee "$daemon_json" > /dev/null
-        need_restart=1
+        warn "Docker not found — docker compose up will not work"
     fi
 
-    if [ $need_restart -eq 1 ]; then
-        info "Restarting Docker daemon with new data-root..."
-        sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
-        sleep 2
-        if docker info > /dev/null 2>&1; then
-            success "Docker restarted with data-root: $DOCKER_DIR"
-        else
-            warn "Docker restart — you may need to run: sudo systemctl restart docker"
-        fi
-    fi
-
-    # Ensure Docker is running
-    if ! docker info > /dev/null 2>&1; then
-        info "Starting Docker daemon..."
-        sudo systemctl start docker 2>/dev/null || sudo service docker start 2>/dev/null || true
-        sleep 2
-    fi
-    if docker info > /dev/null 2>&1; then
-        success "Docker daemon is running"
+    # Chrome (system-installed at 42)
+    if command -v google-chrome &>/dev/null || command -v google-chrome-stable &>/dev/null; then
+        local chrome_ver
+        chrome_ver=$(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null || echo "?")
+        success "Chrome: $chrome_ver"
     else
-        warn "Docker daemon not running — try: sudo systemctl start docker"
+        warn "Chrome not found — Flutter web needs Chrome"
+    fi
+
+    # Java (system-installed at 42)
+    if command -v java &>/dev/null; then
+        success "Java: $(java -version 2>&1 | head -1)"
+    else
+        warn "Java not found — Android SDK needs Java"
     fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 3: NODE.JS (NVM) — in sgoinfre
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 2: NVM + NODE.JS (user-space in sgoinfre)
+# ==============================================================================
 install_node() {
-    step_header "Installing Node.js $NODE_VERSION via NVM (in sgoinfre)"
+    step_header "Node.js $NODE_VERSION via NVM (in sgoinfre)"
 
     export NVM_DIR="$NVM_DIR_CUSTOM"
 
     if [ -d "$NVM_DIR" ] && [ -s "$NVM_DIR/nvm.sh" ]; then
-        success "NVM already installed in sgoinfre"
+        success "NVM already installed"
     else
         info "Installing NVM to $NVM_DIR..."
         rm -rf "$NVM_DIR"
         mkdir -p "$NVM_DIR"
-        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | \
-            PROFILE=/dev/null NVM_DIR="$NVM_DIR" bash > /dev/null 2>&1
-        success "NVM installed"
+        run_logged "Downloading & installing NVM" bash -c \
+            "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | PROFILE=/dev/null NVM_DIR='$NVM_DIR' bash"
     fi
 
     # Load NVM
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
+    if ! command -v nvm &>/dev/null; then
+        err "NVM failed to load"
+        return 1
+    fi
+
     # Install Node
-    if nvm ls "$NODE_VERSION" > /dev/null 2>&1; then
+    if nvm ls "$NODE_VERSION" &>/dev/null 2>&1; then
         success "Node.js $NODE_VERSION already installed"
     else
         info "Installing Node.js $NODE_VERSION..."
-        nvm install "$NODE_VERSION" > /dev/null 2>&1
-        success "Node.js installed"
+        run_logged "Installing Node.js $NODE_VERSION" nvm install "$NODE_VERSION"
     fi
 
-    nvm use "$NODE_VERSION" > /dev/null 2>&1
-    nvm alias default "$NODE_VERSION" > /dev/null 2>&1
+    nvm use "$NODE_VERSION" >> "$LOG_FILE" 2>&1 || true
+    nvm alias default "$NODE_VERSION" >> "$LOG_FILE" 2>&1 || true
 
-    success "Node.js $(node --version) active"
-    success "npm $(npm --version) active"
-}
-
-# ─────────────────────────────────────────────────────────────
-# STEP 4: GOOGLE CHROME (for Flutter web)
-# ─────────────────────────────────────────────────────────────
-install_chrome() {
-    step_header "Installing Google Chrome (for Flutter web)"
-
-    if command -v google-chrome &> /dev/null || command -v google-chrome-stable &> /dev/null; then
-        success "Google Chrome already installed"
-        return
-    fi
-
-    info "Downloading Google Chrome..."
-    mkdir -p "$CHROME_DIR"
-    cd "$TMP_DIR"
-
-    wget -q "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" -O chrome.deb
-    sudo dpkg -i chrome.deb > /dev/null 2>&1 || sudo apt-get install -f -y -qq > /dev/null 2>&1
-    rm -f chrome.deb
-
-    if command -v google-chrome &> /dev/null || command -v google-chrome-stable &> /dev/null; then
-        success "Google Chrome installed"
+    if command -v node &>/dev/null; then
+        success "Node.js $(node --version) active"
+        success "npm $(npm --version) active"
     else
-        warn "Chrome installation may have failed — flutter web needs Chrome"
+        err "Node.js not available after install"
+        return 1
     fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 5: FLUTTER SDK (in sgoinfre)
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 3: Flutter SDK — pre-built release archive (includes Dart SDK + snapshots)
+# ==============================================================================
 install_flutter() {
-    step_header "Installing Flutter SDK (in sgoinfre)"
+    step_header "Flutter SDK (in sgoinfre)"
 
+    export PUB_CACHE="$PUB_CACHE_DIR"
+    mkdir -p "$PUB_CACHE" "$TMP_DIR"
+
+    # ── Resolve latest stable archive URL from Flutter's release manifest ──────
+    info "Resolving latest Flutter stable release URL..."
+    local releases_json
+    releases_json=$(curl -fsSL \
+        "https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json" \
+        2>>"$LOG_FILE" || true)
+    if [ -z "$releases_json" ]; then
+        err "Failed to fetch Flutter releases manifest (check internet connection)"
+        return 1
+    fi
+    # Extract archive path for current stable hash using python3 (always available on Ubuntu)
+    local archive_path
+    archive_path=$(echo "$releases_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+ch = d['current_release']['stable']
+for r in d['releases']:
+    if r['hash'] == ch and r['channel'] == 'stable':
+        print(r['archive']); break
+" 2>>"$LOG_FILE" || true)
+    if [ -z "$archive_path" ]; then
+        err "Could not parse Flutter stable release from manifest"
+        return 1
+    fi
+    local flutter_url="https://storage.googleapis.com/flutter_infra_release/releases/$archive_path"
+    # Extract version string from path, e.g. flutter_linux_3.29.0-stable.tar.xz
+    local flutter_version
+    flutter_version=$(basename "$archive_path" | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "")
+    success "Latest stable: Flutter $flutter_version"
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # ── Skip download if already installed at same version ────────────────────
+    local version_stamp="$FLUTTER_DIR/.installed_version"
+    if [ -d "$FLUTTER_DIR" ] && [ -x "$FLUTTER_DIR/bin/flutter" ] && \
+       [ -f "$version_stamp" ] && [ "$(cat "$version_stamp" 2>/dev/null)" = "$flutter_version" ]; then
+        success "Flutter SDK already installed at v$flutter_version — skipping download"
+    else
+        # ── Download tarball to /tmp (local FS — fast even on NFS machines) ───
+        local tarball="/tmp/flutter_linux_${flutter_version}-stable.tar.xz"
+        if [ -f "$tarball" ]; then
+            info "Tarball already in /tmp — reusing"
+        else
+            run_logged "Downloading Flutter $flutter_version tarball" \
+                curl -fL --progress-bar "$flutter_url" -o "$tarball"
+        fi
+
+        # ── Extract to /tmp first (avoids NFS write amplification) ────────────
+        info "Extracting Flutter SDK (to /tmp, then moving to sgoinfre)..."
+        local extract_dir="/tmp/flutter_extract_$$"
+        rm -rf "$extract_dir"
+        mkdir -p "$extract_dir"
+        run_logged "Extracting Flutter tarball" \
+            tar -xf "$tarball" -C "$extract_dir"
+
+        # ── Move extracted dir to sgoinfre ────────────────────────────────────
+        info "Moving Flutter SDK to sgoinfre..."
+        rm -rf "$FLUTTER_DIR"
+        mv "$extract_dir/flutter" "$FLUTTER_DIR"
+        rm -rf "$extract_dir" "$tarball"
+        echo "$flutter_version" > "$version_stamp"
+        success "Flutter SDK installed to sgoinfre"
+    fi
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # Fix permissions (critical for NFS sgoinfre)
+    chmod -R u+rwX "$FLUTTER_DIR" 2>/dev/null || true
+    success "Permissions fixed"
+
+    # Export for this session
     export FLUTTER_HOME="$FLUTTER_DIR"
     export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$PATH"
 
-    if [ -d "$FLUTTER_DIR" ] && [ -x "$FLUTTER_DIR/bin/flutter" ]; then
-        success "Flutter SDK already present in sgoinfre"
-        info "Upgrading Flutter to latest $FLUTTER_CHANNEL..."
-        (cd "$FLUTTER_DIR" && git fetch --quiet && git checkout "$FLUTTER_CHANNEL" --quiet 2>/dev/null && git pull --quiet 2>/dev/null) || true
-    else
-        info "Cloning Flutter SDK ($FLUTTER_CHANNEL channel)..."
-        rm -rf "$FLUTTER_DIR"
-        git clone --depth 1 -b "$FLUTTER_CHANNEL" https://github.com/flutter/flutter.git "$FLUTTER_DIR" 2>&1 | tail -1
-        success "Flutter SDK cloned"
-    fi
+    # ── NFS lockfile fix ──────────────────────────────────────────────────────
+    # Flutter uses flock() on bin/cache/lockfile at startup. On NFS flock()
+    # blocks forever. Symlink that path to /tmp (local tmpfs) so flock()
+    # resolves instantly.
+    local local_lock="/tmp/.flutter_startup_lock_$(id -u)"
+    mkdir -p "$FLUTTER_DIR/bin/cache" 2>/dev/null || true
+    rm -rf "$FLUTTER_DIR/bin/cache/lockfile" 2>/dev/null
+    ln -sf "$local_lock" "$FLUTTER_DIR/bin/cache/lockfile"
+    success "Lockfile symlinked to /tmp (NFS flock fix)"
+    # ──────────────────────────────────────────────────────────────────────────
 
-    # ── Fix permissions (critical for sgoinfre) ──
-    chmod -R u+rwX "$FLUTTER_DIR"
-    success "Permissions fixed on Flutter directory"
+    # Disable analytics via env vars — no flutter binary call needed
+    export FLUTTER_SUPPRESS_ANALYTICS=1
+    export FLUTTER_CLI_ANIMATIONS=false
+    export PUB_ENVIRONMENT="bot.flutter_install"
+    mkdir -p "$HOME/.config/flutter" 2>/dev/null || true
+    printf '{"firstRunAt":1,"enabled":false}\n' > "$HOME/.config/flutter/settings" 2>/dev/null || true
+    success "Analytics disabled (via env vars + config file)"
 
-    # ── Lockfile workaround for network filesystems ──
-    # Flutter uses Dart's `lockFile()` which relies on `flock()` syscall.
-    # On NFS/CIFS/FUSE mounts, flock() may hang indefinitely.
-    # Workarounds:
-    #   1. Remove any stale lockfile before each operation
-    #   2. Set FLUTTER_ALREADY_LOCKED=true to skip locking
-    #   3. Create a wrapper that cleans lockfile automatically
-    info "Applying lockfile workaround for sgoinfre..."
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-
-    # Create a wrapper script that handles the lockfile issue
-    cat > "$SGOINFRE/flutter_wrapper.sh" << 'WRAPPER_EOF'
-#!/bin/bash
-# Flutter wrapper — prevents lockfile hangs on network filesystems
-FLUTTER_DIR="$HOME/sgoinfre/flutter"
-LOCKFILE="$FLUTTER_DIR/bin/cache/lockfile"
-
-# Remove stale lockfile before running flutter
-if [ -f "$LOCKFILE" ]; then
-    rm -f "$LOCKFILE" 2>/dev/null
-fi
-
-# Run flutter with lockfile handling
-exec "$FLUTTER_DIR/bin/flutter" "$@"
-WRAPPER_EOF
-    chmod +x "$SGOINFRE/flutter_wrapper.sh"
-    success "Flutter lockfile wrapper created"
-
-    # ── Disable analytics (reduces network FS issues) ──
-    "$FLUTTER_DIR/bin/flutter" config --no-analytics > /dev/null 2>&1 || true
-    "$FLUTTER_DIR/bin/flutter" config --no-cli-animations > /dev/null 2>&1 || true
-    success "Flutter analytics disabled"
-
-    # ── Precache web artifacts ──
-    info "Running Flutter precache (web)..."
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-    "$FLUTTER_DIR/bin/flutter" precache --web > /dev/null 2>&1 || true
-    success "Flutter web precache done"
-
-    # Report version
-    local flutter_ver
-    flutter_ver=$("$FLUTTER_DIR/bin/flutter" --version --machine 2>/dev/null | grep -o '"frameworkVersion":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-    success "Flutter $flutter_ver ready"
+    # Precache skipped — web artifacts download automatically on first 'flutter run'
+    success "Precache skipped — web artifacts will auto-download on first run"
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 6: DART SDK (bundled with Flutter)
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 4: DART SDK (bundled with Flutter)
+# ==============================================================================
 verify_dart() {
-    step_header "Verifying Dart SDK"
+    step_header "Dart SDK (bundled with Flutter)"
 
     export PATH="$FLUTTER_DIR/bin:$FLUTTER_DIR/bin/cache/dart-sdk/bin:$PATH"
 
-    if command -v dart &> /dev/null; then
-        success "Dart SDK available: $(dart --version 2>&1 | head -1)"
+    # The pre-built Flutter tarball already bundles the Dart SDK — no bootstrap needed.
+    local dart_bin="$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart"
+    if [ -x "$dart_bin" ]; then
+        success "Dart SDK present: $("$dart_bin" --version 2>&1 | head -1)"
     else
-        warn "Dart not in PATH — will be available after sourcing shell config"
+        warn "Dart SDK binary not found — it will be available after 'flutter pub get' in step 6"
     fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 7: ANDROID SDK (in sgoinfre)
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 5: ANDROID SDK (download + unzip in sgoinfre)
+# ==============================================================================
 install_android_sdk() {
-    step_header "Installing Android SDK & command-line tools (in sgoinfre)"
+    step_header "Android SDK (in sgoinfre)"
 
     export ANDROID_SDK_ROOT="$ANDROID_SDK"
     export ANDROID_HOME="$ANDROID_SDK"
@@ -452,360 +434,435 @@ install_android_sdk() {
 
     mkdir -p "$ANDROID_SDK/cmdline-tools" "$ANDROID_AVD"
 
-    # Install command-line tools
+    # Command-line tools
     if [ -x "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-        success "Android command-line tools already installed"
+        success "Android cmdline-tools already installed"
     else
-        info "Downloading Android command-line tools..."
-        cd "$TMP_DIR"
-        curl -L "$CMDLINE_URL" -o cmdline.zip --progress-bar
-        echo ""
+        info "Downloading Android cmdline-tools..."
+        mkdir -p "$TMP_DIR"
+        run_logged "Downloading cmdline-tools" curl -L "$CMDLINE_URL" -o "$TMP_DIR/cmdline.zip"
 
-        info "Extracting command-line tools..."
-        rm -rf "$ANDROID_SDK/cmdline-tools/latest"
-        unzip -q cmdline.zip -d "$TMP_DIR/cmdline-extract"
+        info "Extracting..."
+        rm -rf "$ANDROID_SDK/cmdline-tools/latest" "$TMP_DIR/cmdline-extract"
+        unzip -q "$TMP_DIR/cmdline.zip" -d "$TMP_DIR/cmdline-extract" >> "$LOG_FILE" 2>&1
         mv "$TMP_DIR/cmdline-extract/cmdline-tools" "$ANDROID_SDK/cmdline-tools/latest"
-        rm -rf "$TMP_DIR/cmdline-extract" cmdline.zip
-        success "Command-line tools installed"
+        rm -rf "$TMP_DIR/cmdline-extract" "$TMP_DIR/cmdline.zip"
+        success "cmdline-tools extracted"
     fi
 
-    # Accept licenses
-    info "Accepting Android SDK licenses..."
-    yes 2>/dev/null | "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+    # Verify sdkmanager
+    if ! "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" --version >> "$LOG_FILE" 2>&1; then
+        err "sdkmanager not working (Java issue?)"
+        return 1
+    fi
+    success "sdkmanager OK"
+
+    # Licenses
+    info "Accepting licenses..."
+    yes 2>/dev/null | "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >> "$LOG_FILE" 2>&1 || true
     success "Licenses accepted"
 
-    # Install SDK components
-    info "Installing Android SDK components (API $ANDROID_API_LEVEL)..."
-    "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" --install \
-        "platform-tools" \
-        "platforms;android-$ANDROID_API_LEVEL" \
-        "build-tools;${ANDROID_API_LEVEL}.0.0" \
-        > /dev/null 2>&1 || true
-    success "Android SDK components installed"
+    # SDK components — only what the project needs (plugins are pinned to API 34
+    # via the subprojects override in android/build.gradle.kts)
+    info "Installing SDK components (API $ANDROID_API_LEVEL)..."
+    run_logged "Installing platforms + build-tools + NDK" \
+        "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platform-tools" \
+            "platforms;android-$ANDROID_API_LEVEL" \
+            "build-tools;${ANDROID_API_LEVEL}.0.0" \
+            "ndk;28.2.13676358"
 
     # Tell Flutter about Android SDK
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-    "$FLUTTER_DIR/bin/flutter" config --android-sdk "$ANDROID_SDK" > /dev/null 2>&1 || true
-    success "Flutter configured with Android SDK"
+    flutter_fix_lock
+    FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false \
+        timeout 30 "$FLUTTER_DIR/bin/flutter" config --android-sdk "$ANDROID_SDK" >> "$LOG_FILE" 2>&1 || true
+    flutter_fix_lock
+    yes 2>/dev/null | FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false \
+        timeout 120 "$FLUTTER_DIR/bin/flutter" doctor --android-licenses >> "$LOG_FILE" 2>&1 || true
+    success "Android SDK configured with Flutter"
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 8: FLUTTER PROJECT DEPENDENCIES
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 6: ANDROID EMULATOR (system image + Pixel 6 AVD)
+# ==============================================================================
+setup_android_emulator() {
+    step_header "Android Emulator (Pixel 6 AVD)"
+
+    export ANDROID_SDK_ROOT="$ANDROID_SDK"
+    export ANDROID_HOME="$ANDROID_SDK"
+    export ANDROID_AVD_HOME="$ANDROID_AVD"
+    export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+
+    local SDKMAN="$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager"
+    local AVDMAN="$ANDROID_SDK/cmdline-tools/latest/bin/avdmanager"
+    local AVD_NAME="Pixel_6"
+    local SYSIMG="system-images;android-${ANDROID_API_LEVEL};google_apis_playstore;x86_64"
+
+    # --- emulator binary ---
+    if [ -x "$ANDROID_SDK/emulator/emulator" ]; then
+        success "Android emulator binary already installed"
+    else
+        info "Installing Android emulator..."
+        run_logged "Installing emulator" \
+            "$SDKMAN" --install "emulator" --sdk_root="$ANDROID_SDK"
+        success "Emulator installed"
+    fi
+
+    # --- system image ---
+    local sysimg_dir="$ANDROID_SDK/system-images/android-${ANDROID_API_LEVEL}/google_apis_playstore/x86_64"
+    if [ -d "$sysimg_dir" ]; then
+        success "System image (API $ANDROID_API_LEVEL x86_64) already installed"
+    else
+        info "Downloading system image API $ANDROID_API_LEVEL (~1.5 GB) — please wait..."
+        run_logged "Installing system image" \
+            "$SDKMAN" --install "$SYSIMG" --sdk_root="$ANDROID_SDK"
+        success "System image installed"
+    fi
+
+    # --- accept any new licenses ---
+    yes 2>/dev/null | "$SDKMAN" --licenses --sdk_root="$ANDROID_SDK" >> "$LOG_FILE" 2>&1 || true
+
+    # --- AVD creation ---
+    mkdir -p "$ANDROID_AVD"
+    if "$AVDMAN" list avd 2>/dev/null | grep -q "Name: $AVD_NAME"; then
+        success "AVD '$AVD_NAME' already exists"
+    else
+        info "Creating AVD '$AVD_NAME' (Pixel 6)..."
+        echo "no" | "$AVDMAN" create avd \
+            --name "$AVD_NAME" \
+            --device "pixel_6" \
+            --package "$SYSIMG" \
+            --path "$ANDROID_AVD/${AVD_NAME}.avd" \
+            --force >> "$LOG_FILE" 2>&1
+        if "$AVDMAN" list avd 2>/dev/null | grep -q "Name: $AVD_NAME"; then
+            success "AVD '$AVD_NAME' created"
+        else
+            err "Failed to create AVD '$AVD_NAME' — check log: $LOG_FILE"
+            return 1
+        fi
+    fi
+
+    # --- tune AVD config for performance (applies on every run, idempotent) ---
+    local avd_ini="$ANDROID_AVD/${AVD_NAME}.avd/config.ini"
+    if [ -f "$avd_ini" ]; then
+        sed -i 's/hw\.gpu\.enabled = .*/hw.gpu.enabled = yes/' "$avd_ini"
+        sed -i 's/hw\.gpu\.mode = .*/hw.gpu.mode = swiftshader_indirect/' "$avd_ini"
+        # Enable physical keyboard passthrough
+        if ! grep -q "hw.keyboard" "$avd_ini"; then
+            echo "hw.keyboard = yes" >> "$avd_ini"
+        else
+            sed -i 's/hw\.keyboard = .*/hw.keyboard = yes/' "$avd_ini"
+        fi
+        # set ramSize only if the existing value is below 3072
+        local cur_ram
+        cur_ram=$(grep -oP '(?<=hw\.ramSize = )\d+' "$avd_ini" 2>/dev/null || echo 0)
+        if [ "$cur_ram" -lt 3072 ] 2>/dev/null; then
+            sed -i 's/hw\.ramSize = .*/hw.ramSize = 3072/' "$avd_ini"
+        fi
+        success "AVD hardware config tuned (GPU host, 3072 MB RAM)"
+    fi
+
+    # --- KVM acceleration check ---
+    if [ -r /dev/kvm ]; then
+        success "KVM available — emulator will use hardware acceleration"
+    else
+        warn "/dev/kvm not accessible — emulator will use software rendering (slow)"
+        warn "Ask sysadmin or try: sudo chmod 666 /dev/kvm"
+    fi
+}
+
+# ==============================================================================
+# STEP 7: PROJECT DEPENDENCIES
+# ==============================================================================
 install_project_deps() {
-    step_header "Installing project dependencies"
+    step_header "Project dependencies"
 
-    cd "$PROJECT_DIR"
+    export PUB_CACHE="$PUB_CACHE_DIR"
 
-    # Flutter pub get
-    info "Running 'flutter pub get' in flutter_app_/..."
     cd "$PROJECT_DIR/flutter_app_"
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-    "$FLUTTER_DIR/bin/flutter" pub get > /dev/null 2>&1
-    success "Flutter dependencies installed"
+    info "Running flutter pub get..."
+    flutter_fix_lock
+    run_logged "flutter pub get" \
+        env FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false \
+        timeout 900 "$FLUTTER_DIR/bin/flutter" pub get
 
-    # Generate code (build_runner)
-    info "Running build_runner for code generation..."
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-    "$FLUTTER_DIR/bin/flutter" pub run build_runner build --delete-conflicting-outputs > /dev/null 2>&1 || true
+    info "Running build_runner..."
+    flutter_fix_lock
+    FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false \
+        timeout 600 "$FLUTTER_DIR/bin/flutter" pub run build_runner build --delete-conflicting-outputs >> "$LOG_FILE" 2>&1 || true
     success "Code generation complete"
 
     cd "$PROJECT_DIR"
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 9: .ENV FILE TEMPLATE
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 8: .ENV FILE
+# ==============================================================================
 setup_env_file() {
-    step_header "Setting up environment configuration"
+    step_header "back/.env configuration"
 
     local env_file="$PROJECT_DIR/back/.env"
 
     if [ -f "$env_file" ]; then
-        success ".env file already exists in back/"
+        success ".env already exists"
     else
-        info "Creating template .env file in back/..."
-        cat > "$env_file" << 'ENV_EOF'
-# ── DATABASE ──
+        info "Creating template .env..."
+        cat > "$env_file" << 'ENVEOF'
+# DATABASE
 DB_HOST=db
 DB_PORT=3306
 DB_USERNAME=root
 DB_PASSWORD=root
 DB_DATABASE=db
 
-# ── JWT ──
+# JWT
 JWT_SECRET=music-room-secret-key-change-me
 JWT_EXPIRATION=7d
 
-# ── APP ──
+# APP
 APP_PORT=3000
 APP_URL=http://localhost:3000
 
-# ── MAIL (MailHog) ──
+# MAIL (MailHog)
 MAIL_HOST=mailhog
 MAIL_PORT=1025
 MAIL_USER=
 MAIL_PASS=
 MAIL_FROM=noreply@music-room.local
 
-# ── OAUTH (fill in your credentials) ──
+# OAUTH
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
-
 FACEBOOK_CLIENT_ID=
 FACEBOOK_CLIENT_SECRET=
 FACEBOOK_CALLBACK_URL=http://localhost:3000/auth/facebook/callback
 
-# ── FRONTEND ──
+# FRONTEND
 FRONTEND_URL=http://localhost:8080
-ENV_EOF
-        success ".env template created — ${YELLOW}please fill in your OAuth credentials${RESET}"
+ENVEOF
+        success ".env template created"
+        warn "Fill in your OAuth credentials in back/.env"
     fi
 }
 
-# ─────────────────────────────────────────────────────────────
-# STEP 10: SHELL CONFIG & FINAL VERIFICATION
-# ─────────────────────────────────────────────────────────────
-setup_shell_and_verify() {
-    step_header "Configuring shell & final verification"
+# ==============================================================================
+# STEP 9: SHELL CONFIG
+# ==============================================================================
+setup_shell_config() {
+    step_header "Shell configuration"
 
-    # ── Generate shell exports block ──
-    local shell_block
-    shell_block=$(cat << 'SHELL_EOF'
+    local shell_rc="$HOME/.zshrc"
+    [ "$(basename "${SHELL:-bash}")" != "zsh" ] && shell_rc="$HOME/.bashrc"
 
-# ═══════════════════════════════════════════════════════════
-# MUSIC-ROOM Development Environment (42 sgoinfre)
-# ═══════════════════════════════════════════════════════════
+    local marker_start="# >>>>> MUSIC-ROOM 42 ENV START >>>>>"
+    local marker_end="# <<<<< MUSIC-ROOM 42 ENV END <<<<<"
 
-# NVM (Node Version Manager)
+    # Remove old block if present
+    if [ -f "$shell_rc" ] && grep -qF "$marker_start" "$shell_rc" 2>/dev/null; then
+        info "Removing old config block..."
+        sed -i "\|$marker_start|,\|$marker_end|d" "$shell_rc"
+    fi
+
+    # Append new block
+    cat >> "$shell_rc" << 'RCEOF'
+
+# >>>>> MUSIC-ROOM 42 ENV START >>>>>
+
+# NVM (Node Version Manager) in sgoinfre
 export NVM_DIR="$HOME/sgoinfre/nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
-# Flutter SDK
+# Flutter SDK in sgoinfre
 export FLUTTER_HOME="$HOME/sgoinfre/flutter"
+export PUB_CACHE="$HOME/sgoinfre/pub_cache"
 export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$PATH"
 
-# Android SDK
+# Android SDK in sgoinfre
 export ANDROID_SDK_ROOT="$HOME/sgoinfre/android-sdk"
 export ANDROID_HOME="$HOME/sgoinfre/android-sdk"
 export ANDROID_AVD_HOME="$HOME/sgoinfre/android-avd"
+export GRADLE_USER_HOME="$HOME/sgoinfre/gradle"
+# Symlink ~/.gradle -> sgoinfre so Gradle always writes there even without the env var
+mkdir -p "$HOME/sgoinfre/gradle" && [ ! -L "$HOME/.gradle" ] && rm -rf "$HOME/.gradle" && ln -sf "$HOME/sgoinfre/gradle" "$HOME/.gradle" 2>/dev/null || true
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-
-# Java
-export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-export PATH="$JAVA_HOME/bin:$PATH"
 
 # Chrome for Flutter web
 export CHROME_EXECUTABLE="$(command -v google-chrome-stable 2>/dev/null || command -v google-chrome 2>/dev/null || echo '/usr/bin/google-chrome-stable')"
 
-# Flutter lockfile fix for sgoinfre (network/special filesystems)
-# Automatically clean stale lockfiles to prevent "waiting for process" hangs
+# Flutter: suppress analytics & animations (avoids lockfile hangs on NFS)
+export FLUTTER_SUPPRESS_ANALYTICS=1
+export FLUTTER_CLI_ANIMATIONS=false
+export PUB_ENVIRONMENT="bot.flutter_install"
+
+# Flutter NFS lockfile fix:
+# flock() on NFS hangs forever. Symlink the lockfile to /tmp (local tmpfs) so
+# flock() resolves instantly. Re-applied on every flutter call in case Flutter
+# or 'flutter upgrade' recreated the real file.
 flutter() {
-    rm -f "$FLUTTER_HOME/bin/cache/lockfile" 2>/dev/null
-    command flutter "$@"
+    local _lf="$FLUTTER_HOME/bin/cache/lockfile"
+    local _tl="/tmp/.flutter_startup_lock_$(id -u)"
+    if [ ! -L "$_lf" ] || [ "$(readlink "$_lf")" != "$_tl" ]; then
+        rm -rf "$_lf" 2>/dev/null
+        mkdir -p "$(dirname "$_lf")" 2>/dev/null
+        ln -sf "$_tl" "$_lf"
+    fi
+    FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false command flutter "$@"
 }
 
-# ═══════════════════════════════════════════════════════════
-SHELL_EOF
-)
+# <<<<< MUSIC-ROOM 42 ENV END <<<<<
+RCEOF
 
-    # Detect shell config file
-    local shell_rc=""
-    if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL")" = "zsh" ]; then
-        shell_rc="$HOME/.zshrc"
-    else
-        shell_rc="$HOME/.bashrc"
-    fi
+    success "Config written to $shell_rc"
 
-    # Check if already configured
-    local marker="MUSIC-ROOM Development Environment"
-    if grep -q "$marker" "$shell_rc" 2>/dev/null; then
-        info "Shell config already contains music-room block — updating..."
-        # Remove old block
-        sed -i "/# ═.*MUSIC-ROOM Development/,/# ═══════════════════════════════════════════════════════════$/d" "$shell_rc"
-    fi
-
-    echo "$shell_block" >> "$shell_rc"
-    success "Shell config updated in $shell_rc"
-
-    # ── Source for current session ──
+    # Source for current session
     export NVM_DIR="$NVM_DIR_CUSTOM"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     export FLUTTER_HOME="$FLUTTER_DIR"
+    export PUB_CACHE="$PUB_CACHE_DIR"
     export ANDROID_SDK_ROOT="$ANDROID_SDK"
     export ANDROID_HOME="$ANDROID_SDK"
     export ANDROID_AVD_HOME="$ANDROID_AVD"
-    export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+    export GRADLE_USER_HOME="$SGOINFRE/gradle"
+    mkdir -p "$SGOINFRE/gradle"
+    # Symlink ~/.gradle -> sgoinfre (belt + suspenders alongside GRADLE_USER_HOME)
+    if [ ! -L "$HOME/.gradle" ]; then
+        rm -rf "$HOME/.gradle"
+        ln -sf "$SGOINFRE/gradle" "$HOME/.gradle"
+    fi
     export CHROME_EXECUTABLE="$(command -v google-chrome-stable 2>/dev/null || command -v google-chrome 2>/dev/null || echo '/usr/bin/google-chrome-stable')"
-    export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$JAVA_HOME/bin:$PATH"
-
-    # ── Verification ──
-    echo ""
-    info "Running final verification..."
-    echo ""
-
-    local all_ok=1
-
-    # Docker
-    if docker --version > /dev/null 2>&1; then
-        success "docker          $(docker --version 2>&1 | grep -oP 'Docker version \K[0-9.]+' || echo 'OK')"
-    else
-        err "docker          NOT FOUND"
-        all_ok=0
-    fi
-
-    # Docker Compose
-    if docker compose version > /dev/null 2>&1; then
-        success "docker compose  $(docker compose version --short 2>/dev/null || echo 'OK')"
-    else
-        err "docker compose  NOT FOUND"
-        all_ok=0
-    fi
-
-    # Node
-    if command -v node > /dev/null 2>&1; then
-        success "node            $(node --version 2>&1)"
-    else
-        err "node            NOT FOUND"
-        all_ok=0
-    fi
-
-    # npm
-    if command -v npm > /dev/null 2>&1; then
-        success "npm             $(npm --version 2>&1)"
-    else
-        err "npm             NOT FOUND"
-        all_ok=0
-    fi
-
-    # Flutter
-    if "$FLUTTER_DIR/bin/flutter" --version > /dev/null 2>&1; then
-        success "flutter         $("$FLUTTER_DIR/bin/flutter" --version 2>&1 | head -1 | awk '{print $2}')"
-    else
-        err "flutter         NOT FOUND"
-        all_ok=0
-    fi
-
-    # Dart
-    if command -v dart > /dev/null 2>&1; then
-        success "dart            $(dart --version 2>&1 | awk '{print $4}')"
-    else
-        err "dart            NOT FOUND"
-        all_ok=0
-    fi
-
-    # Java
-    if java -version 2>&1 | grep -q "17"; then
-        success "java            17 (OpenJDK)"
-    else
-        err "java 17         NOT FOUND"
-        all_ok=0
-    fi
-
-    # Chrome
-    if command -v google-chrome > /dev/null 2>&1 || command -v google-chrome-stable > /dev/null 2>&1; then
-        success "chrome          $(google-chrome --version 2>/dev/null || google-chrome-stable --version 2>/dev/null || echo 'OK')"
-    else
-        err "chrome          NOT FOUND"
-        all_ok=0
-    fi
-
-    # Android SDK
-    if [ -x "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-        success "android-sdk     API $ANDROID_API_LEVEL"
-    else
-        err "android-sdk     NOT FOUND"
-        all_ok=0
-    fi
-
-    echo ""
-
-    # ── Flutter Doctor ──
-    info "Running flutter doctor..."
-    echo ""
-    rm -f "$FLUTTER_DIR/bin/cache/lockfile"
-    "$FLUTTER_DIR/bin/flutter" doctor --verbose 2>&1 | grep -E '^\[|Doctor summary' | head -20 || true
-    echo ""
-
-    # ── Cleanup ──
-    info "Cleaning up temp files..."
-    rm -rf "$TMP_DIR"
-    success "Cleanup complete"
-
-    # ── Disk usage summary ──
-    echo ""
-    info "Disk usage in ~/sgoinfre:"
-    du -sh "$SGOINFRE"/* 2>/dev/null | sort -hr | head -10 || true
-    echo ""
-    local total
-    total=$(du -sh "$SGOINFRE" 2>/dev/null | awk '{print $1}')
-    info "Total sgoinfre usage: ${BOLD}$total${RESET}"
-
-    return $( [ $all_ok -eq 1 ] && echo 0 || echo 1 )
+    export PATH="$FLUTTER_HOME/bin:$FLUTTER_HOME/bin/cache/dart-sdk/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+    success "Environment exported for current session"
 }
 
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
+# STEP 10: FINAL VERIFICATION
+# ==============================================================================
+final_verification() {
+    step_header "Final verification"
+
+    local all_ok=1
+    local pass=0
+    local total=0
+
+    chk() {
+        local name="$1"
+        local cmd="$2"
+        local vcmd="$3"
+        total=$((total + 1))
+        if eval "$cmd" &>/dev/null; then
+            local v
+            v=$(eval "$vcmd" 2>&1 | head -1 | head -c 60)
+            success "$(printf '%-18s' "$name") $v"
+            pass=$((pass + 1))
+        else
+            err "$(printf '%-18s' "$name") NOT AVAILABLE"
+            all_ok=0
+        fi
+    }
+
+    echo ""
+    chk "docker"         "command -v docker"            "docker --version"
+    chk "docker compose" "docker compose version"       "docker compose version"
+    chk "node"           "command -v node"              "node --version"
+    chk "npm"            "command -v npm"               "npm --version"
+    chk "flutter"        "test -x '$FLUTTER_DIR/bin/flutter'" \
+                         "FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false timeout 30 '$FLUTTER_DIR/bin/flutter' --version 2>&1 | head -1"
+    chk "dart"           "test -x '$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart'" \
+                         "'$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart' --version 2>&1 | head -1"
+    chk "java"           "command -v java"              "java -version 2>&1 | head -1"
+    chk "chrome"         "command -v google-chrome || command -v google-chrome-stable" \
+                         "google-chrome --version 2>/dev/null || google-chrome-stable --version"
+    chk "android-sdk"    "test -x '$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager'" \
+                         "echo 'API $ANDROID_API_LEVEL'"
+    echo ""
+    info "${BOLD}$pass/$total${RESET} checks passed"
+    echo ""
+
+    # Flutter Doctor
+    info "Flutter doctor:"
+    echo ""
+    flutter_fix_lock
+    FLUTTER_SUPPRESS_ANALYTICS=1 FLUTTER_CLI_ANIMATIONS=false \
+        timeout 60 "$FLUTTER_DIR/bin/flutter" doctor 2>&1 | grep -E '^\[|Doctor summary' | head -20 || true
+    echo ""
+
+    info "Log: $LOG_FILE"
+
+    [ $all_ok -eq 1 ] && return 0 || return 1
+}
+
+# ==============================================================================
 # FINAL SUMMARY
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
 print_summary() {
     local status=$1
+    local shell_rc="$HOME/.zshrc"
+    [ "$(basename "${SHELL:-bash}")" != "zsh" ] && shell_rc="$HOME/.bashrc"
+
     echo ""
     echo -e "${MAGENTA}${BOLD}"
-    echo "  ╔══════════════════════════════════════════════════════════════╗"
     if [ "$status" -eq 0 ]; then
-        echo "  ║          ✅  INSTALLATION COMPLETE — ALL TOOLS READY       ║"
+        echo "  ╔══════════════════════════════════════════════════════════════╗"
+        echo "  ║         ✅  INSTALLATION COMPLETE — ALL TOOLS READY          ║"
+        echo "  ╚══════════════════════════════════════════════════════════════╝"
     else
-        echo "  ║          ⚠️   INSTALLATION COMPLETE — SOME ISSUES          ║"
+        echo "  ╔══════════════════════════════════════════════════════════════╗"
+        echo "  ║       ⚠️   INSTALLATION COMPLETE — SOME ISSUES FOUND         ║"
+        echo "  ╚══════════════════════════════════════════════════════════════╝"
     fi
-    echo "  ╚══════════════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
     echo ""
     echo -e "  ${BOLD}Quick Start:${RESET}"
     echo ""
-    echo -e "  ${CYAN}1.${RESET} Reload your shell config:"
-    echo -e "     ${GREEN}source ~/.zshrc${RESET}  ${DIM}(or ~/.bashrc)${RESET}"
+    echo -e "  ${CYAN}1.${RESET} Reload your shell:"
+    echo -e "     ${GREEN}source $shell_rc${RESET}"
     echo ""
-    echo -e "  ${CYAN}2.${RESET} Start the backend (Docker):"
-    echo -e "     ${GREEN}cd $(basename "$PROJECT_DIR") && docker compose up --build${RESET}"
+    echo -e "  ${CYAN}2.${RESET} Start the backend:"
+    echo -e "     ${GREEN}cd $PROJECT_DIR && docker compose up --build${RESET}"
     echo ""
-    echo -e "  ${CYAN}3.${RESET} Start the Flutter web app:"
-    echo -e "     ${GREEN}cd $(basename "$PROJECT_DIR")/flutter_app_ && flutter run -d chrome --web-port 8080${RESET}"
+    echo -e "  ${CYAN}3.${RESET} Start Flutter web (another terminal):"
+    echo -e "     ${GREEN}cd $PROJECT_DIR/flutter_app_ && flutter run -d chrome --web-port 8080${RESET}"
+    echo ""
+    echo -e "  ${CYAN}4.${RESET} Start Android emulator (another terminal):"
+    echo -e "     ${GREEN}$ANDROID_SDK/emulator/emulator -avd Pixel_6${RESET}"
+    echo -e "     ${DIM}Then once the emulator has finished booting:${RESET}"
+    echo -e "     ${GREEN}cd $PROJECT_DIR/flutter_app_ && flutter run -d android${RESET}"
     echo ""
     echo -e "  ${BOLD}Services:${RESET}"
-    echo -e "  ${DIM}├${RESET} Backend API       → ${CYAN}http://localhost:3000${RESET}"
-    echo -e "  ${DIM}├${RESET} Flutter Web App   → ${CYAN}http://localhost:8080${RESET}"
-    echo -e "  ${DIM}├${RESET} phpMyAdmin        → ${CYAN}http://localhost:4000${RESET}"
-    echo -e "  ${DIM}├${RESET} MailHog           → ${CYAN}http://localhost:8025${RESET}"
-    echo -e "  ${DIM}└${RESET} MySQL             → ${CYAN}localhost:3306${RESET}"
+    echo -e "  ${DIM}├${RESET} Backend API       ${CYAN}http://localhost:3000${RESET}"
+    echo -e "  ${DIM}├${RESET} Flutter Web       ${CYAN}http://localhost:8080${RESET}"
+    echo -e "  ${DIM}├${RESET} phpMyAdmin        ${CYAN}http://localhost:4000${RESET}"
+    echo -e "  ${DIM}├${RESET} MailHog           ${CYAN}http://localhost:8025${RESET}"
+    echo -e "  ${DIM}└${RESET} MySQL             ${CYAN}localhost:3306${RESET}"
     echo ""
     echo -e "  ${BOLD}Troubleshooting:${RESET}"
-    echo -e "  ${DIM}•${RESET} Flutter lockfile hang → ${GREEN}rm -f ~/sgoinfre/flutter/bin/cache/lockfile${RESET}"
-    echo -e "  ${DIM}•${RESET} Docker permission     → ${GREEN}newgrp docker${RESET} or re-login"
-    echo -e "  ${DIM}•${RESET} Full reset            → ${GREEN}bash install.sh${RESET}"
+    echo -e "  ${DIM}•${RESET} Flutter lockfile hang  → ${GREEN}ln -sf /tmp/.flutter_startup_lock_\$(id -u) ~/sgoinfre/flutter/bin/cache/lockfile${RESET}"
+    echo -e "  ${DIM}•${RESET} Docker permission      → ${GREEN}newgrp docker${RESET}"
+    echo -e "  ${DIM}•${RESET} Re-run installer       → ${GREEN}bash install.sh${RESET} ${DIM}(idempotent)${RESET}"
+    echo -e "  ${DIM}•${RESET} Install log            → ${GREEN}$LOG_FILE${RESET}"
     echo ""
 }
 
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
 # MAIN
-# ─────────────────────────────────────────────────────────────
+# ==============================================================================
 main() {
     print_banner
 
-    preflight_checks          # Step 1  — Pre-flight
-    install_system_deps       # Step 2  — apt packages
-    install_docker            # Step 3  — Docker + Compose
-    install_node              # Step 4  — Node.js (NVM)
-    install_chrome            # Step 5  — Google Chrome
-    install_flutter           # Step 6  — Flutter SDK
-    verify_dart               # Step 7  — Dart SDK
-    install_android_sdk       # Step 8  — Android SDK
-    install_project_deps      # Step 9  — Project deps
-    setup_env_file            # Step 10 — .env template
+    preflight_checks          # 1 — System check (no install)
+    install_node              # 2 — NVM + Node.js
+    install_flutter           # 3 — Flutter SDK
+    verify_dart               # 4 — Dart SDK
+    install_android_sdk       # 5 — Android SDK
+    setup_android_emulator    # 6 — Pixel 6 AVD
+    install_project_deps      # 7 — flutter pub get
+    setup_env_file            # 8 — .env template
+    setup_shell_config        # 9 — Shell rc config
 
     local verify_status=0
-    setup_shell_and_verify || verify_status=$?
+    final_verification || verify_status=$?  # 10 — Verification
 
     print_summary $verify_status
 }
