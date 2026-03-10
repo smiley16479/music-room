@@ -380,9 +380,9 @@ export class InvitationService {
       throw new ForbiddenException('Only the inviter can cancel this invitation');
     }
 
-    // Can only cancel pending invitations
-    if (invitation.status !== InvitationStatus.PENDING) {
-      throw new BadRequestException('Can only cancel pending invitations');
+    // Can only cancel pending or accepted invitations (revoking an accepted invite removes voting rights)
+    if (invitation.status !== InvitationStatus.PENDING && invitation.status !== InvitationStatus.ACCEPTED) {
+      throw new BadRequestException('Can only cancel pending or accepted invitations');
     }
 
     await this.invitationRepository.remove(invitation);

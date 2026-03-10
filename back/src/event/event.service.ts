@@ -514,6 +514,9 @@ export class EventService {
     // Remove user's votes
     await this.voteRepository.delete({ eventId, userId });
 
+    // Remove user's invitation so they lose any voting rights granted by it
+    await this.invitationRepository.delete({ eventId, inviteeId: userId });
+
     this.eventGateway.notifyParticipantLeft(eventId, user);
   }
 
