@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/index.dart';
 import '../services/index.dart';
@@ -67,13 +68,35 @@ class EventProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Get user location for location-based event filtering
+      double? latitude;
+      double? longitude;
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+        );
+        latitude = position.latitude;
+        longitude = position.longitude;
+        debugPrint('📍 User location: $latitude, $longitude');
+      } catch (e) {
+        debugPrint('⚠️ Could not get user location: $e');
+        // Continue without location - will just not show location-based events
+      }
+
       // Load user's events first
-      final myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      final myEvents = await eventService.getMyEvents(
+        page: page,
+        limit: limit,
+        latitude: latitude,
+        longitude: longitude,
+      );
 
       // Load public events (scope='all') - accessible to everyone
       final publicEvents = await eventService.getEvents(
         page: page,
         limit: limit,
+        latitude: latitude,
+        longitude: longitude,
       );
 
       // Merge both lists, avoiding duplicates
@@ -89,7 +112,7 @@ class EventProvider extends ChangeNotifier {
       debugPrint('📋 Event details:');
       for (var e in _events) {
         debugPrint(
-          '  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})',
+          '  - ${e.name} (type: ${e.type}, visibility: ${e.visibility}, isPlaylist: ${e.isPlaylist})',
         );
       }
     } catch (e) {
@@ -110,15 +133,35 @@ class EventProvider extends ChangeNotifier {
 
     debugPrint('Loading my events for page $page, limit $limit');
     try {
+      // Get user location for location-based event filtering
+      double? latitude;
+      double? longitude;
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+        );
+        latitude = position.latitude;
+        longitude = position.longitude;
+        debugPrint('📍 User location: $latitude, $longitude');
+      } catch (e) {
+        debugPrint('⚠️ Could not get user location: $e');
+        // Continue without location
+      }
+
       // Récupère TOUS les events de l'utilisateur (events + playlists)
-      final myEvents = await eventService.getMyEvents(page: page, limit: limit);
+      final myEvents = await eventService.getMyEvents(
+        page: page,
+        limit: limit,
+        latitude: latitude,
+        longitude: longitude,
+      );
       _events.clear();
       _events.addAll(myEvents);
       debugPrint('✅ Loaded my events count: ${_events.length}');
       debugPrint('📋 Event details:');
       for (var e in _events) {
         debugPrint(
-          '  - ${e.name} (type: ${e.type}, isPlaylist: ${e.isPlaylist})',
+          '  - ${e.name} (type: ${e.type}, visibility: ${e.visibility}, isPlaylist: ${e.isPlaylist})',
         );
       }
       debugPrint(

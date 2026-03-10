@@ -203,6 +203,25 @@ class AuthProvider extends ChangeNotifier {
       );
       _token = await authService.secureStorage.getToken();
       _isAuthenticated = true;
+
+    // 3️⃣ WebSocket
+      if (_token != null && webSocketService != null) {
+        await webSocketService!.connect(_token!);
+        webSocketService!.joinEventsRoom();
+        notificationService?.initialize();
+      }
+
+      // 4️⃣ Device registration
+      if (deviceRegistrationService != null) {
+        final success = await deviceRegistrationService!.registerDevice();
+        if (!success) {
+          debugPrint(
+            'Warning: Device registration failed, but Google login succeeded',
+          );
+        }
+      }
+
+
       _isLoading = false;
       notifyListeners();
       return true;
